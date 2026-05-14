@@ -145,7 +145,7 @@ export default {
     if (file && file.text) {
 
       const filePrompt =
-        "用户上传了一个文件，请根据文件内容回答用户问题。\\n\\n" +
+        "用户上传了一个文件。下面是从文件中提取出的相关片段，请优先依据这些片段回答用户问题；如果片段信息不足，请明确说明。\\n\\n" +
         "文件名：" + file.name + "\\n" +
         "文件类型：" + (file.type || "unknown") + "\\n\\n" +
         "文件内容如下：\\n" +
@@ -726,6 +726,7 @@ const fileStatus = document.getElementById("fileStatus");
 
 let selectedFile = null;
 let selectedFileText = "";
+let selectedFileChunks = [];
 
 function clearSelectedImage(){
 
@@ -801,7 +802,7 @@ async function extractPdfText(file){
 }
 
 async function extractDocxText(file){
-
+  
   if (!window.mammoth) {
     throw new Error("mammoth.js 没有加载成功，请检查 CDN 是否可访问");
   }
@@ -813,6 +814,67 @@ async function extractDocxText(file){
   });
 
   return (result.value || "").trim();
+}
+
+function splitTextIntoChunks(text, chunkSize = 1200, overlap = 200){
+
+  const chunks = [];
+  const cleanText = text.replace(/\s+/g, " ").trim();
+
+  let start = 0;
+
+  while(start < cleanText.length){
+
+    const end = Math.min(start + chunkSize, cleanText.length);
+    const chunk = cleanText.slice(start, end).trim();
+
+    if(chunk){
+      chunks.push(chunk);
+    }
+
+    start += chunkSize - overlap;
+  }
+
+  return chunks;
+}
+
+function pickRelevantChunks(question, chunks, maxChunks = 6){
+
+  const queryWords = question
+    .toLowerCase()
+    .split(/[\s,.;:!?，。；：！？、()（）[\]{}'"“”‘’]+/)
+    .filter(word => word.length >= 2);
+
+  if(queryWords.length === 0){
+    return chunks.slice(0, maxChunks);
+  }
+
+  const scored = chunks.map((chunk, index) => {
+
+    const lower = chunk.toLowerCase();
+
+    let score = 0;
+
+    for(const word of queryWords){
+      if(lower.includes(word)){
+        score += 1;
+      }
+    }
+
+    return {
+      index,
+      chunk,
+      score
+    };
+  });
+
+  const picked = scored
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxChunks)
+    .map(item => "【片段 " + (item.index + 1) + "】" + String.fromCharCode(10) + item.chunk);
+
+  return picked.length ? picked : chunks.slice(0, maxChunks);
 }
 
 fileInput.addEventListener("change", async () => {
@@ -865,9 +927,9 @@ fileInput.addEventListener("change", async () => {
     if(!selectedFileText.trim()){
       throw new Error("没有提取到文本内容");
     }
-
+    selectedFileChunks = splitTextIntoChunks(selectedFileText);
     fileStatus.textContent =
-      "已读取：" + file.name + "（" + selectedFileText.length + " 字符）";
+      "已读取：" + file.name + "（" + selectedFileText.length + " 字符，" + selectedFileChunks.length + " 段）";
 
   }catch(err){
 
@@ -1063,6 +1125,13 @@ async function sendMessage(){
   const fileToSend = selectedFile;
   const fileTextToSend = selectedFileText;
 
+  let fileTextForAI = fileTextToSend;
+
+  if(fileTextToSend && selectedFileChunks.length > 0){
+    const relevantChunks = pickRelevantChunks(message || "请总结这个文件", selectedFileChunks);
+    fileTextForAI = relevantChunks.join(String.fromCharCode(10, 10));
+  }
+
   if(!message && !imageToSend && !fileTextToSend){
     return;
   }
@@ -1104,7 +1173,7 @@ async function sendMessage(){
         file:fileToSend ? {
           name:fileToSend.name,
           type:fileToSend.type,
-          text:fileTextToSend
+          text:fileTextForAI
         } : null
       })
     });

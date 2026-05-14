@@ -11,9 +11,9 @@
 export default {
   async fetch(request, env) {
 
-    if (request.method === "GET") {
+    const url = new URL(request.url);
 
-      const url = new URL(request.url);
+    if (request.method === "GET") {
 
       if (url.searchParams.get("agree") === "1") {
         try {
@@ -68,6 +68,45 @@ export default {
 
     if (request.method !== "POST") {
       return new Response("Use POST", { status: 405 });
+    }
+
+    if (url.pathname === "/fetch-url" && request.method === "POST") {
+      const { pageUrl } = await request.json();
+    
+      if (!pageUrl || !/^https?:\/\//i.test(pageUrl)) {
+        return jsonResponse({ error: "请输入有效的网址" }, 400);
+      }
+    
+      try {
+        const res = await fetch(pageUrl, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 Cloudflare Workers AI Assistant",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+          }
+        });
+    
+        if (!res.ok) {
+          return jsonResponse({ error: "网页抓取失败：HTTP " + res.status }, 500);
+        }
+    
+        const html = await res.text();
+    
+        const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        const title = titleMatch ? cleanText(titleMatch[1]) : pageUrl;
+    
+        const text = extractReadableTextFromHtml(html);
+    
+        return jsonResponse({
+          ok: true,
+          url: pageUrl,
+          title,
+          text,
+          length: text.length
+        });
+    
+      } catch (err) {
+        return jsonResponse({ error: "网页抓取失败：" + err.message }, 500);
+      }
     }
 
     const { messages, model, image, file } = await request.json();
@@ -215,6 +254,44 @@ function corsHeaders() {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type"
   };
+}
+
+function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      ...corsHeaders(),
+      "Content-Type": "application/json; charset=utf-8"
+    }
+  });
+}
+
+function cleanText(text = "") {
+  return text
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractReadableTextFromHtml(html = "") {
+  let text = html;
+
+  text = text.replace(/<script[\s\S]*?<\/script>/gi, " ");
+  text = text.replace(/<style[\s\S]*?<\/style>/gi, " ");
+  text = text.replace(/<noscript[\s\S]*?<\/noscript>/gi, " ");
+  text = text.replace(/<!--[\s\S]*?-->/g, " ");
+
+  text = text.replace(/<\/(p|div|section|article|h1|h2|h3|li|br)>/gi, "\n");
+  text = text.replace(/<[^>]+>/g, " ");
+
+  text = cleanText(text);
+
+  return text.slice(0, 60000);
 }
 
 function htmlPage() {
@@ -680,6 +757,37 @@ body.dark{
 
       <div class="inputBar">
         <input
+          id="urlInput"
+          placeholder="粘贴网页 URL..."
+          style="
+            max-width:240px;
+            padding:14px;
+            border:1px solid var(--border);
+            border-radius:14px;
+            font-size:14px;
+            outline:none;
+            background:transparent;
+            color:var(--text);
+          "
+        />
+    
+        <button
+          id="fetchUrlBtn"
+          type="button"
+          style="
+            border:none;
+            background:#059669;
+            color:white;
+            padding:0 16px;
+            border-radius:14px;
+            font-size:14px;
+            cursor:pointer;
+          "
+        >
+          抓取网页
+        </button>  
+
+        <input
           id="input"
           placeholder="输入问题，按 Enter 发送..."
         />
@@ -727,6 +835,13 @@ if (window.pdfjsLib) {
 const chat = document.getElementById("chat");
 
 const input = document.getElementById("input");
+
+const urlInput = document.getElementById("urlInput");
+const fetchUrlBtn = document.getElementById("fetchUrlBtn");
+
+let selectedWebPage = null;
+let selectedWebPageChunks = [];
+let lastWebRelevantChunkCount = 0;
 
 const sendBtn = document.getElementById("sendBtn");
 
@@ -806,6 +921,71 @@ fileBtn.addEventListener("click", () => {
 });
 
 clearFileBtn.addEventListener("click", clearSelectedFile);
+
+fetchUrlBtn.addEventListener("click", () => {
+  alert("抓取按钮已点击");
+  fetchWebPage();
+});
+
+async function fetchWebPage(){
+  alert("进入 fetchWebPage");
+  const pageUrl = urlInput.value.trim();
+
+  if(!pageUrl){
+    alert("请先输入网页 URL");
+    return;
+  }
+
+  if(!/^https?:\\/\\//i.test(pageUrl)){
+    alert("网址必须以 http:// 或 https:// 开头");
+    return;
+  }
+
+  fetchUrlBtn.disabled = true;
+  fetchUrlBtn.textContent = "抓取中...";
+  fileStatus.textContent = "正在抓取网页...";
+
+  try{
+
+    const res = await fetch("/fetch-url", {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify({
+        pageUrl
+      })
+    });
+
+    const data = await res.json();
+
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "网页抓取失败");
+    }
+
+    selectedWebPage = {
+      url:data.url,
+      title:data.title,
+      text:data.text
+    };
+
+    selectedWebPageChunks = splitTextIntoChunks(data.text);
+
+    fileStatus.textContent =
+      "已抓取网页：" + data.title + "（" + data.length + " 字符，" + selectedWebPageChunks.length + " 段）";
+
+  }catch(err){
+
+    selectedWebPage = null;
+    selectedWebPageChunks = [];
+    fileStatus.textContent = "网页抓取失败";
+    alert("网页抓取失败：" + err.message);
+
+  }
+
+  fetchUrlBtn.disabled = false;
+  fetchUrlBtn.textContent = "抓取网页";
+}
 
 async function extractPdfText(file){
   if (!window.pdfjsLib) {
@@ -1163,9 +1343,12 @@ async function sendMessage(){
 
   const fileToSend = selectedFile;
   const fileTextToSend = selectedFileText;
+  const webPageToSend = selectedWebPage;
 
   let fileTextForAI = fileTextToSend;
   let fileInfoForUI = null;
+  let webTextForAI = "";
+
 
   if(fileTextToSend && selectedFileChunks.length > 0){
     const relevantChunks = pickRelevantChunks(message || "请总结这个文件", selectedFileChunks);
@@ -1182,7 +1365,22 @@ async function sendMessage(){
     }
   }
 
-  if(!message && !imageToSend && !fileTextToSend){
+  if(webPageToSend && selectedWebPageChunks.length > 0){
+
+    const relevantWebChunks = pickRelevantChunks(
+      message || "请总结这个网页",
+      selectedWebPageChunks
+    );
+  
+    lastWebRelevantChunkCount = relevantWebChunks.length;
+  
+    webTextForAI =
+      "网页标题：" + webPageToSend.title + String.fromCharCode(10) +
+      "网页 URL：" + webPageToSend.url + String.fromCharCode(10, 10) +
+      relevantWebChunks.join(String.fromCharCode(10, 10));
+  }
+
+  if(!message && !imageToSend && !fileTextToSend && !webTextForAI){
     return;
   }
 
@@ -1190,7 +1388,10 @@ async function sendMessage(){
 
   conversation.push({
     role:"user",
-    content:message || (fileToSend ? "请总结这个文件。" : "请描述这张图片。")
+    content:
+      message ||
+      (fileToSend ? "请总结这个文件。" :
+      (webPageToSend ? "请总结这个网页。" : "请描述这张图片。"))
   });
 
   input.value = "";
@@ -1229,7 +1430,11 @@ async function sendMessage(){
           name:fileToSend.name,
           type:fileToSend.type,
           text:fileTextForAI
-        } : null
+        } : (webTextForAI ? {
+          name:webPageToSend.title,
+          type:"webpage",
+          text:webTextForAI
+        } : null)
       })
     });
 

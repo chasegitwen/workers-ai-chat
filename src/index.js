@@ -232,7 +232,7 @@ return `<!doctype html>
 
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
 
 
 <style>
@@ -669,7 +669,7 @@ body.dark{
 
         <input id="imageInput" type="file" accept="image/*" hidden />
 
-        <input id="fileInput" type="file" accept=".txt,.md,.markdown,.pdf,text/plain,text/markdown,application/pdf" hidden />
+        <input id="fileInput" type="file" accept=".txt,.md,.markdown,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden />
         <button id="fileBtn" type="button">
           文件
         </button>
@@ -800,6 +800,21 @@ async function extractPdfText(file){
   return fullText.trim();
 }
 
+async function extractDocxText(file){
+
+  if (!window.mammoth) {
+    throw new Error("mammoth.js 没有加载成功，请检查 CDN 是否可访问");
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+
+  const result = await mammoth.extractRawText({
+    arrayBuffer: arrayBuffer
+  });
+
+  return (result.value || "").trim();
+}
+
 fileInput.addEventListener("change", async () => {
 
   const file = fileInput.files[0];
@@ -815,8 +830,10 @@ fileInput.addEventListener("change", async () => {
 
   const isPdfFile = name.endsWith(".pdf");
 
-  if (!isTextFile && !isPdfFile) {
-    alert("当前支持 TXT / Markdown / PDF 文件");
+  const isDocxFile = name.endsWith(".docx");
+
+  if (!isTextFile && !isPdfFile && !isDocxFile) {
+    alert("当前支持 TXT / Markdown / PDF / DOCX 文件");
     fileInput.value = "";
     return;
   }
@@ -831,6 +848,8 @@ fileInput.addEventListener("change", async () => {
 
       selectedFileText = await extractPdfText(file);
 
+    }else if(isDocxFile){
+      selectedFileText = await extractDocxText(file);
     }else{
 
       selectedFileText = await new Promise((resolve, reject) => {

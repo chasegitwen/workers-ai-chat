@@ -14,6 +14,14 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === "GET") {
+      if (url.pathname === "/debug-path") {
+        return jsonResponse({
+          ok: true,
+          pathname: url.pathname,
+          hasSearchWeb: true,
+          time: new Date().toISOString()
+        });
+      }
 
       if (url.searchParams.get("agree") === "1") {
         try {
@@ -70,7 +78,12 @@ export default {
       return new Response("Use POST", { status: 405 });
     }
 
+    if (request.method === "POST") {
+      console.log("POST pathname:", url.pathname);
+    }
+
     if (url.pathname === "/fetch-url" && request.method === "POST") {
+
       const { pageUrl } = await request.json();
     
       if (!pageUrl || !/^https?:\/\//i.test(pageUrl)) {
@@ -78,21 +91,27 @@ export default {
       }
     
       try {
-        const res = await fetch(pageUrl, {
+    
+        const response = await fetch(pageUrl, {
           headers: {
-            "User-Agent": "Mozilla/5.0 Cloudflare Workers AI Assistant",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
           }
         });
     
-        if (!res.ok) {
-          return jsonResponse({ error: "网页抓取失败：HTTP " + res.status }, 500);
+        if (!response.ok) {
+          return jsonResponse({
+            error: "网页抓取失败：HTTP " + response.status
+          }, 500);
         }
     
-        const html = await res.text();
+        const html = await response.text();
     
-        const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-        const title = titleMatch ? cleanText(titleMatch[1]) : pageUrl;
+        const titleMatch = html.match(/<title[^>]*>(.*?)<\/title>/i);
+    
+        const title = cleanText(
+          titleMatch?.[1] || "Untitled Page"
+        );
     
         const text = extractReadableTextFromHtml(html);
     
@@ -105,7 +124,56 @@ export default {
         });
     
       } catch (err) {
-        return jsonResponse({ error: "网页抓取失败：" + err.message }, 500);
+    
+        return jsonResponse({
+          error: "网页抓取失败：" + err.message
+        }, 500);
+      }
+    }
+
+    if (url.pathname === "/search-web" && request.method === "POST") {
+      const { query } = await request.json();
+    
+      if (!query || !query.trim()) {
+        return jsonResponse({ error: "请输入搜索关键词" }, 400);
+      }
+    
+      try {
+        const res = await fetch(
+          "https://api.search.brave.com/res/v1/web/search?q=" +
+          encodeURIComponent(query),
+          {
+            headers: {
+              "Accept": "application/json",
+              "X-Subscription-Token": env.BRAVE_SEARCH_API_KEY
+            }
+          }
+        );
+    
+        if (!res.ok) {
+          return jsonResponse({
+            error: "搜索失败：HTTP " + res.status
+          }, 500);
+        }
+    
+        const data = await res.json();
+    
+        const results = (data.web?.results || []).slice(0, 5).map(item => ({
+          title: item.title || "",
+          url: item.url || "",
+          description: item.description || ""
+        }));
+    
+        return jsonResponse({
+          ok: true,
+          query,
+          results
+        });
+    
+      } catch (err) {
+        return jsonResponse({
+          error: "搜索失败：" + err.message
+        }, 500);
       }
     }
 
@@ -296,7 +364,7 @@ function extractReadableTextFromHtml(html = "") {
 
 function htmlPage() {
 
-return `<!doctype html>
+  return `<!doctype html>
 <html lang="zh-CN">
 
 <head>
@@ -752,73 +820,112 @@ body.dark{
           你好，我是基于 Cloudflare Workers AI 的网页助手。
           你可以问我问题，也可以让我写代码、总结、翻译或分析内容。
         </div>
+        <div id="searchResults"></div>
 
       </div>
 
       <div class="inputBar">
-        <input
-          id="urlInput"
-          placeholder="粘贴网页 URL..."
-          style="
-            max-width:240px;
-            padding:14px;
-            border:1px solid var(--border);
-            border-radius:14px;
-            font-size:14px;
-            outline:none;
-            background:transparent;
-            color:var(--text);
-          "
-        />
-    
-        <button
-          id="fetchUrlBtn"
-          type="button"
-          style="
-            border:none;
-            background:#059669;
-            color:white;
-            padding:0 16px;
-            border-radius:14px;
-            font-size:14px;
-            cursor:pointer;
-          "
-        >
-          抓取网页
-        </button>  
 
-        <input
-          id="input"
-          placeholder="输入问题，按 Enter 发送..."
-        />
+  <input
+    id="searchInput"
+    placeholder="搜索关键词..."
+    style="
+      max-width:180px;
+      padding:14px;
+      border:1px solid var(--border);
+      border-radius:14px;
+      font-size:14px;
+      outline:none;
+      background:transparent;
+      color:var(--text);
+    "
+  />
 
-        <input id="imageInput" type="file" accept="image/*" hidden />
+  <button
+    id="searchBtn"
+    type="button"
+    style="
+      border:none;
+      background:#7c3aed;
+      color:white;
+      padding:0 16px;
+      border-radius:14px;
+      font-size:14px;
+      cursor:pointer;
+    "
+  >
+    搜索
+  </button>
 
-        <input id="fileInput" type="file" accept=".txt,.md,.markdown,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden />
-        <button id="fileBtn" type="button">
-          文件
-        </button>
+  <input
+    id="urlInput"
+    placeholder="粘贴网页 URL..."
+    style="
+      max-width:180px;
+      padding:14px;
+      border:1px solid var(--border);
+      border-radius:14px;
+      font-size:14px;
+      outline:none;
+      background:transparent;
+      color:var(--text);
+    "
+  />
 
-        <div id="fileStatus"></div>
+  <button
+    id="fetchUrlBtn"
+    type="button"
+    style="
+      border:none;
+      background:#059669;
+      color:white;
+      padding:0 16px;
+      border-radius:14px;
+      font-size:14px;
+      cursor:pointer;
+    "
+  >
+    抓取网页
+  </button>
 
-        <button id="clearFileBtn" type="button">清除</button>
+  <input
+    id="input"
+    placeholder="输入问题，按 Enter 发送..."
+  />
 
-        <button id="imageBtn" type="button">
-          图片
-        </button>
-        
-        <div id="imagePreviewBox">
-          <img id="imagePreview" />
-          <button id="removeImageBtn" type="button" title="移除图片">×</button>
-        </div>
+  <input id="imageInput" type="file" accept="image/*" hidden />
 
-        <div id="uploadStatus"></div>
+  <input
+    id="fileInput"
+    type="file"
+    accept=".txt,.md,.markdown,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    hidden
+  />
 
-        <button id="sendBtn">
-          发送
-        </button>
+  <button id="fileBtn" type="button">
+    文件
+  </button>
 
-      </div>
+  <div id="fileStatus"></div>
+
+  <button id="clearFileBtn" type="button">清除</button>
+
+  <button id="imageBtn" type="button">
+    图片
+  </button>
+
+  <div id="imagePreviewBox">
+    <img id="imagePreview" />
+    <button id="removeImageBtn" type="button" title="移除图片">×</button>
+  </div>
+
+  <div id="uploadStatus"></div>
+
+  <button id="sendBtn">
+    发送
+  </button>
+
+</div>
 
     </section>
 
@@ -835,6 +942,10 @@ if (window.pdfjsLib) {
 const chat = document.getElementById("chat");
 
 const input = document.getElementById("input");
+
+const searchInput = document.getElementById("searchInput");
+const searchBtn = document.getElementById("searchBtn");
+const searchResults = document.getElementById("searchResults");
 
 const urlInput = document.getElementById("urlInput");
 const fetchUrlBtn = document.getElementById("fetchUrlBtn");
@@ -920,15 +1031,134 @@ fileBtn.addEventListener("click", () => {
   fileInput.click();
 });
 
+async function searchWeb(){
+
+  const query = searchInput.value.trim();
+
+  if(!query){
+    alert("请输入搜索关键词");
+    return;
+  }
+
+  searchBtn.disabled = true;
+  searchBtn.textContent = "搜索中...";
+  fileStatus.textContent = "正在搜索网页...";
+
+  try{
+
+    const res = await fetch("/search-web", {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify({
+        query:query
+      })
+    });
+
+    const data = await res.json();
+
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "搜索失败");
+    }
+
+    renderSearchResults(data.results || []);
+
+    fileStatus.textContent =
+      "搜索完成：" + query + "（" + (data.results || []).length + " 条结果）";
+
+  }catch(err){
+
+    fileStatus.textContent = "搜索失败";
+    alert("搜索失败：" + err.message);
+
+  }
+
+  searchBtn.disabled = false;
+  searchBtn.textContent = "搜索";
+}
+
+function renderSearchResults(results){
+
+  searchResults.innerHTML = "";
+
+  if(!results.length){
+    searchResults.innerHTML =
+      "<div class='msg ai'>没有找到搜索结果。</div>";
+    return;
+  }
+
+  const box = document.createElement("div");
+  box.className = "msg ai";
+  box.style.maxWidth = "92%";
+
+  const title = document.createElement("div");
+  title.style.fontWeight = "700";
+  title.style.marginBottom = "10px";
+  title.textContent = "搜索结果";
+  box.appendChild(title);
+
+  results.forEach((item, index) => {
+
+    const card = document.createElement("div");
+    card.style.border = "1px solid var(--border)";
+    card.style.borderRadius = "12px";
+    card.style.padding = "10px";
+    card.style.marginTop = "10px";
+    card.style.cursor = "pointer";
+
+    const h = document.createElement("div");
+    h.style.fontWeight = "700";
+    h.textContent = (index + 1) + ". " + item.title;
+
+    const desc = document.createElement("div");
+    desc.style.fontSize = "13px";
+    desc.style.color = "var(--muted)";
+    desc.style.marginTop = "6px";
+    desc.textContent = item.description || "";
+
+    const link = document.createElement("div");
+    link.style.fontSize = "12px";
+    link.style.color = "var(--primary)";
+    link.style.marginTop = "6px";
+    link.textContent = item.url;
+
+    const btn = document.createElement("button");
+    btn.textContent = "抓取此网页";
+    btn.type = "button";
+    btn.style.marginTop = "8px";
+    btn.style.border = "none";
+    btn.style.background = "#059669";
+    btn.style.color = "white";
+    btn.style.padding = "8px 12px";
+    btn.style.borderRadius = "10px";
+    btn.style.cursor = "pointer";
+
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      urlInput.value = item.url;
+      await fetchWebPage();
+    });
+
+    card.appendChild(h);
+    card.appendChild(desc);
+    card.appendChild(link);
+    card.appendChild(btn);
+
+    box.appendChild(card);
+  });
+
+  searchResults.appendChild(box);
+  scrollBottom();
+}
+
 clearFileBtn.addEventListener("click", clearSelectedFile);
 
-fetchUrlBtn.addEventListener("click", () => {
-  alert("抓取按钮已点击");
-  fetchWebPage();
-});
+searchBtn.addEventListener("click", searchWeb);
+
+fetchUrlBtn.addEventListener("click", fetchWebPage);
 
 async function fetchWebPage(){
-  alert("进入 fetchWebPage");
   const pageUrl = urlInput.value.trim();
 
   if(!pageUrl){
@@ -1056,7 +1286,7 @@ function pickRelevantChunks(question, chunks, maxChunks = 6){
 
   const queryWords = question
     .toLowerCase()
-    .split(/[\s,.;:!?，。；：！？、()（）[\]{}'"“”‘’]+/)
+    .split(/[\\s,.;:!?，。；：！？、()（）\\[\\]{}'"“”‘’]+/)
     .filter(word => word.length >= 2);
 
   if(queryWords.length === 0){

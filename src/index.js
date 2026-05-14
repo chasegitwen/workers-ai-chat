@@ -177,6 +177,92 @@ export default {
       }
     }
 
+    if (url.pathname === "/search-and-fetch" && request.method === "POST") {
+      const { query } = await request.json();
+    
+      if (!query || !query.trim()) {
+        return jsonResponse({ error: "请输入联网问题" }, 400);
+      }
+    
+      if (!env.BRAVE_SEARCH_API_KEY) {
+        return jsonResponse({ error: "缺少 BRAVE_SEARCH_API_KEY" }, 500);
+      }
+    
+      try {
+        const searchRes = await fetch(
+          "https://api.search.brave.com/res/v1/web/search?q=" +
+            encodeURIComponent(query.trim()) +
+            "&count=5",
+          {
+            headers: {
+              "Accept": "application/json",
+              "X-Subscription-Token": env.BRAVE_SEARCH_API_KEY
+            }
+          }
+        );
+    
+        if (!searchRes.ok) {
+          return jsonResponse({
+            error: "搜索失败：HTTP " + searchRes.status
+          }, 500);
+        }
+    
+        const searchData = await searchRes.json();
+    
+        const searchResults = (searchData.web?.results || [])
+          .slice(0, 3)
+          .map(item => ({
+            title: item.title || "",
+            url: item.url || "",
+            description: item.description || ""
+          }));
+    
+        const pages = [];
+    
+        for (const item of searchResults) {
+          try {
+            const pageRes = await fetch(item.url, {
+              headers: {
+                "User-Agent": "Mozilla/5.0 Cloudflare Workers AI Assistant",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+              }
+            });
+    
+            if (!pageRes.ok) {
+              continue;
+            }
+    
+            const html = await pageRes.text();
+            const text = extractReadableTextFromHtml(html);
+    
+            if (text && text.length > 100) {
+              pages.push({
+                title: item.title,
+                url: item.url,
+                description: item.description,
+                text: text.slice(0, 8000)
+              });
+            }
+    
+          } catch (err) {
+            // 单个网页抓取失败就跳过
+          }
+        }
+    
+        return jsonResponse({
+          ok: true,
+          query: query.trim(),
+          results: searchResults,
+          pages
+        });
+    
+      } catch (err) {
+        return jsonResponse({
+          error: "联网搜索失败：" + err.message
+        }, 500);
+      }
+    }
+
     const { messages, model, image, file } = await request.json();
 
     if (image) {
@@ -255,7 +341,7 @@ export default {
         "用户上传了一个文件。下面是从文件中提取出的相关片段，请优先依据这些片段回答用户问题；如果片段信息不足，请明确说明。\\n\\n" +
         "文件名：" + file.name + "\\n" +
         "文件类型：" + (file.type || "unknown") + "\\n\\n" +
-        "文件内容如下：\\n" +
+        "资料内容如下：\\n" +
         file.text.slice(0, 12000);
     
       messages.push({
@@ -857,6 +943,24 @@ body.dark{
     搜索
   </button>
 
+  <button
+    id="webAnswerBtn"
+    type="button"
+    style="
+      border:none;
+      background:#dc2626;
+      color:white;
+      padding:0 16px;
+      border-radius:14px;
+      font-size:14px;
+      cursor:pointer;
+    "
+  >
+    联网回答
+  </button>
+
+
+
   <input
     id="urlInput"
     placeholder="粘贴网页 URL..."
@@ -945,6 +1049,11 @@ const input = document.getElementById("input");
 
 const searchInput = document.getElementById("searchInput");
 const searchBtn = document.getElementById("searchBtn");
+
+const webAnswerBtn = document.getElementById("webAnswerBtn");
+let webSearchContext = "";
+let webSearchSources = [];
+
 const searchResults = document.getElementById("searchResults");
 
 const urlInput = document.getElementById("urlInput");
@@ -1155,6 +1264,72 @@ function renderSearchResults(results){
 clearFileBtn.addEventListener("click", clearSelectedFile);
 
 searchBtn.addEventListener("click", searchWeb);
+webAnswerBtn.addEventListener("click", webAnswer);
+async function webAnswer(){
+
+  const query = input.value.trim() || searchInput.value.trim();
+
+  if(!query){
+    alert("请先在聊天框或搜索框输入问题");
+    return;
+  }
+
+  webAnswerBtn.disabled = true;
+  webAnswerBtn.textContent = "联网中...";
+  fileStatus.textContent = "正在联网搜索并抓取网页...";
+
+  try{
+
+    const res = await fetch("/search-and-fetch", {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify({
+        query:query
+      })
+    });
+
+    const data = await res.json();
+
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "联网搜索失败");
+    }
+
+    webSearchSources = data.pages || [];
+
+    webSearchContext = webSearchSources.map((page, index) => {
+      return [
+        "【来源 " + (index + 1) + "】",
+        "标题：" + page.title,
+        "URL：" + page.url,
+        "摘要：" + (page.description || ""),
+        "正文片段：",
+        page.text
+      ].join(String.fromCharCode(10));
+    }).join(String.fromCharCode(10, 10));
+
+    fileStatus.textContent =
+      "联网完成：找到 " + (data.results || []).length +
+      " 条结果，成功抓取 " + webSearchSources.length + " 个网页";
+
+    if(!webSearchContext){
+      alert("搜索到了结果，但网页正文抓取失败。可以先用搜索结果手动抓取。");
+      return;
+    }
+
+    await sendMessage();
+
+  }catch(err){
+
+    fileStatus.textContent = "联网回答失败";
+    alert("联网回答失败：" + err.message);
+
+  }
+
+  webAnswerBtn.disabled = false;
+  webAnswerBtn.textContent = "联网回答";
+}
 
 fetchUrlBtn.addEventListener("click", fetchWebPage);
 
@@ -1578,6 +1753,7 @@ async function sendMessage(){
   let fileTextForAI = fileTextToSend;
   let fileInfoForUI = null;
   let webTextForAI = "";
+  let networkTextForAI = "";
 
 
   if(fileTextToSend && selectedFileChunks.length > 0){
@@ -1610,7 +1786,21 @@ async function sendMessage(){
       relevantWebChunks.join(String.fromCharCode(10, 10));
   }
 
-  if(!message && !imageToSend && !fileTextToSend && !webTextForAI){
+  if(webSearchContext){
+
+    networkTextForAI =
+      "下面是联网搜索得到的多个网页内容，请优先依据这些来源回答问题，并尽量综合多个来源的信息。" +
+      String.fromCharCode(10, 10) +
+      webSearchContext;
+  }
+
+  if(
+    !message &&
+    !imageToSend &&
+    !fileTextToSend &&
+    !webTextForAI &&
+    !networkTextForAI
+  ){
     return;
   }
 
@@ -1664,7 +1854,11 @@ async function sendMessage(){
           name:webPageToSend.title,
           type:"webpage",
           text:webTextForAI
-        } : null)
+        } : (networkTextForAI ? {
+          name:"联网搜索结果",
+          type:"web-search",
+          text:networkTextForAI
+        } : null))
       })
     });
 
@@ -1685,6 +1879,8 @@ async function sendMessage(){
       role:"assistant",
       content:reply || ""
     });
+    webSearchContext = "";
+    webSearchSources = [];
 
     if(imageToSend){
       clearSelectedImage();

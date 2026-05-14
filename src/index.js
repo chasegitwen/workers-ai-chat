@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Welcome to Cloudflare Workers! This is your first worker.
  *
  * - Run `npm run dev` in your terminal to start a development server
@@ -70,7 +70,7 @@ export default {
       return new Response("Use POST", { status: 405 });
     }
 
-    const { messages, model, image } = await request.json();
+    const { messages, model, image, file } = await request.json();
 
     if (image) {
 
@@ -139,6 +139,22 @@ export default {
           }
         );
       }
+    }
+
+    
+    if (file && file.text) {
+
+      const filePrompt =
+        "用户上传了一个文件，请根据文件内容回答用户问题。\\n\\n" +
+        "文件名：" + file.name + "\\n" +
+        "文件类型：" + (file.type || "unknown") + "\\n\\n" +
+        "文件内容如下：\\n" +
+        file.text.slice(0, 12000);
+    
+      messages.push({
+        role: "user",
+        content: filePrompt
+      });
     }
 
     const allowedModels = [
@@ -215,6 +231,9 @@ return `<!doctype html>
 <title>Workers AI Assistant</title>
 
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+
 
 <style>
 
@@ -227,6 +246,27 @@ return `<!doctype html>
     font-size:16px;
     cursor:pointer;
     margin-right:8px;
+  }
+
+  #fileBtn{
+    border:none;
+    background:#4b5563;
+    color:white;
+    padding:0 18px;
+    border-radius:14px;
+    font-size:16px;
+    cursor:pointer;
+    margin-right:8px;
+  }
+  
+  #fileStatus{
+    font-size:12px;
+    color:var(--muted);
+    white-space:nowrap;
+    align-self:center;
+    max-width:180px;
+    overflow:hidden;
+    text-overflow:ellipsis;
   }
 
   #imagePreviewBox{
@@ -629,6 +669,13 @@ body.dark{
 
         <input id="imageInput" type="file" accept="image/*" hidden />
 
+        <input id="fileInput" type="file" accept=".txt,.md,.markdown,.pdf,text/plain,text/markdown,application/pdf" hidden />
+        <button id="fileBtn" type="button">
+          文件
+        </button>
+
+        <div id="fileStatus"></div>
+
         <button id="imageBtn" type="button">
           图片
         </button>
@@ -653,6 +700,10 @@ body.dark{
 </div>
 
 <script>
+if (window.pdfjsLib) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+}
 
 const chat = document.getElementById("chat");
 
@@ -668,6 +719,13 @@ const removeImageBtn = document.getElementById("removeImageBtn");
 const uploadStatus = document.getElementById("uploadStatus");
 
 let selectedImage = null;
+
+const fileBtn = document.getElementById("fileBtn");
+const fileInput = document.getElementById("fileInput");
+const fileStatus = document.getElementById("fileStatus");
+
+let selectedFile = null;
+let selectedFileText = "";
 
 function clearSelectedImage(){
 
@@ -709,6 +767,100 @@ imageInput.addEventListener("change", () => {
 });
 
 removeImageBtn.addEventListener("click", clearSelectedImage);
+
+fileBtn.addEventListener("click", () => {
+  fileInput.click();
+});
+
+async function extractPdfText(file){
+  if (!window.pdfjsLib) {
+    throw new Error("pdf.js 没有加载成功，请检查 CDN 是否可访问");
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+
+  const pdf = await pdfjsLib.getDocument({
+    data: arrayBuffer
+  }).promise;
+
+  let fullText = "";
+
+  for(let pageNum = 1; pageNum <= pdf.numPages; pageNum++){
+
+    const page = await pdf.getPage(pageNum);
+    const textContent = await page.getTextContent();
+
+    const pageText = textContent.items
+      .map(item => item.str)
+      .join(" ");
+
+    fullText += String.fromCharCode(10, 10) + "--- 第 " + pageNum + " 页 ---" + String.fromCharCode(10) + pageText;
+  }
+
+  return fullText.trim();
+}
+
+fileInput.addEventListener("change", async () => {
+
+  const file = fileInput.files[0];
+
+  if (!file) return;
+
+  const name = file.name.toLowerCase();
+
+  const isTextFile =
+    name.endsWith(".txt") ||
+    name.endsWith(".md") ||
+    name.endsWith(".markdown");
+
+  const isPdfFile = name.endsWith(".pdf");
+
+  if (!isTextFile && !isPdfFile) {
+    alert("当前支持 TXT / Markdown / PDF 文件");
+    fileInput.value = "";
+    return;
+  }
+
+  try{
+
+    selectedFile = file;
+    selectedFileText = "";
+    fileStatus.textContent = "正在读取：" + file.name;
+
+    if(isPdfFile){
+
+      selectedFileText = await extractPdfText(file);
+
+    }else{
+
+      selectedFileText = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+
+        reader.onload = () => resolve(reader.result || "");
+        reader.onerror = () => reject(new Error("文件读取失败"));
+
+        reader.readAsText(file, "utf-8");
+      });
+    }
+
+    if(!selectedFileText.trim()){
+      throw new Error("没有提取到文本内容");
+    }
+
+    fileStatus.textContent =
+      "已读取：" + file.name + "（" + selectedFileText.length + " 字符）";
+
+  }catch(err){
+
+    alert("文件读取失败：" + err.message);
+
+    selectedFile = null;
+    selectedFileText = "";
+    fileInput.value = "";
+    fileStatus.textContent = "";
+  }
+});
+
 
 const modelSelect = document.getElementById("modelSelect");
 
@@ -889,7 +1041,10 @@ async function sendMessage(){
   const message = input.value.trim();
   const imageToSend = selectedImage;
 
-  if(!message && !imageToSend){
+  const fileToSend = selectedFile;
+  const fileTextToSend = selectedFileText;
+
+  if(!message && !imageToSend && !fileTextToSend){
     return;
   }
 
@@ -926,7 +1081,12 @@ async function sendMessage(){
       body:JSON.stringify({
         messages:conversation,
         model:modelSelect.value,
-        image:imageToSend
+        image:imageToSend,
+        file:fileToSend ? {
+          name:fileToSend.name,
+          type:fileToSend.type,
+          text:fileTextToSend
+        } : null
       })
     });
 

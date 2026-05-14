@@ -187,12 +187,12 @@ export default {
       });
 
     } catch (err) {
-      console.log("图片识别失败", err);
+      console.log("AI 请求失败", err);
   
       return new Response(
         "data: " + JSON.stringify({
           response:
-            "图片识别失败：\n\n" +
+            "AI 请求失败：\n\n" +
             "name: " + err.name + "\n" +
             "message: " + err.message + "\n" +
             "stack: " + err.stack
@@ -264,9 +264,26 @@ return `<!doctype html>
     color:var(--muted);
     white-space:nowrap;
     align-self:center;
-    max-width:180px;
+    max-width:260px;
     overflow:hidden;
     text-overflow:ellipsis;
+  }
+
+  #clearFileBtn{
+    display:none;
+    border:none;
+    background:#6b7280;
+    color:white;
+    padding:0 12px;
+    border-radius:14px;
+    font-size:14px;
+    cursor:pointer;
+  }
+
+  .fileInfo{
+    margin-top:8px;
+    font-size:12px;
+    color:var(--muted);
   }
 
   #imagePreviewBox{
@@ -676,6 +693,8 @@ body.dark{
 
         <div id="fileStatus"></div>
 
+        <button id="clearFileBtn" type="button">清除</button>
+
         <button id="imageBtn" type="button">
           图片
         </button>
@@ -723,10 +742,23 @@ let selectedImage = null;
 const fileBtn = document.getElementById("fileBtn");
 const fileInput = document.getElementById("fileInput");
 const fileStatus = document.getElementById("fileStatus");
+const clearFileBtn = document.getElementById("clearFileBtn");
 
 let selectedFile = null;
 let selectedFileText = "";
 let selectedFileChunks = [];
+let lastRelevantChunkCount = 0;
+
+function clearSelectedFile(){
+
+  selectedFile = null;
+  selectedFileText = "";
+  selectedFileChunks = [];
+  lastRelevantChunkCount = 0;
+  fileInput.value = "";
+  fileStatus.textContent = "";
+  clearFileBtn.style.display = "none";
+}
 
 function clearSelectedImage(){
 
@@ -772,6 +804,8 @@ removeImageBtn.addEventListener("click", clearSelectedImage);
 fileBtn.addEventListener("click", () => {
   fileInput.click();
 });
+
+clearFileBtn.addEventListener("click", clearSelectedFile);
 
 async function extractPdfText(file){
   if (!window.pdfjsLib) {
@@ -928,6 +962,7 @@ fileInput.addEventListener("change", async () => {
       throw new Error("没有提取到文本内容");
     }
     selectedFileChunks = splitTextIntoChunks(selectedFileText);
+    clearFileBtn.style.display = "inline-block";
     fileStatus.textContent =
       "已读取：" + file.name + "（" + selectedFileText.length + " 字符，" + selectedFileChunks.length + " 段）";
 
@@ -935,10 +970,7 @@ fileInput.addEventListener("change", async () => {
 
     alert("文件读取失败：" + err.message);
 
-    selectedFile = null;
-    selectedFileText = "";
-    fileInput.value = "";
-    fileStatus.textContent = "";
+    clearSelectedFile();
   }
 });
 
@@ -970,11 +1002,11 @@ function scrollBottom(){
   chat.scrollTop = chat.scrollHeight;
 }
 
-function addUserMessage(text, imageDataUrl){
+function addUserMessage(text, imageDataUrl, fileInfo){
 
   const div = document.createElement("div");
 
-  div.className = imageDataUrl && !text
+  div.className = imageDataUrl && !text && !fileInfo
     ? "msg user userImageOnly"
     : "msg user";
 
@@ -990,6 +1022,13 @@ function addUserMessage(text, imageDataUrl){
     img.src = imageDataUrl;
     img.alt = "上传的图片";
     div.appendChild(img);
+  }
+
+  if(fileInfo){
+    const fileDiv = document.createElement("div");
+    fileDiv.className = "fileInfo";
+    fileDiv.textContent = "📄 " + fileInfo.name + " · " + fileInfo.chars + " 字符 · " + fileInfo.chunks + " 段";
+    div.appendChild(fileDiv);
   }
 
   chat.appendChild(div);
@@ -1126,21 +1165,32 @@ async function sendMessage(){
   const fileTextToSend = selectedFileText;
 
   let fileTextForAI = fileTextToSend;
+  let fileInfoForUI = null;
 
   if(fileTextToSend && selectedFileChunks.length > 0){
     const relevantChunks = pickRelevantChunks(message || "请总结这个文件", selectedFileChunks);
+    lastRelevantChunkCount = relevantChunks.length;
     fileTextForAI = relevantChunks.join(String.fromCharCode(10, 10));
+
+    if(fileToSend){
+      fileInfoForUI = {
+        name: fileToSend.name,
+        chars: selectedFileText.length,
+        chunks: selectedFileChunks.length,
+        usedChunks: lastRelevantChunkCount
+      };
+    }
   }
 
   if(!message && !imageToSend && !fileTextToSend){
     return;
   }
 
-  addUserMessage(message, imageToSend);
+  addUserMessage(message, imageToSend, fileInfoForUI);
 
   conversation.push({
     role:"user",
-    content:message || "请描述这张图片。"
+    content:message || (fileToSend ? "请总结这个文件。" : "请描述这张图片。")
   });
 
   input.value = "";
@@ -1154,6 +1204,11 @@ async function sendMessage(){
 
   if(imageToSend){
     uploadStatus.textContent = "图片上传中...";
+  }
+
+  if(fileToSend){
+    aiDiv.innerHTML =
+      "<span class='loading'>正在基于 " + lastRelevantChunkCount + " 个相关片段回答...</span>";
   }
 
   try{
@@ -1200,6 +1255,11 @@ async function sendMessage(){
       clearSelectedImage();
     }
 
+    if(fileToSend){
+      fileStatus.textContent =
+        "当前文件：" + fileToSend.name + "（" + selectedFileChunks.length + " 段，上次使用 " + lastRelevantChunkCount + " 段）";
+    }
+
   }catch(err){
 
     aiDiv.innerHTML =
@@ -1207,6 +1267,10 @@ async function sendMessage(){
 
     if(imageToSend){
       uploadStatus.textContent = "图片发送失败，可重试";
+    }
+
+    if(fileToSend){
+      fileStatus.textContent = "文件问答失败，可重试：" + fileToSend.name;
     }
   }
 

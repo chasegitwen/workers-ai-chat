@@ -1,4 +1,10 @@
 import { corsHeaders } from "../utils/response.js";
+import {
+  ensureConversation,
+  getRecentMessages,
+  saveMessage,
+  titleFromMessage
+} from "./history.js";
 
 const allowedModels = [
   "@cf/zai-org/glm-4.7-flash",
@@ -7,17 +13,128 @@ const allowedModels = [
   "@cf/meta/llama-3.1-8b-instruct-fast"
 ];
 
+const defaultSystemMessage = {
+  role: "system",
+  content: "\u4f60\u662f\u4e00\u4e2a\u7f51\u9875 AI \u52a9\u624b\uff0c\u8bf7\u7b80\u6d01\u3001\u51c6\u786e\u3001\u53cb\u597d\u5730\u56de\u7b54\u3002\u53ef\u4ee5\u4f7f\u7528 Markdown\u3002"
+};
+
+function getUserMessage(messages) {
+  const userMessage = [...(messages || [])]
+    .reverse()
+    .find(message => message.role === "user");
+
+  return (userMessage?.content || "").trim();
+}
+
+function readStreamText(value) {
+  if (value === "[DONE]") {
+    return "";
+  }
+
+  try {
+    const data = JSON.parse(value);
+
+    return (
+      data.response ||
+      data.result?.response ||
+      data.output_text ||
+      data.text ||
+      data.choices?.[0]?.delta?.content ||
+      data.choices?.[0]?.message?.content ||
+      data.choices?.[0]?.text ||
+      ""
+    );
+  } catch (err) {
+    return "";
+  }
+}
+
+function streamWithHistorySave(result, env, conversationId) {
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffer = "";
+  let reply = "";
+
+  return result.pipeThrough(new TransformStream({
+    transform(chunk, controller) {
+      controller.enqueue(chunk);
+
+      buffer += decoder.decode(chunk, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() || "";
+
+      for (const event of events) {
+        const lines = event
+          .split("\n")
+          .filter(line => line.startsWith("data:"))
+          .map(line => line.slice(5).trimStart());
+
+        for (const line of lines) {
+          reply += readStreamText(line);
+        }
+      }
+    },
+    async flush(controller) {
+      if (buffer.trim()) {
+        const lines = buffer
+          .split("\n")
+          .filter(line => line.startsWith("data:"))
+          .map(line => line.slice(5).trimStart());
+
+        for (const line of lines) {
+          reply += readStreamText(line);
+        }
+      }
+
+      if (env.DB && reply) {
+        await saveMessage(env.DB, conversationId, "assistant", reply);
+      }
+
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+    }
+  }));
+}
+
+async function prepareConversation(env, conversationId, userContent) {
+  if (!env.DB) {
+    return {
+      id: conversationId || crypto.randomUUID()
+    };
+  }
+
+  return ensureConversation(
+    env.DB,
+    conversationId,
+    titleFromMessage(userContent)
+  );
+}
+
 export async function handleChat(request, env) {
-  const { messages, model, image, file } = await request.json();
+  const {
+    messages = [],
+    model,
+    image,
+    file,
+    conversationId
+  } = await request.json();
+
+  const userContent = getUserMessage(messages) ||
+    (image ? "\u8bf7\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\u3002" : "\u8bf7\u7ee7\u7eed\u3002");
+
+  const conversation = await prepareConversation(env, conversationId, userContent);
 
   if (image) {
     try {
-      console.log("收到图片");
+      console.log("received image");
+
+      if (env.DB) {
+        await saveMessage(env.DB, conversation.id, "user", userContent);
+      }
 
       const base64 = image.split(",")[1];
 
       if (!base64) {
-        throw new Error("图片 DataURL 格式不正确");
+        throw new Error("Image DataURL format is invalid");
       }
 
       const imageBytes = Array.from(
@@ -30,22 +147,26 @@ export async function handleChat(request, env) {
       const result = await env.AI.run(
         "@cf/meta/llama-3.2-11b-vision-instruct",
         {
-          prompt: "请用中文描述这张图片，说明图片中的主要对象、场景和可能用途。",
+          prompt: "\u8bf7\u7528\u4e2d\u6587\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\uff0c\u8bf4\u660e\u56fe\u7247\u4e2d\u7684\u4e3b\u8981\u5bf9\u8c61\u3001\u573a\u666f\u548c\u53ef\u80fd\u7528\u9014\u3002",
           image: imageBytes,
           max_tokens: 256
         }
       );
+      const reply = result.response || JSON.stringify(result);
+
+      if (env.DB) {
+        await saveMessage(env.DB, conversation.id, "assistant", reply);
+      }
 
       return new Response(
         "data: " + JSON.stringify({
-          response:
-            result.response ||
-            JSON.stringify(result)
+          response: reply
         }) + "\n\n",
         {
           status: 200,
           headers: {
             ...corsHeaders(),
+            "X-Conversation-Id": conversation.id,
             "Content-Type": "text/event-stream; charset=utf-8",
             "Cache-Control": "no-cache",
             "Connection": "keep-alive"
@@ -53,12 +174,12 @@ export async function handleChat(request, env) {
         }
       );
     } catch (err) {
-      console.log("图片识别失败", err);
+      console.log("image recognition failed", err);
 
       return new Response(
         "data: " + JSON.stringify({
           response:
-            "图片识别失败：\n\n" +
+            "\u56fe\u7247\u8bc6\u522b\u5931\u8d25\uff1a\n\n" +
             "name: " + (err.name || "") + "\n" +
             "message: " + (err.message || String(err))
         }) + "\n\n",
@@ -66,6 +187,7 @@ export async function handleChat(request, env) {
           status: 200,
           headers: {
             ...corsHeaders(),
+            "X-Conversation-Id": conversation.id,
             "Content-Type": "text/event-stream; charset=utf-8",
             "Cache-Control": "no-cache",
             "Connection": "keep-alive"
@@ -75,15 +197,28 @@ export async function handleChat(request, env) {
     }
   }
 
+  if (env.DB) {
+    await saveMessage(env.DB, conversation.id, "user", userContent);
+  }
+
+  const historyMessages = env.DB
+    ? await getRecentMessages(env.DB, conversation.id, 20)
+    : messages.filter(message => message.role !== "system");
+
+  const modelMessages = [
+    defaultSystemMessage,
+    ...historyMessages
+  ];
+
   if (file && file.text) {
     const filePrompt =
-      "用户上传了一个文件。下面是从文件中提取出的相关片段，请优先依据这些片段回答用户问题；如果片段信息不足，请明确说明。\\n\\n" +
-      "文件名：" + file.name + "\\n" +
-      "文件类型：" + (file.type || "unknown") + "\\n\\n" +
-      "资料内容如下：\\n" +
+      "\u7528\u6237\u4e0a\u4f20\u4e86\u4e00\u4e2a\u6587\u4ef6\u3002\u4e0b\u9762\u662f\u4ece\u6587\u4ef6\u4e2d\u63d0\u53d6\u51fa\u7684\u76f8\u5173\u7247\u6bb5\uff0c\u8bf7\u4f18\u5148\u4f9d\u636e\u8fd9\u4e9b\u7247\u6bb5\u56de\u7b54\u7528\u6237\u95ee\u9898\uff1b\u5982\u679c\u7247\u6bb5\u4fe1\u606f\u4e0d\u8db3\uff0c\u8bf7\u660e\u786e\u8bf4\u660e\u3002\n\n" +
+      "\u6587\u4ef6\u540d\uff1a" + file.name + "\n" +
+      "\u6587\u4ef6\u7c7b\u578b\uff1a" + (file.type || "unknown") + "\n\n" +
+      "\u8d44\u6599\u5185\u5bb9\u5982\u4e0b\uff1a\n" +
       file.text.slice(0, 12000);
 
-    messages.push({
+    modelMessages.push({
       role: "user",
       content: filePrompt
     });
@@ -97,31 +232,34 @@ export async function handleChat(request, env) {
     const result = await env.AI.run(
       selectedModel,
       {
-        messages,
+        messages: modelMessages,
         stream: true
       }
     );
 
-    return new Response(result, {
+    return new Response(streamWithHistorySave(result, env, conversation.id), {
       headers: {
         ...corsHeaders(),
+        "X-Conversation-Id": conversation.id,
         "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "no-cache"
       }
     });
   } catch (err) {
-    console.log("AI 请求失败", err);
+    console.log("AI request failed", err);
 
     return new Response(
       "data: " + JSON.stringify({
         response:
-          "AI 请求失败：\n\n" +
+          "AI \u8bf7\u6c42\u5931\u8d25\uff1a\n\n" +
           "name: " + err.name + "\n" +
           "message: " + err.message + "\n" +
           "stack: " + err.stack
       }) + "\n\n",
       {
         headers: {
+          ...corsHeaders(),
+          "X-Conversation-Id": conversation.id,
           "Content-Type": "text/event-stream; charset=utf-8",
           "Cache-Control": "no-cache",
           "Connection": "keep-alive"

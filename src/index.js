@@ -1,5 +1,6 @@
 import { handleChat } from "./api/chat.js";
 import { handleFetchUrl } from "./api/fetchUrl.js";
+import { handleHistory } from "./api/history.js";
 import { handleSearchAndFetch } from "./api/searchAndFetch.js";
 import { handleSearchWeb } from "./api/searchWeb.js";
 import { htmlPage } from "./frontend/page.js";
@@ -8,6 +9,14 @@ import { corsHeaders, jsonResponse } from "./utils/response.js";
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    if (url.pathname.startsWith("/api/conversations")) {
+      const historyResponse = await handleHistory(request, env, url);
+
+      if (historyResponse) {
+        return historyResponse;
+      }
+    }
 
     if (request.method === "GET") {
       if (url.pathname === "/debug-path") {

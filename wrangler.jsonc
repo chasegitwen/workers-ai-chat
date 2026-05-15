@@ -16,7 +16,14 @@
 	],
 	"ai": {
 		"binding": "AI"
-	}
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "web-ai-assistant-history",
+			"database_id": "978c2e6d-3c8d-493d-975c-eac5375f75fb"
+		}
+	]
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

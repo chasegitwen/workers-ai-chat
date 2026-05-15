@@ -212,6 +212,49 @@ body.dark{
   font-size:14px;
 }
 
+.newChatBtn{
+  width:100%;
+  border:none;
+  background:var(--primary);
+  color:white;
+  border-radius:14px;
+  padding:10px 12px;
+  font-size:14px;
+  cursor:pointer;
+  margin-bottom:12px;
+}
+
+.historyList{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  min-height:0;
+  max-height:240px;
+  overflow-y:auto;
+  margin-bottom:14px;
+}
+
+.historyItem{
+  width:100%;
+  border:1px solid var(--border);
+  background:transparent;
+  color:var(--text);
+  border-radius:12px;
+  padding:9px 10px;
+  font-size:13px;
+  text-align:left;
+  cursor:pointer;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.historyItem.active{
+  border-color:var(--primary);
+  background:rgba(37,99,235,.1);
+  color:var(--primary);
+}
+
 .badge{
   display:inline-block;
   background:rgba(37,99,235,.1);
@@ -477,6 +520,12 @@ body.dark{
 
       <h2>网页 AI 助手</h2>
 
+      <button id="newChatBtn" class="newChatBtn" type="button">
+        New Chat
+      </button>
+
+      <div id="conversationList" class="historyList"></div>
+
       <p>
         这是部署在 Cloudflare Workers 上的 AI 网页助手。
         不依赖 VPS，不需要本地 GPU，直接调用 Workers AI。
@@ -617,6 +666,8 @@ if (window.pdfjsLib) {
 }
 
 const chat = document.getElementById("chat");
+const newChatBtn = document.getElementById("newChatBtn");
+const conversationList = document.getElementById("conversationList");
 
 const input = document.getElementById("input");
 
@@ -628,7 +679,8 @@ const webAnswerBtn = document.getElementById("webAnswerBtn");
 let webSearchContext = "";
 let webSearchSources = [];
 
-const searchResults = document.getElementById("searchResults");
+let searchResults = document.getElementById("searchResults");
+let currentConversationId = null;
 
 const fetchUrlBtn = document.getElementById("fetchUrlBtn");
 
@@ -1176,6 +1228,128 @@ const conversation = [
   }
 ];
 
+function resetLocalConversation(){
+  conversation.length = 1;
+}
+
+function resetChatView(){
+  chat.innerHTML =
+    "<div class='msg ai'>你好，我是基于 Cloudflare Workers AI 的网页助手。你可以问我问题，也可以让我写代码、总结、翻译或分析内容。</div>" +
+    "<div id='searchResults'></div>";
+  searchResults = document.getElementById("searchResults");
+  scrollBottom();
+}
+
+function setActiveConversation(){
+  conversationList.querySelectorAll(".historyItem").forEach(item => {
+    item.classList.toggle("active", item.dataset.id === currentConversationId);
+  });
+}
+
+async function loadConversations(){
+  try{
+    const res = await fetch("/api/conversations");
+    const data = await res.json();
+
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "加载会话失败");
+    }
+
+    conversationList.innerHTML = "";
+
+    (data.conversations || []).forEach(item => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "historyItem";
+      btn.dataset.id = item.id;
+      btn.textContent = item.title || "New Chat";
+      btn.title = btn.textContent;
+      btn.addEventListener("click", () => loadConversationMessages(item.id));
+      conversationList.appendChild(btn);
+    });
+
+    setActiveConversation();
+  }catch(err){
+    console.log("load conversations failed", err);
+  }
+}
+
+async function createNewConversation(){
+  try{
+    const res = await fetch("/api/conversations", {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify({
+        title:"New Chat"
+      })
+    });
+    const data = await res.json();
+
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "创建会话失败");
+    }
+
+    currentConversationId = data.conversation.id;
+    resetLocalConversation();
+    resetChatView();
+    clearSelectedImage();
+    webSearchContext = "";
+    webSearchSources = [];
+    setContextStatus(getCurrentContextStatus());
+    await loadConversations();
+  }catch(err){
+    alert("创建会话失败：" + err.message);
+  }
+}
+
+function renderHistoryMessage(message){
+  const div = document.createElement("div");
+  div.className = message.role === "user" ? "msg user" : "msg ai";
+
+  if(message.role === "assistant"){
+    div.innerHTML = marked.parse(message.content || "");
+  }else{
+    div.textContent = message.content || "";
+  }
+
+  chat.appendChild(div);
+}
+
+async function loadConversationMessages(conversationId){
+  try{
+    const res = await fetch("/api/conversations/" + encodeURIComponent(conversationId) + "/messages");
+    const data = await res.json();
+
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "加载消息失败");
+    }
+
+    currentConversationId = conversationId;
+    resetLocalConversation();
+    chat.innerHTML = "<div id='searchResults'></div>";
+    searchResults = document.getElementById("searchResults");
+
+    (data.messages || []).forEach(message => {
+      renderHistoryMessage(message);
+
+      if(message.role === "user" || message.role === "assistant"){
+        conversation.push({
+          role:message.role,
+          content:message.content || ""
+        });
+      }
+    });
+
+    setActiveConversation();
+    setContextStatus(getCurrentContextStatus());
+    scrollBottom();
+  }catch(err){
+    alert("加载会话失败：" + err.message);
+  }
+}
+
 input.addEventListener("keydown", e => {
 
   if(e.key === "Enter"){
@@ -1185,6 +1359,8 @@ input.addEventListener("keydown", e => {
 });
 
 sendBtn.addEventListener("click", sendMessage);
+newChatBtn.addEventListener("click", createNewConversation);
+loadConversations();
 
 function toggleTheme(){
   document.body.classList.toggle("dark");
@@ -1413,12 +1589,14 @@ async function sendMessage(){
 
   addUserMessage(message, imageToSend, fileInfoForUI);
 
+  const userMessageForRequest =
+    message ||
+    (fileToSend ? "\u8bf7\u603b\u7ed3\u8fd9\u4e2a\u6587\u4ef6\u3002" :
+    (webPageToSend ? "\u8bf7\u603b\u7ed3\u8fd9\u4e2a\u7f51\u9875\u3002" : "\u8bf7\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\u3002"));
+
   conversation.push({
     role:"user",
-    content:
-      message ||
-      (fileToSend ? "请总结这个文件。" :
-      (webPageToSend ? "请总结这个网页。" : "请描述这张图片。"))
+    content:userMessageForRequest
   });
 
   input.value = "";
@@ -1450,7 +1628,13 @@ async function sendMessage(){
       },
 
       body:JSON.stringify({
-        messages:conversation,
+        conversationId:currentConversationId,
+        messages:[
+          {
+            role:"user",
+            content:userMessageForRequest
+          }
+        ],
         model:modelSelect.value,
         image:imageToSend,
         file:fileToSend ? {
@@ -1474,6 +1658,13 @@ async function sendMessage(){
       throw new Error(errorText || "HTTP " + res.status);
     }
 
+    const responseConversationId = res.headers.get("X-Conversation-Id");
+
+    if(responseConversationId){
+      currentConversationId = responseConversationId;
+      setActiveConversation();
+    }
+
     aiDiv.innerHTML = "";
 
     const reply = await streamAIResponse(res, aiDiv);
@@ -1488,6 +1679,7 @@ async function sendMessage(){
     });
     webSearchContext = "";
     webSearchSources = [];
+    await loadConversations();
 
     if(imageToSend){
       clearSelectedImage();

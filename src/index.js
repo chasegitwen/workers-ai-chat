@@ -7,7 +7,7 @@ import { handleSearchAndFetch } from "./api/searchAndFetch.js";
 import { handleSearchWeb } from "./api/searchWeb.js";
 import { htmlPage } from "./frontend/page.js";
 import { requireAuth } from "./lib/auth.js";
-import { getEnabledModels } from "./providers/models.js";
+import { getEnabledModels } from "./providers/config.js";
 import { corsHeaders, jsonResponse } from "./utils/response.js";
 
 export default {

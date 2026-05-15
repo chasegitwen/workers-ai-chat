@@ -1292,7 +1292,7 @@ async function loadModels(){
     modelSelect.innerHTML = "";
 
     data.models
-      .filter(model => !model.deprecated)
+      .filter(model => !model.deprecated && model.enabled !== false && model.capabilities?.text)
       .forEach(model => {
         const option = document.createElement("option");
         option.value = model.id;

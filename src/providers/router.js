@@ -1,13 +1,21 @@
-import { ModelNotFoundError, ProviderError } from "./errors.js";
+import {
+  ModelNotFoundError,
+  UnsupportedProviderTypeError
+} from "./errors.js";
+import {
+  findModel,
+  getModelRuntimeConfig
+} from "./config.js";
 import {
   DEFAULT_VISION_MODEL,
-  FALLBACK_TEXT_MODEL,
-  findModel
+  FALLBACK_TEXT_MODEL
 } from "./models.js";
+import { callAnthropic } from "./anthropicRuntime.js";
+import { callOpenAICompatible } from "./openaiCompatible.js";
 import { callWorkersAI, callWorkersAIVision } from "./workersai.js";
 
-function resolveTextModel(model) {
-  const selected = findModel(model);
+function resolveTextConfig(model) {
+  const selected = getModelRuntimeConfig(model);
 
   if (selected) {
     return selected;
@@ -20,7 +28,7 @@ function resolveTextModel(model) {
     FALLBACK_TEXT_MODEL
   );
 
-  const fallback = findModel(FALLBACK_TEXT_MODEL);
+  const fallback = getModelRuntimeConfig(FALLBACK_TEXT_MODEL);
 
   if (!fallback) {
     throw new ModelNotFoundError("Fallback model is not configured", {
@@ -32,9 +40,89 @@ function resolveTextModel(model) {
   return fallback;
 }
 
+function resolveVisionConfig(model) {
+  const requested = model || DEFAULT_VISION_MODEL;
+  const enabledModel = getModelRuntimeConfig(requested);
+  const configuredModel = findModel(requested);
+
+  return enabledModel || configuredModel || {
+    id: requested,
+    providerType: "workers-ai",
+    provider: "workers-ai",
+    modelName: requested,
+    capabilities: {
+      vision: true
+    }
+  };
+}
+
+async function callByProviderType({
+  env,
+  config,
+  messages,
+  stream,
+  max_tokens,
+  temperature,
+  prompt,
+  image
+}) {
+  switch (config.providerType) {
+    case "workers-ai":
+      if (prompt || image) {
+        return callWorkersAIVision({
+          env,
+          model: config.modelName,
+          prompt,
+          image,
+          max_tokens
+        });
+      }
+
+      return callWorkersAI({
+        env,
+        model: config.modelName,
+        messages,
+        stream,
+        max_tokens,
+        temperature
+      });
+
+    case "openai-compatible":
+      return callOpenAICompatible({
+        env,
+        config,
+        messages,
+        stream,
+        max_tokens,
+        temperature
+      });
+
+    case "anthropic":
+      return callAnthropic({
+        env,
+        config,
+        messages,
+        stream,
+        max_tokens,
+        temperature,
+        prompt,
+        image
+      });
+
+    default:
+      throw new UnsupportedProviderTypeError(
+        "Unsupported provider type: " + config.providerType,
+        {
+          provider: config.provider,
+          providerType: config.providerType,
+          model: config.id
+        }
+      );
+  }
+}
+
 export async function callModel({
   env,
-  provider,
   model,
   messages,
   stream,
@@ -43,46 +131,25 @@ export async function callModel({
   prompt,
   image
 }) {
-  const requestedProvider = provider || "workers-ai";
-
-  if (requestedProvider !== "workers-ai") {
-    throw new ProviderError("Unsupported provider: " + requestedProvider, {
-      provider: requestedProvider,
-      model
-    });
-  }
-
-  if (prompt || image) {
-    const visionModel = model || DEFAULT_VISION_MODEL;
-    const response = await callWorkersAIVision({
-      env,
-      model: visionModel,
-      prompt,
-      image,
-      max_tokens
-    });
-
-    return {
-      provider: "workers-ai",
-      model: visionModel,
-      stream: false,
-      response
-    };
-  }
-
-  const selectedModel = resolveTextModel(model);
-  const response = await callWorkersAI({
+  const config = (prompt || image)
+    ? resolveVisionConfig(model)
+    : resolveTextConfig(model);
+  const response = await callByProviderType({
     env,
-    model: selectedModel.id,
+    config,
     messages,
     stream,
     max_tokens,
-    temperature
+    temperature,
+    prompt,
+    image
   });
 
   return {
-    provider: selectedModel.provider,
-    model: selectedModel.id,
+    provider: config.provider,
+    providerType: config.providerType,
+    model: config.id,
+    modelName: config.modelName,
     stream: Boolean(stream),
     response
   };

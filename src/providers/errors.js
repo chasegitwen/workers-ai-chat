@@ -20,3 +20,19 @@ export class ProviderTimeoutError extends ProviderError {
     this.name = "ProviderTimeoutError";
   }
 }
+
+export class UnsupportedProviderTypeError extends ProviderError {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = "UnsupportedProviderTypeError";
+    this.providerType = options.providerType || "";
+  }
+}
+
+export class ProviderNotImplementedError extends ProviderError {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = "ProviderNotImplementedError";
+    this.providerType = options.providerType || "";
+  }
+}

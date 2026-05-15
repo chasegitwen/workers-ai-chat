@@ -137,6 +137,8 @@ body.dark{
 body{
   margin:0;
   height:100vh;
+  max-height:100vh;
+  overflow:hidden;
   font-family:Arial, "Microsoft YaHei", sans-serif;
   background:linear-gradient(135deg,var(--bg),#ffffff);
   color:var(--text);
@@ -148,12 +150,15 @@ body.dark{
 
 .app{
   height:100vh;
+  max-height:100vh;
   display:flex;
   flex-direction:column;
+  overflow:hidden;
 }
 
 .topbar{
   height:64px;
+  flex:0 0 64px;
   padding:0 24px;
   display:flex;
   align-items:center;
@@ -183,6 +188,7 @@ body.dark{
 
 .main{
   flex:1;
+  min-height:0;
   display:grid;
   grid-template-columns:280px minmax(0,1fr);
   gap:20px;
@@ -191,6 +197,9 @@ body.dark{
 }
 
 .sidebar{
+  height:100%;
+  min-height:0;
+  overflow:hidden;
   background:var(--panel);
   border:1px solid var(--border);
   border-radius:22px;
@@ -203,13 +212,40 @@ body.dark{
 
 .sidebar h2{
   margin-top:0;
+  margin-bottom:12px;
   font-size:20px;
+  flex:0 0 auto;
 }
 
 .sidebar p{
   color:var(--muted);
   line-height:1.7;
   font-size:14px;
+}
+
+.sidebarIntro,
+.sidebarBadges{
+  display:none;
+}
+
+.sidebarMain{
+  flex:1 1 auto;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+
+.modelArea{
+  flex:0 0 auto;
+  padding-top:12px;
+  border-top:1px solid var(--border);
+}
+
+.modelLabel{
+  color:var(--muted);
+  font-size:12px;
+  margin-bottom:8px;
 }
 
 .newChatBtn{
@@ -222,14 +258,15 @@ body.dark{
   font-size:14px;
   cursor:pointer;
   margin-bottom:12px;
+  flex:0 0 auto;
 }
 
 .historyList{
   display:flex;
   flex-direction:column;
   gap:8px;
-  min-height:0;
-  max-height:240px;
+  flex:1 1 auto;
+  min-height:120px;
   overflow-y:auto;
   margin-bottom:14px;
 }
@@ -280,6 +317,113 @@ body.dark{
   border-color:#dc2626;
 }
 
+.libraryPanel{
+  flex:0 0 auto;
+  min-height:0;
+  max-height:260px;
+  overflow:hidden;
+  border-top:1px solid var(--border);
+  border-bottom:1px solid var(--border);
+  padding:12px 0;
+  margin:0 0 14px;
+}
+
+.libraryHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin-bottom:8px;
+}
+
+.libraryHeader strong{
+  font-size:14px;
+}
+
+.libraryHeader button{
+  border:1px solid var(--border);
+  background:transparent;
+  color:var(--text);
+  border-radius:999px;
+  padding:5px 9px;
+  font-size:12px;
+  cursor:pointer;
+}
+
+.libraryCount{
+  color:var(--muted);
+  font-size:12px;
+  margin-bottom:8px;
+}
+
+.filesList{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  min-height:0;
+  max-height:180px;
+  overflow-y:auto;
+}
+
+.fileLibraryItem{
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:9px;
+  background:transparent;
+}
+
+.fileLibraryItem.selected{
+  border-color:var(--primary);
+  background:rgba(37,99,235,.08);
+}
+
+.fileLibraryName{
+  color:var(--text);
+  font-size:13px;
+  font-weight:600;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.fileLibraryMeta{
+  margin-top:4px;
+  color:var(--muted);
+  font-size:11px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.fileLibraryActions{
+  display:flex;
+  gap:6px;
+  margin-top:8px;
+}
+
+.fileLibraryActions button{
+  flex:1;
+  border:1px solid var(--border);
+  background:transparent;
+  color:var(--text);
+  border-radius:10px;
+  padding:6px 8px;
+  font-size:12px;
+  cursor:pointer;
+}
+
+.fileLibraryActions .selectedAction{
+  background:var(--primary);
+  border-color:var(--primary);
+  color:white;
+}
+
+.fileLibraryActions .deleteFileAction:hover{
+  background:#dc2626;
+  border-color:#dc2626;
+  color:white;
+}
+
 .badge{
   display:inline-block;
   background:rgba(37,99,235,.1);
@@ -293,6 +437,8 @@ body.dark{
 .chatCard{
   display:flex;
   flex-direction:column;
+  height:100%;
+  max-height:100%;
   min-height:0;
   background:var(--panel);
   border:1px solid var(--border);
@@ -302,6 +448,7 @@ body.dark{
 }
 
 .chatHeader{
+  flex:0 0 auto;
   padding:16px 20px;
   border-bottom:1px solid var(--border);
   font-weight:600;
@@ -337,6 +484,7 @@ body.dark{
 
 #chat{
   flex:1;
+  min-height:0;
   overflow-y:auto;
   padding:22px;
   display:flex;
@@ -395,6 +543,7 @@ body.dark{
 }
 
 .inputBar{
+  flex:0 0 auto;
   display:flex;
   flex-direction:column;
   gap:8px;
@@ -522,6 +671,7 @@ body.dark{
 
   .main{
     grid-template-columns:1fr;
+    min-height:0;
   }
 
   .sidebar{
@@ -577,22 +727,36 @@ body.dark{
         New Chat
       </button>
 
-      <div id="conversationList" class="historyList"></div>
+      <div class="sidebarMain">
 
-      <p>
+        <div id="conversationList" class="historyList"></div>
+
+        <div class="libraryPanel">
+          <div class="libraryHeader">
+            <strong>&#x6587;&#x4EF6;&#x5E93;</strong>
+            <button id="refreshFilesBtn" type="button">&#x5237;&#x65B0;</button>
+          </div>
+          <div id="selectedFilesCount" class="libraryCount">&#x5DF2;&#x9009;&#x62E9; 0 &#x4E2A;&#x6587;&#x4EF6;</div>
+          <div id="filesList" class="filesList"></div>
+        </div>
+
+      </div>
+
+      <p class="sidebarIntro">
         这是部署在 Cloudflare Workers 上的 AI 网页助手。
         不依赖 VPS，不需要本地 GPU，直接调用 Workers AI。
       </p>
 
-      <div class="badge">多轮对话</div>
-      <div class="badge">Markdown</div>
-      <div class="badge">模型切换</div>
-      <div class="badge">打字机效果</div>
-      <div class="badge">深浅色切换</div>
+      <div class="sidebarBadges">
+        <div class="badge">多轮对话</div>
+        <div class="badge">Markdown</div>
+        <div class="badge">模型切换</div>
+        <div class="badge">打字机效果</div>
+        <div class="badge">深浅色切换</div>
+      </div>
 
-      <p style="margin-top:auto;">
-        当前模型由下方选择
-      </p>
+      <div class="modelArea">
+        <div class="modelLabel">当前模型</div>
     
       <select
         id="modelSelect"
@@ -624,6 +788,8 @@ body.dark{
         </option>
     
       </select>
+
+      </div>
 
     </aside>
 
@@ -725,6 +891,9 @@ if (window.pdfjsLib) {
 const chat = document.getElementById("chat");
 const newChatBtn = document.getElementById("newChatBtn");
 const conversationList = document.getElementById("conversationList");
+const refreshFilesBtn = document.getElementById("refreshFilesBtn");
+const selectedFilesCount = document.getElementById("selectedFilesCount");
+const filesList = document.getElementById("filesList");
 const summaryStatus = document.getElementById("summaryStatus");
 const viewSummaryBtn = document.getElementById("viewSummaryBtn");
 
@@ -765,9 +934,12 @@ const fileStatus = document.getElementById("fileStatus");
 const clearFileBtn = document.getElementById("clearFileBtn");
 
 let selectedFile = null;
+let selectedFileId = null;
 let selectedFileText = "";
 let selectedFileChunks = [];
 let lastRelevantChunkCount = 0;
+let filesLibrary = [];
+let selectedFileIds = [];
 
 function setContextStatus(text){
   contextStatus.textContent = text || "";
@@ -789,14 +961,170 @@ function getCurrentContextStatus(){
     : "";
 }
 
+function formatFileSize(size){
+  const value = Number(size || 0);
+
+  if(value >= 1024 * 1024){
+    return (value / 1024 / 1024).toFixed(1) + " MB";
+  }
+
+  if(value >= 1024){
+    return (value / 1024).toFixed(1) + " KB";
+  }
+
+  return value + " B";
+}
+
+function formatDate(value){
+  if(!value){
+    return "";
+  }
+
+  const date = new Date(value);
+
+  if(Number.isNaN(date.getTime())){
+    return String(value);
+  }
+
+  return date.toLocaleString();
+}
+
+function updateSelectedFilesStatus(){
+  selectedFilesCount.textContent = "\u5df2\u9009\u62e9 " + selectedFileIds.length + " \u4e2a\u6587\u4ef6";
+}
+
+function setSelectedFilesStatus(){
+  setContextStatus(selectedFileIds.length ? "\u5df2\u9009\u62e9 " + selectedFileIds.length + " \u4e2a\u6587\u4ef6" : getCurrentContextStatus());
+}
+
+function renderFilesLibrary(){
+  filesList.innerHTML = "";
+  updateSelectedFilesStatus();
+
+  if(!filesLibrary.length){
+    const empty = document.createElement("div");
+    empty.className = "libraryCount";
+    empty.textContent = "\u6682\u65e0\u6587\u4ef6";
+    filesList.appendChild(empty);
+    return;
+  }
+
+  filesLibrary.forEach(file => {
+    const selected = selectedFileIds.includes(file.id);
+    const item = document.createElement("div");
+    item.className = "fileLibraryItem" + (selected ? " selected" : "");
+
+    const name = document.createElement("div");
+    name.className = "fileLibraryName";
+    name.textContent = file.filename || "file";
+    name.title = name.textContent;
+
+    const meta = document.createElement("div");
+    meta.className = "fileLibraryMeta";
+    meta.textContent = formatFileSize(file.size) + " · " + formatDate(file.created_at);
+
+    const actions = document.createElement("div");
+    actions.className = "fileLibraryActions";
+
+    const selectBtn = document.createElement("button");
+    selectBtn.type = "button";
+    selectBtn.className = selected ? "selectedAction" : "";
+    selectBtn.textContent = selected ? "\u53d6\u6d88" : "\u9009\u62e9";
+    selectBtn.addEventListener("click", () => toggleLibraryFile(file.id));
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "deleteFileAction";
+    deleteBtn.textContent = "\u5220\u9664";
+    deleteBtn.addEventListener("click", () => deleteLibraryFile(file.id, file.filename || "file"));
+
+    actions.appendChild(selectBtn);
+    actions.appendChild(deleteBtn);
+    item.appendChild(name);
+    item.appendChild(meta);
+    item.appendChild(actions);
+    filesList.appendChild(item);
+  });
+}
+
+async function loadFilesLibrary(){
+  try{
+    const res = await fetch("/api/files");
+    const data = await res.json();
+
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "\u6587\u4ef6\u5e93\u52a0\u8f7d\u5931\u8d25");
+    }
+
+    filesLibrary = data.files || [];
+    const existingIds = new Set(filesLibrary.map(file => file.id));
+    selectedFileIds = selectedFileIds.filter(id => existingIds.has(id));
+    selectedFileId = selectedFileId && existingIds.has(selectedFileId) ? selectedFileId : null;
+    renderFilesLibrary();
+    setSelectedFilesStatus();
+  }catch(err){
+    setContextStatus("\u6587\u4ef6\u5e93\u52a0\u8f7d\u5931\u8d25");
+    console.log("load files failed", err);
+  }
+}
+
+function toggleLibraryFile(fileId){
+  if(selectedFileIds.includes(fileId)){
+    selectedFileIds = selectedFileIds.filter(id => id !== fileId);
+
+    if(selectedFileId === fileId){
+      selectedFileId = null;
+    }
+  }else{
+    selectedFileIds.push(fileId);
+  }
+
+  renderFilesLibrary();
+  setSelectedFilesStatus();
+}
+
+async function deleteLibraryFile(fileId, filename){
+  if(!confirm("\u786e\u5b9a\u5220\u9664\u6587\u4ef6\u201c" + filename + "\u201d\u5417\uff1f")){
+    return;
+  }
+
+  try{
+    const res = await fetch("/api/files/" + encodeURIComponent(fileId), {
+      method:"DELETE"
+    });
+    const data = await res.json();
+
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "\u5220\u9664\u5931\u8d25");
+    }
+
+    filesLibrary = filesLibrary.filter(file => file.id !== fileId);
+    selectedFileIds = selectedFileIds.filter(id => id !== fileId);
+
+    if(selectedFileId === fileId){
+      selectedFileId = null;
+    }
+
+    renderFilesLibrary();
+    setContextStatus("\u6587\u4ef6\u5df2\u5220\u9664");
+  }catch(err){
+    setContextStatus("\u5220\u9664\u5931\u8d25");
+    console.log("delete file failed", err);
+  }
+}
+
 function clearSelectedFile(){
 
+  const fileIdToClear = selectedFileId;
   selectedFile = null;
+  selectedFileId = null;
+  selectedFileIds = selectedFileIds.filter(id => id !== fileIdToClear);
   selectedFileText = "";
   selectedFileChunks = [];
   lastRelevantChunkCount = 0;
   fileInput.value = "";
   fileStatus.textContent = "";
+  renderFilesLibrary();
   setContextStatus(getCurrentContextStatus());
   clearFileBtn.style.display = "none";
 }
@@ -1203,6 +1531,28 @@ function pickRelevantChunks(question, chunks, maxChunks = 6){
   return picked.length ? picked : chunks.slice(0, maxChunks);
 }
 
+async function uploadFileToLibrary(file, textContent){
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("text_content", textContent || "");
+
+  if(currentConversationId){
+    formData.append("conversation_id", currentConversationId);
+  }
+
+  const res = await fetch("/api/files/upload", {
+    method:"POST",
+    body:formData
+  });
+  const data = await res.json();
+
+  if(!res.ok || !data.ok){
+    throw new Error(data.error || "文件上传失败");
+  }
+
+  return data.file;
+}
+
 fileInput.addEventListener("change", async () => {
 
   const file = fileInput.files[0];
@@ -1227,6 +1577,7 @@ fileInput.addEventListener("change", async () => {
   }
 
   const previousFile = selectedFile;
+  const previousFileId = selectedFileId;
   const previousFileText = selectedFileText;
   const previousFileChunks = selectedFileChunks;
   const previousRelevantChunkCount = lastRelevantChunkCount;
@@ -1234,6 +1585,7 @@ fileInput.addEventListener("change", async () => {
   try{
 
     selectedFile = file;
+    selectedFileId = null;
     selectedFileText = "";
     setContextStatus("\u6b63\u5728\u8bfb\u53d6\uff1a" + file.name);
 
@@ -1259,9 +1611,23 @@ fileInput.addEventListener("change", async () => {
       throw new Error("没有提取到文本内容");
     }
     selectedFileChunks = splitTextIntoChunks(selectedFileText);
+    const savedFile = await uploadFileToLibrary(file, selectedFileText);
+    selectedFileId = savedFile.id;
+    filesLibrary = [
+      {
+        ...savedFile,
+        conversation_id: currentConversationId || null
+      },
+      ...filesLibrary.filter(item => item.id !== savedFile.id)
+    ];
+    selectedFileIds = [
+      savedFile.id,
+      ...selectedFileIds.filter(id => id !== savedFile.id)
+    ];
+    renderFilesLibrary();
     clearFileBtn.style.display = "inline-block";
     setContextStatus(
-      "\u5df2\u8bfb\u53d6\uff1a" + file.name + "\uff08" + selectedFileText.length + " \u5b57\u7b26\uff0c" + selectedFileChunks.length + " \u6bb5\uff09"
+      "\u6587\u4ef6\u5df2\u4fdd\u5b58\u5230\u6587\u4ef6\u5e93\uff0c\u5e76\u5df2\u9009\u62e9"
     );
 
   }catch(err){
@@ -1269,11 +1635,13 @@ fileInput.addEventListener("change", async () => {
     alert("文件读取失败：" + err.message);
 
     selectedFile = previousFile;
+    selectedFileId = previousFileId;
     selectedFileText = previousFileText;
     selectedFileChunks = previousFileChunks;
     lastRelevantChunkCount = previousRelevantChunkCount;
     fileInput.value = "";
     clearFileBtn.style.display = previousFile ? "inline-block" : "none";
+    renderFilesLibrary();
     setContextStatus(getCurrentContextStatus());
   }
 });
@@ -1355,6 +1723,9 @@ function clearWebContext(){
 
 function resetTransientContext(){
   clearSelectedFile();
+  selectedFileIds = [];
+  selectedFileId = null;
+  renderFilesLibrary();
   clearSelectedImage();
   clearWebContext();
   setContextStatus("");
@@ -1513,7 +1884,9 @@ input.addEventListener("keydown", e => {
 sendBtn.addEventListener("click", sendMessage);
 newChatBtn.addEventListener("click", createNewConversation);
 viewSummaryBtn.addEventListener("click", viewCurrentSummary);
+refreshFilesBtn.addEventListener("click", loadFilesLibrary);
 loadConversations();
+loadFilesLibrary();
 
 function toggleTheme(){
   document.body.classList.toggle("dark");
@@ -1734,18 +2107,21 @@ async function sendMessage(){
     !message &&
     !imageToSend &&
     !fileTextToSend &&
+    selectedFileIds.length === 0 &&
     !webTextForAI &&
     !networkTextForAI
   ){
     return;
   }
 
-  addUserMessage(message, imageToSend, fileInfoForUI);
-
   const userMessageForRequest =
     message ||
     (fileToSend ? "\u8bf7\u603b\u7ed3\u8fd9\u4e2a\u6587\u4ef6\u3002" :
-    (webPageToSend ? "\u8bf7\u603b\u7ed3\u8fd9\u4e2a\u7f51\u9875\u3002" : "\u8bf7\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\u3002"));
+    (selectedFileIds.length ? "\u8bf7\u57fa\u4e8e\u5df2\u9009\u62e9\u7684\u6587\u4ef6\u56de\u7b54\u3002" :
+    (webPageToSend ? "\u8bf7\u603b\u7ed3\u8fd9\u4e2a\u7f51\u9875\u3002" : "\u8bf7\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\u3002")));
+
+  const displayMessage = message || (imageToSend ? "" : userMessageForRequest);
+  addUserMessage(displayMessage, imageToSend, fileInfoForUI);
 
   conversation.push({
     role:"user",
@@ -1790,6 +2166,7 @@ async function sendMessage(){
         ],
         model:modelSelect.value,
         image:imageToSend,
+        fileIds:selectedFileIds,
         file:fileToSend ? {
           name:fileToSend.name,
           type:fileToSend.type,

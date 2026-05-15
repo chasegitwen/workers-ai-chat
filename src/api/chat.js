@@ -1,4 +1,5 @@
 import { corsHeaders } from "../utils/response.js";
+import { getFileTextsByIds } from "./files.js";
 import {
   ensureConversation,
   saveMessage,
@@ -122,6 +123,7 @@ export async function handleChat(request, env) {
     model,
     image,
     file,
+    fileIds = [],
     conversationId
   } = await request.json();
 
@@ -224,13 +226,39 @@ export async function handleChat(request, env) {
     defaultSystemMessage
   ];
 
+  const ragFiles = [];
+
   if (file && file.text) {
+    ragFiles.push(file);
+  }
+
+  if (Array.isArray(fileIds) && fileIds.length) {
+    const storedFiles = await getFileTextsByIds(env, fileIds);
+
+    for (const storedFile of storedFiles) {
+      const duplicate = ragFiles.some(item =>
+        item.name === storedFile.name &&
+        (item.text || "").trim() === (storedFile.text || "").trim()
+      );
+
+      if (!duplicate) {
+        ragFiles.push(storedFile);
+      }
+    }
+  }
+
+  if (ragFiles.length) {
     const filePrompt =
-      "\u7528\u6237\u4e0a\u4f20\u4e86\u4e00\u4e2a\u6587\u4ef6\u3002\u4e0b\u9762\u662f\u4ece\u6587\u4ef6\u4e2d\u63d0\u53d6\u51fa\u7684\u76f8\u5173\u7247\u6bb5\uff0c\u8bf7\u4f18\u5148\u4f9d\u636e\u8fd9\u4e9b\u7247\u6bb5\u56de\u7b54\u7528\u6237\u95ee\u9898\uff1b\u5982\u679c\u7247\u6bb5\u4fe1\u606f\u4e0d\u8db3\uff0c\u8bf7\u660e\u786e\u8bf4\u660e\u3002\n\n" +
-      "\u6587\u4ef6\u540d\uff1a" + file.name + "\n" +
-      "\u6587\u4ef6\u7c7b\u578b\uff1a" + (file.type || "unknown") + "\n\n" +
-      "\u8d44\u6599\u5185\u5bb9\u5982\u4e0b\uff1a\n" +
-      file.text.slice(0, 12000);
+      "\u7528\u6237\u9009\u62e9\u4e86\u6587\u4ef6\u4e0a\u4e0b\u6587\u3002\u4e0b\u9762\u662f\u4ece\u6587\u4ef6\u4e2d\u63d0\u53d6\u51fa\u7684\u76f8\u5173\u7247\u6bb5\uff0c\u8bf7\u4f18\u5148\u4f9d\u636e\u8fd9\u4e9b\u7247\u6bb5\u56de\u7b54\u7528\u6237\u95ee\u9898\uff1b\u5982\u679c\u7247\u6bb5\u4fe1\u606f\u4e0d\u8db3\uff0c\u8bf7\u660e\u786e\u8bf4\u660e\u3002\n\n" +
+      ragFiles.map((item, index) => {
+        return [
+          "\u3010\u6587\u4ef6 " + (index + 1) + "\u3011",
+          "\u6587\u4ef6\u540d\uff1a" + item.name,
+          "\u6587\u4ef6\u7c7b\u578b\uff1a" + (item.type || "unknown"),
+          "\u8d44\u6599\u5185\u5bb9\uff1a",
+          (item.text || "").slice(0, 12000)
+        ].join("\n");
+      }).join("\n\n");
 
     modelMessages.push({
       role: "user",

@@ -1,4 +1,5 @@
 import { handleChat } from "./api/chat.js";
+import { handleFiles } from "./api/files.js";
 import { handleFetchUrl } from "./api/fetchUrl.js";
 import { handleHistory } from "./api/history.js";
 import { handleSearchAndFetch } from "./api/searchAndFetch.js";
@@ -15,6 +16,14 @@ export default {
 
       if (historyResponse) {
         return historyResponse;
+      }
+    }
+
+    if (url.pathname.startsWith("/api/files")) {
+      const filesResponse = await handleFiles(request, env, url);
+
+      if (filesResponse) {
+        return filesResponse;
       }
     }
 

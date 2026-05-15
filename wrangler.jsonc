@@ -23,6 +23,12 @@
 			"database_name": "web-ai-assistant-history",
 			"database_id": "978c2e6d-3c8d-493d-975c-eac5375f75fb"
 		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "FILES_BUCKET",
+			"bucket_name": "workers-ai-files"
+		}
 	]
 	/**
 	 * Smart Placement

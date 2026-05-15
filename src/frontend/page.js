@@ -22,22 +22,24 @@ export function htmlPage() {
     border:none;
     background:#666;
     color:white;
-    padding:0 18px;
-    border-radius:14px;
-    font-size:16px;
+    min-height:38px;
+    padding:0 14px;
+    border-radius:999px;
+    font-size:14px;
     cursor:pointer;
-    margin-right:8px;
+    flex:0 0 auto;
   }
 
   #fileBtn{
     border:none;
     background:#4b5563;
     color:white;
-    padding:0 18px;
-    border-radius:14px;
-    font-size:16px;
+    min-height:38px;
+    padding:0 14px;
+    border-radius:999px;
+    font-size:14px;
     cursor:pointer;
-    margin-right:8px;
+    flex:0 0 auto;
   }
   
   #fileStatus{
@@ -307,11 +309,67 @@ body.dark{
 }
 
 .inputBar{
-  display:flex;
-  gap:10px;
   padding:16px;
   border-top:1px solid var(--border);
   background:var(--panel);
+}
+
+.inputShell{
+  width:100%;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  padding:10px;
+  border:1px solid var(--border);
+  border-radius:24px;
+  background:var(--panel);
+  box-shadow:0 6px 22px rgba(0,0,0,.06);
+}
+
+.inputActions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex:0 0 auto;
+}
+
+.inputPrimaryActions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex:0 1 auto;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+}
+
+.toolBtn{
+  min-height:38px;
+  border:none;
+  color:white;
+  padding:0 14px;
+  border-radius:999px;
+  font-size:14px;
+  cursor:pointer;
+  white-space:nowrap;
+  flex:0 0 auto;
+}
+
+.toolBtn:disabled{
+  opacity:.6;
+  cursor:not-allowed;
+}
+
+#searchBtn{
+  background:#7c3aed;
+}
+
+#webAnswerBtn{
+  background:#dc2626;
+}
+
+#fetchUrlBtn{
+  background:#059669;
 }
 
 #modelSelect{
@@ -325,10 +383,10 @@ body.dark{
 }
 
 #input{
-  flex:1;
-  padding:14px;
-  border:1px solid var(--border);
-  border-radius:14px;
+  flex:1 1 260px;
+  min-width:160px;
+  padding:12px 6px;
+  border:none;
   font-size:16px;
   outline:none;
   background:transparent;
@@ -339,10 +397,12 @@ body.dark{
   border:none;
   background:var(--primary);
   color:white;
-  padding:0 24px;
-  border-radius:14px;
+  min-height:40px;
+  padding:0 20px;
+  border-radius:999px;
   font-size:16px;
   cursor:pointer;
+  flex:0 0 auto;
 }
 
 #sendBtn:hover{
@@ -375,6 +435,24 @@ body.dark{
 
   .topbar{
     padding:0 16px;
+  }
+
+  .inputBar{
+    padding:12px;
+  }
+
+  .inputShell{
+    align-items:stretch;
+  }
+
+  .inputActions,
+  .inputPrimaryActions{
+    flex-wrap:wrap;
+  }
+
+  #input{
+    order:-1;
+    flex-basis:100%;
   }
 }
 
@@ -462,91 +540,6 @@ body.dark{
 
       <div class="inputBar">
 
-  <input
-    id="searchInput"
-    placeholder="搜索关键词..."
-    style="
-      max-width:180px;
-      padding:14px;
-      border:1px solid var(--border);
-      border-radius:14px;
-      font-size:14px;
-      outline:none;
-      background:transparent;
-      color:var(--text);
-    "
-  />
-
-  <button
-    id="searchBtn"
-    type="button"
-    style="
-      border:none;
-      background:#7c3aed;
-      color:white;
-      padding:0 16px;
-      border-radius:14px;
-      font-size:14px;
-      cursor:pointer;
-    "
-  >
-    搜索
-  </button>
-
-  <button
-    id="webAnswerBtn"
-    type="button"
-    style="
-      border:none;
-      background:#dc2626;
-      color:white;
-      padding:0 16px;
-      border-radius:14px;
-      font-size:14px;
-      cursor:pointer;
-    "
-  >
-    联网回答
-  </button>
-
-
-
-  <input
-    id="urlInput"
-    placeholder="粘贴网页 URL..."
-    style="
-      max-width:180px;
-      padding:14px;
-      border:1px solid var(--border);
-      border-radius:14px;
-      font-size:14px;
-      outline:none;
-      background:transparent;
-      color:var(--text);
-    "
-  />
-
-  <button
-    id="fetchUrlBtn"
-    type="button"
-    style="
-      border:none;
-      background:#059669;
-      color:white;
-      padding:0 16px;
-      border-radius:14px;
-      font-size:14px;
-      cursor:pointer;
-    "
-  >
-    抓取网页
-  </button>
-
-  <input
-    id="input"
-    placeholder="输入问题，按 Enter 发送..."
-  />
-
   <input id="imageInput" type="file" accept="image/*" hidden />
 
   <input
@@ -556,28 +549,53 @@ body.dark{
     hidden
   />
 
-  <button id="fileBtn" type="button">
-    文件
-  </button>
+  <div class="inputShell">
 
-  <div id="fileStatus"></div>
+    <div class="inputActions">
+      <button id="fileBtn" type="button">
+        &#x6587;&#x4EF6;
+      </button>
 
-  <button id="clearFileBtn" type="button">清除</button>
+      <button id="imageBtn" type="button">
+        &#x56FE;&#x7247;
+      </button>
+    </div>
 
-  <button id="imageBtn" type="button">
-    图片
-  </button>
+    <input
+      id="input"
+      placeholder="&#x8F93;&#x5165;&#x95EE;&#x9898;&#x3001;&#x641C;&#x7D22;&#x5173;&#x952E;&#x8BCD;&#x6216;&#x7F51;&#x9875; URL..."
+    />
 
-  <div id="imagePreviewBox">
-    <img id="imagePreview" />
-    <button id="removeImageBtn" type="button" title="移除图片">×</button>
+    <div class="inputPrimaryActions">
+      <button id="searchBtn" class="toolBtn" type="button">
+        &#x641C;&#x7D22;
+      </button>
+
+      <button id="webAnswerBtn" class="toolBtn" type="button">
+        &#x8054;&#x7F51;&#x56DE;&#x7B54;
+      </button>
+
+      <button id="fetchUrlBtn" class="toolBtn" type="button">
+        &#x6293;&#x53D6;&#x7F51;&#x9875;
+      </button>
+
+      <button id="sendBtn" type="button">
+        &#x53D1;&#x9001;
+      </button>
+    </div>
+
+    <div id="imagePreviewBox">
+      <img id="imagePreview" />
+      <button id="removeImageBtn" type="button" title="&#x79FB;&#x9664;&#x56FE;&#x7247;">&times;</button>
+    </div>
+
+    <div id="fileStatus"></div>
+
+    <button id="clearFileBtn" type="button">&#x6E05;&#x9664;</button>
+
+    <div id="uploadStatus"></div>
+
   </div>
-
-  <div id="uploadStatus"></div>
-
-  <button id="sendBtn">
-    发送
-  </button>
 
 </div>
 
@@ -597,7 +615,6 @@ const chat = document.getElementById("chat");
 
 const input = document.getElementById("input");
 
-const searchInput = document.getElementById("searchInput");
 const searchBtn = document.getElementById("searchBtn");
 
 const webAnswerBtn = document.getElementById("webAnswerBtn");
@@ -606,7 +623,6 @@ let webSearchSources = [];
 
 const searchResults = document.getElementById("searchResults");
 
-const urlInput = document.getElementById("urlInput");
 const fetchUrlBtn = document.getElementById("fetchUrlBtn");
 
 let selectedWebPage = null;
@@ -692,7 +708,7 @@ fileBtn.addEventListener("click", () => {
 
 async function searchWeb(){
 
-  const query = searchInput.value.trim();
+  const query = input.value.trim();
 
   if(!query){
     alert("请输入搜索关键词");
@@ -700,7 +716,7 @@ async function searchWeb(){
   }
 
   searchBtn.disabled = true;
-  searchBtn.textContent = "搜索中...";
+  searchBtn.textContent = "\u641c\u7d22\u4e2d...";
   fileStatus.textContent = "正在搜索网页...";
 
   try{
@@ -734,7 +750,7 @@ async function searchWeb(){
   }
 
   searchBtn.disabled = false;
-  searchBtn.textContent = "搜索";
+  searchBtn.textContent = "\u641c\u7d22";
 }
 
 function renderSearchResults(results){
@@ -783,7 +799,7 @@ function renderSearchResults(results){
     link.textContent = item.url;
 
     const btn = document.createElement("button");
-    btn.textContent = "抓取此网页";
+    btn.textContent = "\u6293\u53d6\u6b64\u7f51\u9875";
     btn.type = "button";
     btn.style.marginTop = "8px";
     btn.style.border = "none";
@@ -795,8 +811,7 @@ function renderSearchResults(results){
 
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      urlInput.value = item.url;
-      await fetchWebPage();
+      await fetchWebPage(item.url);
     });
 
     card.appendChild(h);
@@ -817,7 +832,7 @@ searchBtn.addEventListener("click", searchWeb);
 webAnswerBtn.addEventListener("click", webAnswer);
 async function webAnswer(){
 
-  const query = input.value.trim() || searchInput.value.trim();
+  const query = input.value.trim();
 
   if(!query){
     alert("请先在聊天框或搜索框输入问题");
@@ -825,7 +840,7 @@ async function webAnswer(){
   }
 
   webAnswerBtn.disabled = true;
-  webAnswerBtn.textContent = "联网中...";
+  webAnswerBtn.textContent = "\u8054\u7f51\u4e2d...";
   fileStatus.textContent = "正在联网搜索并抓取网页...";
 
   try{
@@ -878,13 +893,13 @@ async function webAnswer(){
   }
 
   webAnswerBtn.disabled = false;
-  webAnswerBtn.textContent = "联网回答";
+  webAnswerBtn.textContent = "\u8054\u7f51\u56de\u7b54";
 }
 
 fetchUrlBtn.addEventListener("click", fetchWebPage);
 
-async function fetchWebPage(){
-  const pageUrl = urlInput.value.trim();
+async function fetchWebPage(pageUrlFromResult){
+  const pageUrl = (typeof pageUrlFromResult === "string" ? pageUrlFromResult : input.value).trim();
 
   if(!pageUrl){
     alert("请先输入网页 URL");
@@ -897,7 +912,7 @@ async function fetchWebPage(){
   }
 
   fetchUrlBtn.disabled = true;
-  fetchUrlBtn.textContent = "抓取中...";
+  fetchUrlBtn.textContent = "\u6293\u53d6\u4e2d...";
   fileStatus.textContent = "正在抓取网页...";
 
   try{
@@ -939,7 +954,7 @@ async function fetchWebPage(){
   }
 
   fetchUrlBtn.disabled = false;
-  fetchUrlBtn.textContent = "抓取网页";
+  fetchUrlBtn.textContent = "\u6293\u53d6\u7f51\u9875";
 }
 
 async function extractPdfText(file){

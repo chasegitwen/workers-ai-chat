@@ -260,7 +260,7 @@ export async function handleFiles(request, env, url) {
       createdAt
     ).run();
 
-    await saveFileChunks(env.DB, id, textContent);
+    const chunkCount = await saveFileChunks(env.DB, id, textContent);
 
     return jsonResponse({
       ok: true,
@@ -269,18 +269,33 @@ export async function handleFiles(request, env, url) {
         filename,
         content_type: file.type || "application/octet-stream",
         size: file.size,
-        created_at: createdAt
+        created_at: createdAt,
+        chunk_count: chunkCount
       }
     });
   }
 
   if (request.method === "GET" && url.pathname === "/api/files") {
+    const q = (url.searchParams.get("q") || "").trim();
+    const like = "%" + q + "%";
     const result = await env.DB.prepare(
-      `SELECT id, conversation_id, filename, content_type, size, created_at
-       FROM files
-       ORDER BY created_at DESC
+      `SELECT
+         f.id,
+         f.conversation_id,
+         f.filename,
+         f.content_type,
+         f.size,
+         f.created_at,
+         (
+           SELECT COUNT(*)
+           FROM file_chunks fc
+           WHERE fc.file_id = f.id
+         ) AS chunk_count
+       FROM files f
+       WHERE (? = '' OR f.filename LIKE ? OR f.text_content LIKE ?)
+       ORDER BY f.created_at DESC
        LIMIT 50`
-    ).all();
+    ).bind(q, like, like).all();
 
     return jsonResponse({
       ok: true,
@@ -309,7 +324,73 @@ export async function handleFiles(request, env, url) {
     });
   }
 
+  const chunksMatch = url.pathname.match(/^\/api\/files\/([^/]+)\/chunks$/);
+
+  if (request.method === "GET" && chunksMatch) {
+    const file = await env.DB.prepare(
+      `SELECT id, filename, content_type, size, created_at
+       FROM files
+       WHERE id = ?`
+    ).bind(chunksMatch[1]).first();
+
+    if (!file) {
+      return jsonResponse({
+        ok: false,
+        error: "file not found"
+      }, 404);
+    }
+
+    const chunks = await env.DB.prepare(
+      `SELECT
+         chunk_index,
+         substr(content, 1, 300) AS content_preview,
+         length(content) AS length
+       FROM file_chunks
+       WHERE file_id = ?
+       ORDER BY chunk_index ASC`
+    ).bind(file.id).all();
+
+    return jsonResponse({
+      ok: true,
+      file,
+      chunks: chunks.results || []
+    });
+  }
+
   const fileMatch = url.pathname.match(/^\/api\/files\/([^/]+)$/);
+
+  if (request.method === "GET" && fileMatch) {
+    const file = await env.DB.prepare(
+      `SELECT
+         f.id,
+         f.conversation_id,
+         f.filename,
+         f.content_type,
+         f.size,
+         f.r2_key,
+         f.created_at,
+         substr(COALESCE(f.text_content, ''), 1, 1000) AS text_preview,
+         (
+           SELECT COUNT(*)
+           FROM file_chunks fc
+           WHERE fc.file_id = f.id
+         ) AS chunk_count
+       FROM files f
+       WHERE f.id = ?`
+    ).bind(fileMatch[1]).first();
+
+    if (!file) {
+      return jsonResponse({
+        ok: false,
+        error: "file not found"
+      }, 404);
+    }
+
+    return jsonResponse({
+      ok: true,
+      file
+    });
+  }
 
   if (request.method === "DELETE" && fileMatch) {
     const file = await env.DB.prepare(
@@ -324,9 +405,14 @@ export async function handleFiles(request, env, url) {
     }
 
     await env.FILES_BUCKET.delete(file.r2_key);
-    await env.DB.prepare(
-      "DELETE FROM files WHERE id = ?"
-    ).bind(file.id).run();
+    await env.DB.batch([
+      env.DB.prepare(
+        "DELETE FROM file_chunks WHERE file_id = ?"
+      ).bind(file.id),
+      env.DB.prepare(
+        "DELETE FROM files WHERE id = ?"
+      ).bind(file.id)
+    ]);
 
     return jsonResponse({
       ok: true

@@ -322,6 +322,8 @@ body.dark{
   min-height:0;
   max-height:260px;
   overflow:hidden;
+  display:flex;
+  flex-direction:column;
   border-top:1px solid var(--border);
   border-bottom:1px solid var(--border);
   padding:12px 0;
@@ -356,12 +358,63 @@ body.dark{
   margin-bottom:8px;
 }
 
+.librarySearch{
+  display:flex;
+  gap:6px;
+  margin-bottom:8px;
+}
+
+.librarySearch input,
+.librarySort{
+  min-width:0;
+  border:1px solid var(--border);
+  background:transparent;
+  color:var(--text);
+  border-radius:10px;
+  padding:7px 9px;
+  font-size:12px;
+}
+
+.librarySearch input{
+  flex:1;
+}
+
+.librarySearch button,
+.clearSelectedFilesBtn{
+  flex:0 0 auto;
+  border:1px solid var(--border);
+  background:transparent;
+  color:var(--text);
+  border-radius:10px;
+  padding:7px 9px;
+  font-size:12px;
+  cursor:pointer;
+}
+
+.librarySort{
+  width:100%;
+  margin-bottom:8px;
+}
+
+.librarySelectedRow{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+}
+
+.clearSelectedFilesBtn{
+  display:none;
+  padding:5px 8px;
+}
+
 .filesList{
   display:flex;
   flex-direction:column;
   gap:8px;
+  flex:1 1 auto;
   min-height:0;
-  max-height:180px;
+  max-height:none;
   overflow-y:auto;
 }
 
@@ -397,6 +450,7 @@ body.dark{
 
 .fileLibraryActions{
   display:flex;
+  flex-wrap:wrap;
   gap:6px;
   margin-top:8px;
 }
@@ -416,6 +470,35 @@ body.dark{
   background:var(--primary);
   border-color:var(--primary);
   color:white;
+}
+
+.fileDetailPanel{
+  margin-top:8px;
+  border-top:1px solid var(--border);
+  padding-top:8px;
+  color:var(--muted);
+  font-size:11px;
+  line-height:1.5;
+}
+
+.fileDetailTitle{
+  color:var(--text);
+  font-weight:600;
+  margin-bottom:4px;
+}
+
+.filePreview,
+.chunkPreview{
+  margin-top:6px;
+  max-height:72px;
+  overflow:auto;
+  white-space:pre-wrap;
+  word-break:break-word;
+}
+
+.chunkPreview{
+  border-top:1px dashed var(--border);
+  padding-top:6px;
 }
 
 .fileLibraryActions .deleteFileAction:hover{
@@ -736,7 +819,19 @@ body.dark{
             <strong>&#x6587;&#x4EF6;&#x5E93;</strong>
             <button id="refreshFilesBtn" type="button">&#x5237;&#x65B0;</button>
           </div>
-          <div id="selectedFilesCount" class="libraryCount">&#x5DF2;&#x9009;&#x62E9; 0 &#x4E2A;&#x6587;&#x4EF6;</div>
+          <div class="librarySearch">
+            <input id="fileSearchInput" type="search" placeholder="&#x641C;&#x7D22;&#x6587;&#x4EF6;" />
+            <button id="fileSearchBtn" type="button">&#x641C;&#x7D22;</button>
+          </div>
+          <select id="fileSortSelect" class="librarySort">
+            <option value="latest">&#x6700;&#x65B0;&#x4F18;&#x5148;</option>
+            <option value="name">&#x6587;&#x4EF6;&#x540D; A-Z</option>
+            <option value="size">&#x6587;&#x4EF6;&#x5927;&#x5C0F;</option>
+          </select>
+          <div class="librarySelectedRow">
+            <div id="selectedFilesCount" class="libraryCount">&#x5DF2;&#x9009;&#x62E9; 0 &#x4E2A;&#x6587;&#x4EF6;</div>
+            <button id="clearSelectedFilesBtn" class="clearSelectedFilesBtn" type="button">&#x6E05;&#x7A7A;</button>
+          </div>
           <div id="filesList" class="filesList"></div>
         </div>
 
@@ -892,7 +987,11 @@ const chat = document.getElementById("chat");
 const newChatBtn = document.getElementById("newChatBtn");
 const conversationList = document.getElementById("conversationList");
 const refreshFilesBtn = document.getElementById("refreshFilesBtn");
+const fileSearchInput = document.getElementById("fileSearchInput");
+const fileSearchBtn = document.getElementById("fileSearchBtn");
+const fileSortSelect = document.getElementById("fileSortSelect");
 const selectedFilesCount = document.getElementById("selectedFilesCount");
+const clearSelectedFilesBtn = document.getElementById("clearSelectedFilesBtn");
 const filesList = document.getElementById("filesList");
 const summaryStatus = document.getElementById("summaryStatus");
 const viewSummaryBtn = document.getElementById("viewSummaryBtn");
@@ -940,6 +1039,11 @@ let selectedFileChunks = [];
 let lastRelevantChunkCount = 0;
 let filesLibrary = [];
 let selectedFileIds = [];
+let fileLibraryQuery = "";
+let fileLibrarySort = "latest";
+let expandedFileId = null;
+let fileDetailsCache = {};
+let fileChunksCache = {};
 
 function setContextStatus(text){
   contextStatus.textContent = text || "";
@@ -991,10 +1095,83 @@ function formatDate(value){
 
 function updateSelectedFilesStatus(){
   selectedFilesCount.textContent = "\u5df2\u9009\u62e9 " + selectedFileIds.length + " \u4e2a\u6587\u4ef6";
+  clearSelectedFilesBtn.style.display = selectedFileIds.length ? "inline-block" : "none";
 }
 
 function setSelectedFilesStatus(){
   setContextStatus(selectedFileIds.length ? "\u5df2\u9009\u62e9 " + selectedFileIds.length + " \u4e2a\u6587\u4ef6" : getCurrentContextStatus());
+}
+
+function getSortedFilesLibrary(){
+  return [...filesLibrary].sort((a, b) => {
+    if(fileLibrarySort === "name"){
+      return String(a.filename || "").localeCompare(String(b.filename || ""));
+    }
+
+    if(fileLibrarySort === "size"){
+      return Number(b.size || 0) - Number(a.size || 0);
+    }
+
+    return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+  });
+}
+
+function renderFileDetailPanel(fileId){
+  const panel = document.createElement("div");
+  panel.className = "fileDetailPanel";
+
+  const detail = fileDetailsCache[fileId];
+  const chunks = fileChunksCache[fileId];
+
+  if(!detail || !chunks){
+    panel.textContent = "\u6b63\u5728\u52a0\u8f7d\u8be6\u60c5...";
+    return panel;
+  }
+
+  const title = document.createElement("div");
+  title.className = "fileDetailTitle";
+  title.textContent = detail.filename || "file";
+  panel.appendChild(title);
+
+  const meta = document.createElement("div");
+  meta.textContent =
+    "\u7c7b\u578b\uff1a" + (detail.content_type || "-") +
+    " / \u5927\u5c0f\uff1a" + formatFileSize(detail.size) +
+    " / chunk\uff1a" + Number(detail.chunk_count || 0);
+  panel.appendChild(meta);
+
+  const created = document.createElement("div");
+  created.textContent = "\u4e0a\u4f20\u65f6\u95f4\uff1a" + formatDate(detail.created_at);
+  panel.appendChild(created);
+
+  const preview = document.createElement("div");
+  preview.className = "filePreview";
+  preview.textContent = detail.text_preview || "\u6682\u65e0\u6587\u672c\u9884\u89c8";
+  panel.appendChild(preview);
+
+  const chunkTitle = document.createElement("div");
+  chunkTitle.className = "fileDetailTitle";
+  chunkTitle.textContent = "\u7247\u6bb5\u9884\u89c8";
+  panel.appendChild(chunkTitle);
+
+  (chunks || []).slice(0, 5).forEach(chunk => {
+    const chunkDiv = document.createElement("div");
+    chunkDiv.className = "chunkPreview";
+    chunkDiv.textContent =
+      "Chunk " + chunk.chunk_index +
+      " (" + Number(chunk.length || 0) + " chars)" +
+      String.fromCharCode(10) +
+      (chunk.content_preview || "");
+    panel.appendChild(chunkDiv);
+  });
+
+  if(!chunks.length){
+    const empty = document.createElement("div");
+    empty.textContent = "\u6682\u65e0 chunk";
+    panel.appendChild(empty);
+  }
+
+  return panel;
 }
 
 function renderFilesLibrary(){
@@ -1009,7 +1186,7 @@ function renderFilesLibrary(){
     return;
   }
 
-  filesLibrary.forEach(file => {
+  getSortedFilesLibrary().forEach(file => {
     const selected = selectedFileIds.includes(file.id);
     const item = document.createElement("div");
     item.className = "fileLibraryItem" + (selected ? " selected" : "");
@@ -1021,7 +1198,10 @@ function renderFilesLibrary(){
 
     const meta = document.createElement("div");
     meta.className = "fileLibraryMeta";
-    meta.textContent = formatFileSize(file.size) + " · " + formatDate(file.created_at);
+    meta.textContent =
+      formatFileSize(file.size) +
+      " / chunk " + Number(file.chunk_count || 0) +
+      " / " + formatDate(file.created_at);
 
     const actions = document.createElement("div");
     actions.className = "fileLibraryActions";
@@ -1032,6 +1212,11 @@ function renderFilesLibrary(){
     selectBtn.textContent = selected ? "\u53d6\u6d88" : "\u9009\u62e9";
     selectBtn.addEventListener("click", () => toggleLibraryFile(file.id));
 
+    const detailBtn = document.createElement("button");
+    detailBtn.type = "button";
+    detailBtn.textContent = expandedFileId === file.id ? "\u6536\u8d77" : "\u8be6\u60c5";
+    detailBtn.addEventListener("click", () => toggleFileDetails(file.id));
+
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
     deleteBtn.className = "deleteFileAction";
@@ -1039,17 +1224,25 @@ function renderFilesLibrary(){
     deleteBtn.addEventListener("click", () => deleteLibraryFile(file.id, file.filename || "file"));
 
     actions.appendChild(selectBtn);
+    actions.appendChild(detailBtn);
     actions.appendChild(deleteBtn);
     item.appendChild(name);
     item.appendChild(meta);
     item.appendChild(actions);
+
+    if(expandedFileId === file.id){
+      item.appendChild(renderFileDetailPanel(file.id));
+    }
+
     filesList.appendChild(item);
   });
 }
 
-async function loadFilesLibrary(){
+async function loadFilesLibrary(options = {}){
   try{
-    const res = await fetch("/api/files");
+    const query = typeof options.query === "string" ? options.query : fileLibraryQuery;
+    const url = query ? "/api/files?q=" + encodeURIComponent(query) : "/api/files";
+    const res = await fetch(url);
     const data = await res.json();
 
     if(!res.ok || !data.ok){
@@ -1057,14 +1250,68 @@ async function loadFilesLibrary(){
     }
 
     filesLibrary = data.files || [];
-    const existingIds = new Set(filesLibrary.map(file => file.id));
-    selectedFileIds = selectedFileIds.filter(id => existingIds.has(id));
-    selectedFileId = selectedFileId && existingIds.has(selectedFileId) ? selectedFileId : null;
+
+    if(options.pruneSelection || !query){
+      const existingIds = new Set(filesLibrary.map(file => file.id));
+      selectedFileIds = selectedFileIds.filter(id => existingIds.has(id));
+      selectedFileId = selectedFileId && existingIds.has(selectedFileId) ? selectedFileId : null;
+    }
+
     renderFilesLibrary();
     setSelectedFilesStatus();
   }catch(err){
     setContextStatus("\u6587\u4ef6\u5e93\u52a0\u8f7d\u5931\u8d25");
     console.log("load files failed", err);
+  }
+}
+
+function searchFilesLibrary(){
+  fileLibraryQuery = fileSearchInput.value.trim();
+  loadFilesLibrary({ query:fileLibraryQuery, pruneSelection:false });
+}
+
+function clearSelectedLibraryFiles(){
+  selectedFileIds = [];
+  selectedFileId = null;
+  renderFilesLibrary();
+  setSelectedFilesStatus();
+}
+
+async function toggleFileDetails(fileId){
+  if(expandedFileId === fileId){
+    expandedFileId = null;
+    renderFilesLibrary();
+    return;
+  }
+
+  expandedFileId = fileId;
+  renderFilesLibrary();
+
+  if(fileDetailsCache[fileId] && fileChunksCache[fileId]){
+    return;
+  }
+
+  try{
+    const detailRes = await fetch("/api/files/" + encodeURIComponent(fileId));
+    const detailData = await detailRes.json();
+
+    if(!detailRes.ok || !detailData.ok){
+      throw new Error(detailData.error || "\u6587\u4ef6\u8be6\u60c5\u52a0\u8f7d\u5931\u8d25");
+    }
+
+    const chunksRes = await fetch("/api/files/" + encodeURIComponent(fileId) + "/chunks");
+    const chunksData = await chunksRes.json();
+
+    if(!chunksRes.ok || !chunksData.ok){
+      throw new Error(chunksData.error || "chunk \u9884\u89c8\u52a0\u8f7d\u5931\u8d25");
+    }
+
+    fileDetailsCache[fileId] = detailData.file;
+    fileChunksCache[fileId] = chunksData.chunks || [];
+    renderFilesLibrary();
+  }catch(err){
+    setContextStatus("\u6587\u4ef6\u8be6\u60c5\u52a0\u8f7d\u5931\u8d25");
+    console.log("load file detail failed", err);
   }
 }
 
@@ -1104,6 +1351,13 @@ async function deleteLibraryFile(fileId, filename){
     if(selectedFileId === fileId){
       selectedFileId = null;
     }
+
+    if(expandedFileId === fileId){
+      expandedFileId = null;
+    }
+
+    delete fileDetailsCache[fileId];
+    delete fileChunksCache[fileId];
 
     renderFilesLibrary();
     setContextStatus("\u6587\u4ef6\u5df2\u5220\u9664");
@@ -1616,7 +1870,8 @@ fileInput.addEventListener("change", async () => {
     filesLibrary = [
       {
         ...savedFile,
-        conversation_id: currentConversationId || null
+        conversation_id: currentConversationId || null,
+        chunk_count: Number(savedFile.chunk_count || 0)
       },
       ...filesLibrary.filter(item => item.id !== savedFile.id)
     ];
@@ -1885,6 +2140,17 @@ sendBtn.addEventListener("click", sendMessage);
 newChatBtn.addEventListener("click", createNewConversation);
 viewSummaryBtn.addEventListener("click", viewCurrentSummary);
 refreshFilesBtn.addEventListener("click", loadFilesLibrary);
+fileSearchBtn.addEventListener("click", searchFilesLibrary);
+fileSearchInput.addEventListener("keydown", e => {
+  if(e.key === "Enter"){
+    searchFilesLibrary();
+  }
+});
+fileSortSelect.addEventListener("change", () => {
+  fileLibrarySort = fileSortSelect.value;
+  renderFilesLibrary();
+});
+clearSelectedFilesBtn.addEventListener("click", clearSelectedLibraryFiles);
 loadConversations();
 loadFilesLibrary();
 

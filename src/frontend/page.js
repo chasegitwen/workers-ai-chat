@@ -625,6 +625,59 @@ body.dark{
   font-family:Consolas,Monaco,monospace;
 }
 
+.sourceCitations{
+  margin-top:10px;
+  padding-top:8px;
+  border-top:1px solid var(--border);
+  color:var(--muted);
+  font-size:12px;
+}
+
+.sourceCitationsTitle{
+  margin-bottom:6px;
+}
+
+.sourceCitationItem{
+  margin-top:4px;
+}
+
+.sourceCitationBtn{
+  width:100%;
+  min-width:0;
+  border:none;
+  background:transparent;
+  color:var(--muted);
+  cursor:pointer;
+  padding:3px 0;
+  text-align:left;
+  display:block;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  font-size:12px;
+}
+
+.sourceCitationBtn:hover{
+  color:var(--primary);
+}
+
+.sourceCitationPreview{
+  display:none;
+  margin-top:4px;
+  padding:8px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  white-space:pre-wrap;
+  word-break:break-word;
+  max-height:110px;
+  overflow:auto;
+  background:rgba(148,163,184,.08);
+}
+
+.sourceCitationPreview.active{
+  display:block;
+}
+
 .inputBar{
   flex:0 0 auto;
   display:flex;
@@ -1044,6 +1097,7 @@ let fileLibrarySort = "latest";
 let expandedFileId = null;
 let fileDetailsCache = {};
 let fileChunksCache = {};
+let sourcePreviewCache = {};
 
 function setContextStatus(text){
   contextStatus.textContent = text || "";
@@ -2209,6 +2263,90 @@ function addAIMessage(){
   return div;
 }
 
+async function getSourcePreview(source){
+  const key = source.file_id + ":" + source.chunk_index;
+
+  if(sourcePreviewCache[key]){
+    return sourcePreviewCache[key];
+  }
+
+  if(source.preview){
+    sourcePreviewCache[key] = String(source.preview).slice(0, 500);
+    return sourcePreviewCache[key];
+  }
+
+  const res = await fetch("/api/files/" + encodeURIComponent(source.file_id) + "/chunks");
+  const data = await res.json();
+
+  if(!res.ok || !data.ok){
+    throw new Error(data.error || "source preview failed");
+  }
+
+  const chunk = (data.chunks || []).find(item => Number(item.chunk_index) === Number(source.chunk_index));
+  sourcePreviewCache[key] = String(chunk?.content_preview || "").slice(0, 500);
+  return sourcePreviewCache[key];
+}
+
+function renderSources(element, sources){
+  if(!Array.isArray(sources) || !sources.length){
+    return;
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "sourceCitations";
+
+  const title = document.createElement("div");
+  title.className = "sourceCitationsTitle";
+  title.textContent = "\u6765\u6e90\uff1a";
+  wrapper.appendChild(title);
+
+  sources.forEach(source => {
+    const item = document.createElement("div");
+    item.className = "sourceCitationItem";
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "sourceCitationBtn";
+    btn.textContent = "- " + (source.filename || "file") + " \u00b7 chunk " + source.chunk_index;
+    btn.title = btn.textContent;
+
+    const preview = document.createElement("div");
+    preview.className = "sourceCitationPreview";
+
+    btn.addEventListener("click", async () => {
+      preview.classList.toggle("active");
+
+      if(!preview.classList.contains("active") || preview.dataset.loaded){
+        return;
+      }
+
+      preview.textContent = "\u6b63\u5728\u52a0\u8f7d...";
+
+      try{
+        preview.textContent = await getSourcePreview(source) || "\u6682\u65e0\u9884\u89c8";
+      }catch(err){
+        preview.textContent = "\u6765\u6e90\u9884\u89c8\u52a0\u8f7d\u5931\u8d25";
+        console.log("load source preview failed", err);
+      }
+
+      preview.dataset.loaded = "1";
+      scrollBottom();
+    });
+
+    item.appendChild(btn);
+    item.appendChild(preview);
+    wrapper.appendChild(item);
+  });
+
+  element.appendChild(wrapper);
+}
+
+function renderAssistantMessage(element, text, sources){
+  element.innerHTML = marked.parse(text || "");
+  renderSources(element, sources);
+  scrollBottom();
+}
+
 async function typeWriter(element, text){
 
   let current = "";
@@ -2250,12 +2388,71 @@ function readStreamChunk(value){
   }
 }
 
+function parseSseEvent(event){
+  const parsed = {
+    type:"message",
+    data:""
+  };
+  const dataLines = [];
+
+  event.split("\\n").forEach(line => {
+    if(line.startsWith("event:")){
+      parsed.type = line.slice(6).trim() || "message";
+    }else if(line.startsWith("data:")){
+      dataLines.push(line.slice(5).trimStart());
+    }
+  });
+
+  parsed.data = dataLines.join("\\n");
+  return parsed;
+}
+
+function handleStreamEvent(eventText, state, element){
+  const event = parseSseEvent(eventText);
+
+  if(event.type === "sources"){
+    try{
+      const data = JSON.parse(event.data || "{}");
+      state.sources = Array.isArray(data.sources) ? data.sources : [];
+      renderAssistantMessage(element, state.reply, state.sources);
+    }catch(err){
+      console.log("parse sources failed", err);
+    }
+
+    return false;
+  }
+
+  if(event.type === "done"){
+    return true;
+  }
+
+  if(event.data === "[DONE]"){
+    return false;
+  }
+
+  const chunk = readStreamChunk(event.data);
+
+  if(chunk.done){
+    return false;
+  }
+
+  if(chunk.text){
+    state.reply += chunk.text;
+    renderAssistantMessage(element, state.reply, state.sources);
+  }
+
+  return false;
+}
+
 async function streamAIResponse(response, element){
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let reply = "";
+  const state = {
+    reply:"",
+    sources:[]
+  };
 
   while(true){
 
@@ -2270,50 +2467,17 @@ async function streamAIResponse(response, element){
     buffer = events.pop() || "";
 
     for(const event of events){
-
-      const lines = event
-        .split("\\n")
-        .filter(line => line.startsWith("data:"))
-        .map(line => line.slice(5).trimStart());
-
-      for(const line of lines){
-
-        const chunk = readStreamChunk(line);
-
-        if(chunk.done){
-          return reply;
-        }
-
-        if(chunk.text){
-          reply += chunk.text;
-          element.innerHTML = marked.parse(reply);
-          scrollBottom();
-        }
+      if(handleStreamEvent(event, state, element)){
+        return state;
       }
     }
   }
 
   if(buffer.trim()){
-
-    const lines = buffer
-      .split("\\n")
-      .filter(line => line.startsWith("data:"))
-      .map(line => line.slice(5).trimStart());
-
-    for(const line of lines){
-
-      const chunk = readStreamChunk(line);
-
-      if(!chunk.done && chunk.text){
-        reply += chunk.text;
-      }
-    }
-
-    element.innerHTML = marked.parse(reply);
-    scrollBottom();
+    handleStreamEvent(buffer, state, element);
   }
 
-  return reply;
+  return state;
 }
 
 async function sendMessage(){
@@ -2463,7 +2627,8 @@ async function sendMessage(){
 
     aiDiv.innerHTML = "";
 
-    const reply = await streamAIResponse(res, aiDiv);
+    const streamResult = await streamAIResponse(res, aiDiv);
+    const reply = streamResult.reply || "";
 
     if(!reply){
       aiDiv.innerHTML = marked.parse("没有返回内容");
@@ -2471,7 +2636,8 @@ async function sendMessage(){
 
     conversation.push({
       role:"assistant",
-      content:reply || ""
+      content:reply || "",
+      sources:streamResult.sources || []
     });
     webSearchContext = "";
     webSearchSources = [];

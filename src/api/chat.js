@@ -53,7 +53,46 @@ function readStreamText(value) {
   }
 }
 
-function streamWithHistorySave(result, env, conversationId) {
+function buildFileSources(fileChunks) {
+  const seen = new Set();
+
+  return (fileChunks || [])
+    .map(chunk => ({
+      file_id: chunk.fileId,
+      filename: chunk.filename,
+      chunk_index: chunk.chunkIndex,
+      score: Number(chunk.score || 0),
+      preview: String(chunk.content || "").slice(0, 400)
+    }))
+    .filter(source => {
+      if (!source.file_id || source.chunk_index === undefined || source.chunk_index === null) {
+        return false;
+      }
+
+      const key = source.file_id + ":" + source.chunk_index;
+
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+
+      if (a.filename !== b.filename) {
+        return String(a.filename || "").localeCompare(String(b.filename || ""));
+      }
+
+      return Number(a.chunk_index || 0) - Number(b.chunk_index || 0);
+    })
+    .slice(0, 8);
+}
+
+function streamWithHistorySave(result, env, conversationId, sources = []) {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
   let buffer = "";
@@ -95,9 +134,17 @@ function streamWithHistorySave(result, env, conversationId) {
         await maybeUpdateConversationSummary(env, conversationId);
       }
 
+      if (sources.length) {
+        controller.enqueue(encoder.encode(
+          "event: sources\n" +
+          "data: " + JSON.stringify({ sources }) + "\n\n"
+        ));
+      }
+
       controller.enqueue(encoder.encode(
         "data: " + JSON.stringify({ conversationId }) + "\n\n"
       ));
+      controller.enqueue(encoder.encode("event: done\ndata: {}\n\n"));
       controller.enqueue(encoder.encode("data: [DONE]\n\n"));
     }
   }));
@@ -227,6 +274,7 @@ export async function handleChat(request, env) {
   ];
 
   const ragFiles = [];
+  let ragSources = [];
 
   if (file && file.text) {
     ragFiles.push(file);
@@ -239,6 +287,7 @@ export async function handleChat(request, env) {
     });
 
     console.log("[file-rag]", "selected files:", fileIds.length, "retrieved chunks:", fileChunks.length);
+    ragSources = buildFileSources(fileChunks);
 
     if (fileChunks.length) {
       ragFiles.push({
@@ -297,7 +346,7 @@ export async function handleChat(request, env) {
       }
     );
 
-    return new Response(streamWithHistorySave(result, env, conversation.id), {
+    return new Response(streamWithHistorySave(result, env, conversation.id, ragSources), {
       headers: {
         ...corsHeaders(),
         "X-Conversation-Id": conversation.id,

@@ -9,13 +9,8 @@ import {
   buildConversationContext,
   maybeUpdateConversationSummary
 } from "./summary.js";
-
-const allowedModels = [
-  "@cf/zai-org/glm-4.7-flash",
-  "@cf/google/gemma-4-26b-a4b-it",
-  "@cf/moonshotai/kimi-k2.6",
-  "@cf/meta/llama-3.1-8b-instruct-fast"
-];
+import { DEFAULT_TEXT_MODEL } from "../providers/models.js";
+import { callModel } from "../providers/router.js";
 
 const defaultSystemMessage = {
   role: "system",
@@ -200,15 +195,15 @@ export async function handleChat(request, env) {
         )
       );
 
-      const result = await env.AI.run(
-        "@cf/meta/llama-3.2-11b-vision-instruct",
-        {
-          prompt: "\u8bf7\u7528\u4e2d\u6587\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\uff0c\u8bf4\u660e\u56fe\u7247\u4e2d\u7684\u4e3b\u8981\u5bf9\u8c61\u3001\u573a\u666f\u548c\u53ef\u80fd\u7528\u9014\u3002",
-          image: imageBytes,
-          max_tokens: 256
-        }
-      );
-      const reply = result.response || JSON.stringify(result);
+      const result = await callModel({
+        env,
+        provider: "workers-ai",
+        model: "@cf/meta/llama-3.2-11b-vision-instruct",
+        prompt: "\u8bf7\u7528\u4e2d\u6587\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\uff0c\u8bf4\u660e\u56fe\u7247\u4e2d\u7684\u4e3b\u8981\u5bf9\u8c61\u3001\u573a\u666f\u548c\u53ef\u80fd\u7528\u9014\u3002",
+        image: imageBytes,
+        max_tokens: 256
+      });
+      const reply = result.response.response || JSON.stringify(result.response);
 
       if (env.DB) {
         await saveMessage(env.DB, conversation.id, "assistant", reply);
@@ -333,20 +328,17 @@ export async function handleChat(request, env) {
     content: userContent
   });
 
-  const selectedModel = allowedModels.includes(model)
-    ? model
-    : "@cf/meta/llama-3.1-8b-instruct-fast";
-
   try {
-    const result = await env.AI.run(
-      selectedModel,
-      {
-        messages: modelMessages,
-        stream: true
-      }
-    );
+    const result = await callModel({
+      env,
+      provider: "workers-ai",
+      model: model || DEFAULT_TEXT_MODEL,
+      messages: modelMessages,
+      stream: true
+    });
+    const aiResponse = result.response;
 
-    return new Response(streamWithHistorySave(result, env, conversation.id, ragSources), {
+    return new Response(streamWithHistorySave(aiResponse, env, conversation.id, ragSources), {
       headers: {
         ...corsHeaders(),
         "X-Conversation-Id": conversation.id,

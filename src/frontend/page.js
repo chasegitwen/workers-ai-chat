@@ -1216,6 +1216,7 @@ async function checkAuth(){
 
     if(res.ok && data.ok && data.authenticated){
       showApp();
+      await loadModels();
       await loadConversations();
       await loadFilesLibrary();
       input.focus();
@@ -1253,6 +1254,7 @@ async function login(event){
 
     loginPassword.value = "";
     showApp();
+    await loadModels();
     await loadConversations();
     await loadFilesLibrary();
     input.focus();
@@ -1275,6 +1277,36 @@ async function logout(){
   showLogin();
   loginPassword.value = "";
   loginUsername.focus();
+}
+
+async function loadModels(){
+  try{
+    const currentValue = modelSelect.value;
+    const res = await fetch("/api/models");
+    const data = await res.json();
+
+    if(!res.ok || !Array.isArray(data.models) || !data.models.length){
+      throw new Error("models unavailable");
+    }
+
+    modelSelect.innerHTML = "";
+
+    data.models
+      .filter(model => !model.deprecated)
+      .forEach(model => {
+        const option = document.createElement("option");
+        option.value = model.id;
+        option.textContent = (model.label || model.id) + (model.recommended ? " · 推荐" : "");
+        option.dataset.provider = model.provider || "workers-ai";
+        modelSelect.appendChild(option);
+      });
+
+    if([...modelSelect.options].some(option => option.value === currentValue)){
+      modelSelect.value = currentValue;
+    }
+  }catch(err){
+    console.log("load models failed, using fallback options", err);
+  }
 }
 
 function setContextStatus(text){

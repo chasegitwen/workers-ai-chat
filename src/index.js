@@ -1,4 +1,4 @@
-import { handleAuth } from "./api/auth.js";
+﻿import { handleAuth } from "./api/auth.js";
 import { handleChat } from "./api/chat.js";
 import { handleFiles } from "./api/files.js";
 import { handleFetchUrl } from "./api/fetchUrl.js";
@@ -7,6 +7,7 @@ import { handleSearchAndFetch } from "./api/searchAndFetch.js";
 import { handleSearchWeb } from "./api/searchWeb.js";
 import { htmlPage } from "./frontend/page.js";
 import { requireAuth } from "./lib/auth.js";
+import { getEnabledModels } from "./providers/models.js";
 import { corsHeaders, jsonResponse } from "./utils/response.js";
 
 export default {
@@ -32,6 +33,39 @@ export default {
 
       if (!auth.ok) {
         return auth.response;
+      }
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/models") {
+      return jsonResponse({
+        models: getEnabledModels()
+      });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/debug/ai") {
+      try {
+        const result = await env.AI.run(
+          "@cf/meta/llama-3.1-8b-instruct-fast",
+          {
+            messages: [
+              {
+                role: "user",
+                content: "hello"
+              }
+            ]
+          }
+        );
+
+        return Response.json(result);
+      } catch (err) {
+        return Response.json({
+          ok: false,
+          name: err.name || "",
+          message: err.message || String(err),
+          stack: err.stack || ""
+        }, {
+          status: 500
+        });
       }
     }
 

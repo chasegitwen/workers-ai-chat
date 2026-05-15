@@ -90,6 +90,9 @@ function streamWithHistorySave(result, env, conversationId) {
         await saveMessage(env.DB, conversationId, "assistant", reply);
       }
 
+      controller.enqueue(encoder.encode(
+        "data: " + JSON.stringify({ conversationId }) + "\n\n"
+      ));
       controller.enqueue(encoder.encode("data: [DONE]\n\n"));
     }
   }));
@@ -161,7 +164,11 @@ export async function handleChat(request, env) {
       return new Response(
         "data: " + JSON.stringify({
           response: reply
-        }) + "\n\n",
+        }) + "\n\n" +
+        "data: " + JSON.stringify({
+          conversationId: conversation.id
+        }) + "\n\n" +
+        "data: [DONE]\n\n",
         {
           status: 200,
           headers: {

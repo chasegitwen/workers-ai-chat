@@ -234,7 +234,15 @@ body.dark{
   margin-bottom:14px;
 }
 
+.historyRow{
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+
 .historyItem{
+  min-width:0;
+  flex:1;
   width:100%;
   border:1px solid var(--border);
   background:transparent;
@@ -253,6 +261,23 @@ body.dark{
   border-color:var(--primary);
   background:rgba(37,99,235,.1);
   color:var(--primary);
+}
+
+.deleteConversationBtn{
+  width:30px;
+  height:30px;
+  flex:0 0 auto;
+  border:1px solid var(--border);
+  background:transparent;
+  color:var(--muted);
+  border-radius:10px;
+  cursor:pointer;
+}
+
+.deleteConversationBtn:hover{
+  color:white;
+  background:#dc2626;
+  border-color:#dc2626;
 }
 
 .badge{
@@ -681,6 +706,7 @@ let webSearchSources = [];
 
 let searchResults = document.getElementById("searchResults");
 let currentConversationId = null;
+let conversationsCache = [];
 
 const fetchUrlBtn = document.getElementById("fetchUrlBtn");
 
@@ -1246,6 +1272,29 @@ function setActiveConversation(){
   });
 }
 
+function clearWebContext(){
+  selectedWebPage = null;
+  selectedWebPageChunks = [];
+  lastWebRelevantChunkCount = 0;
+  webSearchContext = "";
+  webSearchSources = [];
+}
+
+function resetTransientContext(){
+  clearSelectedFile();
+  clearSelectedImage();
+  clearWebContext();
+  setContextStatus("");
+}
+
+function enterBlankChat(){
+  currentConversationId = null;
+  resetLocalConversation();
+  resetChatView();
+  resetTransientContext();
+  setActiveConversation();
+}
+
 async function loadConversations(){
   try{
     const res = await fetch("/api/conversations");
@@ -1255,52 +1304,79 @@ async function loadConversations(){
       throw new Error(data.error || "加载会话失败");
     }
 
+    conversationsCache = data.conversations || [];
     conversationList.innerHTML = "";
 
-    (data.conversations || []).forEach(item => {
+    conversationsCache.forEach(item => {
+      const row = document.createElement("div");
+      row.className = "historyRow";
+
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "historyItem";
       btn.dataset.id = item.id;
       btn.textContent = item.title || "New Chat";
-      btn.title = btn.textContent;
+      btn.title = item.last_message_preview
+        ? btn.textContent + "\\n" + item.last_message_preview
+        : btn.textContent;
       btn.addEventListener("click", () => loadConversationMessages(item.id));
-      conversationList.appendChild(btn);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "deleteConversationBtn";
+      deleteBtn.textContent = "×";
+      deleteBtn.title = "删除会话";
+      deleteBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deleteConversation(item.id, item.title || "New Chat");
+      });
+
+      row.appendChild(btn);
+      row.appendChild(deleteBtn);
+      conversationList.appendChild(row);
     });
 
     setActiveConversation();
+    return conversationsCache;
   }catch(err){
     console.log("load conversations failed", err);
+    return conversationsCache;
   }
 }
 
 async function createNewConversation(){
+  enterBlankChat();
+}
+
+async function deleteConversation(conversationId, title){
+  if(!confirm("确定删除会话“" + title + "”吗？")){
+    return;
+  }
+
   try{
-    const res = await fetch("/api/conversations", {
-      method:"POST",
-      headers:{
-        "Content-Type":"application/json"
-      },
-      body:JSON.stringify({
-        title:"New Chat"
-      })
+    const deletingCurrent = conversationId === currentConversationId;
+    const res = await fetch("/api/conversations/" + encodeURIComponent(conversationId), {
+      method:"DELETE"
     });
     const data = await res.json();
 
     if(!res.ok || !data.ok){
-      throw new Error(data.error || "创建会话失败");
+      throw new Error(data.error || "删除会话失败");
     }
 
-    currentConversationId = data.conversation.id;
-    resetLocalConversation();
-    resetChatView();
-    clearSelectedImage();
-    webSearchContext = "";
-    webSearchSources = [];
-    setContextStatus(getCurrentContextStatus());
-    await loadConversations();
+    const conversations = await loadConversations();
+
+    if(deletingCurrent){
+      const nextConversation = conversations.find(item => item.id !== conversationId);
+
+      if(nextConversation){
+        await loadConversationMessages(nextConversation.id);
+      }else{
+        enterBlankChat();
+      }
+    }
   }catch(err){
-    alert("创建会话失败：" + err.message);
+    alert("删除会话失败：" + err.message);
   }
 }
 
@@ -1328,6 +1404,7 @@ async function loadConversationMessages(conversationId){
 
     currentConversationId = conversationId;
     resetLocalConversation();
+    resetTransientContext();
     chat.innerHTML = "<div id='searchResults'></div>";
     searchResults = document.getElementById("searchResults");
 

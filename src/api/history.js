@@ -8,9 +8,34 @@ export function now() {
   return Date.now();
 }
 
+export function cleanTitle(title, maxLength = 80) {
+  if (typeof title !== "string") {
+    return "";
+  }
+
+  return title.replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+export function isDefaultTitle(title) {
+  const clean = cleanTitle(title);
+  return !clean || clean === "New Chat" || clean === "\u65b0\u4f1a\u8bdd";
+}
+
 export function titleFromMessage(content) {
   const clean = (content || "").replace(/\s+/g, " ").trim();
-  return clean ? clean.slice(0, 40) : "New Chat";
+
+  if (!clean) {
+    return "New Chat";
+  }
+
+  const hasCjk = /[\u3400-\u9fff]/.test(clean);
+  const limit = hasCjk ? 20 : 40;
+
+  if (clean.length <= limit) {
+    return clean;
+  }
+
+  return clean.slice(0, limit) + "...";
 }
 
 export async function createConversation(db, title = "New Chat") {
@@ -30,17 +55,30 @@ export async function createConversation(db, title = "New Chat") {
 }
 
 export async function ensureConversation(db, conversationId, title) {
+  const nextTitle = cleanTitle(title) || "New Chat";
+
   if (conversationId) {
     const existing = await db.prepare(
       "SELECT id, title, created_at, updated_at FROM conversations WHERE id = ?"
     ).bind(conversationId).first();
 
     if (existing) {
+      if (isDefaultTitle(existing.title) && !isDefaultTitle(nextTitle)) {
+        await db.prepare(
+          "UPDATE conversations SET title = ? WHERE id = ?"
+        ).bind(nextTitle, conversationId).run();
+
+        return {
+          ...existing,
+          title: nextTitle
+        };
+      }
+
       return existing;
     }
   }
 
-  return createConversation(db, title);
+  return createConversation(db, nextTitle);
 }
 
 export async function saveMessage(db, conversationId, role, content) {
@@ -83,15 +121,34 @@ export async function handleHistory(request, env, url) {
 
   if (request.method === "GET" && url.pathname === "/api/conversations") {
     const result = await env.DB.prepare(
-      `SELECT id, title, created_at, updated_at
-       FROM conversations
-       ORDER BY updated_at DESC
+      `SELECT
+         c.id,
+         c.title,
+         c.created_at,
+         c.updated_at,
+         COUNT(m.id) AS message_count,
+         (
+           SELECT content
+           FROM messages
+           WHERE conversation_id = c.id
+           ORDER BY created_at DESC
+           LIMIT 1
+         ) AS last_message_preview
+       FROM conversations c
+       LEFT JOIN messages m ON m.conversation_id = c.id
+       GROUP BY c.id, c.title, c.created_at, c.updated_at
+       ORDER BY c.updated_at DESC
        LIMIT 50`
     ).all();
 
     return jsonResponse({
       ok: true,
-      conversations: result.results || []
+      conversations: (result.results || []).map(item => ({
+        ...item,
+        last_message_preview: item.last_message_preview
+          ? String(item.last_message_preview).replace(/\s+/g, " ").trim().slice(0, 80)
+          : ""
+      }))
     });
   }
 
@@ -123,6 +180,33 @@ export async function handleHistory(request, env, url) {
   }
 
   const conversationMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)$/);
+
+  if (request.method === "PATCH" && conversationMatch) {
+    const data = await request.json().catch(() => ({}));
+    const title = cleanTitle(data.title);
+
+    if (!title) {
+      return jsonResponse({
+        ok: false,
+        error: "title must be a non-empty string"
+      }, 400);
+    }
+
+    const timestamp = now();
+
+    await env.DB.prepare(
+      "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?"
+    ).bind(title, timestamp, conversationMatch[1]).run();
+
+    return jsonResponse({
+      ok: true,
+      conversation: {
+        id: conversationMatch[1],
+        title,
+        updated_at: timestamp
+      }
+    });
+  }
 
   if (request.method === "DELETE" && conversationMatch) {
     await env.DB.prepare(

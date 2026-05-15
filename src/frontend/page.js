@@ -43,13 +43,7 @@ export function htmlPage() {
   }
   
   #fileStatus{
-    font-size:12px;
-    color:var(--muted);
-    white-space:nowrap;
-    align-self:center;
-    max-width:260px;
-    overflow:hidden;
-    text-overflow:ellipsis;
+    display:none;
   }
 
   #clearFileBtn{
@@ -109,11 +103,7 @@ export function htmlPage() {
   }
 
   #uploadStatus{
-    font-size:12px;
-    color:var(--muted);
-    margin-left:4px;
-    white-space:nowrap;
-    align-self:center;
+    display:none;
   }
 
 :root{
@@ -309,9 +299,22 @@ body.dark{
 }
 
 .inputBar{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
   padding:16px;
   border-top:1px solid var(--border);
   background:var(--panel);
+}
+
+#contextStatus{
+  min-height:16px;
+  color:var(--muted);
+  font-size:12px;
+  line-height:16px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 
 .inputShell{
@@ -549,6 +552,8 @@ body.dark{
     hidden
   />
 
+  <div id="contextStatus"></div>
+
   <div class="inputShell">
 
     <div class="inputActions">
@@ -615,6 +620,8 @@ const chat = document.getElementById("chat");
 
 const input = document.getElementById("input");
 
+const contextStatus = document.getElementById("contextStatus");
+
 const searchBtn = document.getElementById("searchBtn");
 
 const webAnswerBtn = document.getElementById("webAnswerBtn");
@@ -650,6 +657,26 @@ let selectedFileText = "";
 let selectedFileChunks = [];
 let lastRelevantChunkCount = 0;
 
+function setContextStatus(text){
+  contextStatus.textContent = text || "";
+}
+
+function getCurrentContextStatus(){
+  const contexts = [];
+
+  if(selectedFile){
+    contexts.push("\u6587\u4ef6\uff1a" + selectedFile.name);
+  }
+
+  if(selectedWebPage){
+    contexts.push("\u7f51\u9875\uff1a" + selectedWebPage.title);
+  }
+
+  return contexts.length
+    ? "\u5f53\u524d\u4e0a\u4e0b\u6587\uff1a" + contexts.join(" / ")
+    : "";
+}
+
 function clearSelectedFile(){
 
   selectedFile = null;
@@ -658,6 +685,7 @@ function clearSelectedFile(){
   lastRelevantChunkCount = 0;
   fileInput.value = "";
   fileStatus.textContent = "";
+  setContextStatus(getCurrentContextStatus());
   clearFileBtn.style.display = "none";
 }
 
@@ -668,6 +696,7 @@ function clearSelectedImage(){
   imagePreview.src = "";
   imagePreviewBox.style.display = "none";
   uploadStatus.textContent = "";
+  setContextStatus(getCurrentContextStatus());
 }
 imageBtn.addEventListener("click", () => {
   imageInput.click();
@@ -692,7 +721,7 @@ imageInput.addEventListener("change", () => {
 
     imagePreview.src = reader.result;
     imagePreviewBox.style.display = "block";
-    uploadStatus.textContent = "已选择图片，准备发送";
+    setContextStatus("\u5df2\u9009\u62e9\u56fe\u7247\uff0c\u51c6\u5907\u53d1\u9001");
 
   };
 
@@ -717,7 +746,7 @@ async function searchWeb(){
 
   searchBtn.disabled = true;
   searchBtn.textContent = "\u641c\u7d22\u4e2d...";
-  fileStatus.textContent = "正在搜索网页...";
+  setContextStatus("\u6b63\u5728\u641c\u7d22\u7f51\u9875...");
 
   try{
 
@@ -739,12 +768,13 @@ async function searchWeb(){
 
     renderSearchResults(data.results || []);
 
-    fileStatus.textContent =
-      "搜索完成：" + query + "（" + (data.results || []).length + " 条结果）";
+    setContextStatus(
+      "\u641c\u7d22\u5b8c\u6210\uff1a" + query + "\uff08" + (data.results || []).length + " \u6761\u7ed3\u679c\uff09"
+    );
 
   }catch(err){
 
-    fileStatus.textContent = "搜索失败";
+    setContextStatus("\u641c\u7d22\u5931\u8d25");
     alert("搜索失败：" + err.message);
 
   }
@@ -841,7 +871,7 @@ async function webAnswer(){
 
   webAnswerBtn.disabled = true;
   webAnswerBtn.textContent = "\u8054\u7f51\u4e2d...";
-  fileStatus.textContent = "正在联网搜索并抓取网页...";
+  setContextStatus("\u6b63\u5728\u8054\u7f51\u641c\u7d22\u5e76\u6293\u53d6\u7f51\u9875...");
 
   try{
 
@@ -874,9 +904,10 @@ async function webAnswer(){
       ].join(String.fromCharCode(10));
     }).join(String.fromCharCode(10, 10));
 
-    fileStatus.textContent =
-      "联网完成：找到 " + (data.results || []).length +
-      " 条结果，成功抓取 " + webSearchSources.length + " 个网页";
+    setContextStatus(
+      "\u8054\u7f51\u5b8c\u6210\uff1a\u627e\u5230 " + (data.results || []).length +
+      " \u6761\u7ed3\u679c\uff0c\u6210\u529f\u6293\u53d6 " + webSearchSources.length + " \u4e2a\u7f51\u9875"
+    );
 
     if(!webSearchContext){
       alert("搜索到了结果，但网页正文抓取失败。可以先用搜索结果手动抓取。");
@@ -887,7 +918,7 @@ async function webAnswer(){
 
   }catch(err){
 
-    fileStatus.textContent = "联网回答失败";
+    setContextStatus("\u8054\u7f51\u56de\u7b54\u5931\u8d25");
     alert("联网回答失败：" + err.message);
 
   }
@@ -913,7 +944,7 @@ async function fetchWebPage(pageUrlFromResult){
 
   fetchUrlBtn.disabled = true;
   fetchUrlBtn.textContent = "\u6293\u53d6\u4e2d...";
-  fileStatus.textContent = "正在抓取网页...";
+  setContextStatus("\u6b63\u5728\u6293\u53d6\u7f51\u9875...");
 
   try{
 
@@ -941,14 +972,13 @@ async function fetchWebPage(pageUrlFromResult){
 
     selectedWebPageChunks = splitTextIntoChunks(data.text);
 
-    fileStatus.textContent =
-      "已抓取网页：" + data.title + "（" + data.length + " 字符，" + selectedWebPageChunks.length + " 段）";
+    setContextStatus(
+      "\u5df2\u6293\u53d6\u7f51\u9875\uff1a" + data.title + "\uff08" + data.length + " \u5b57\u7b26\uff0c" + selectedWebPageChunks.length + " \u6bb5\uff09"
+    );
 
   }catch(err){
 
-    selectedWebPage = null;
-    selectedWebPageChunks = [];
-    fileStatus.textContent = "网页抓取失败";
+    setContextStatus("\u7f51\u9875\u6293\u53d6\u5931\u8d25" + (getCurrentContextStatus() ? "\uff0c" + getCurrentContextStatus() : ""));
     alert("网页抓取失败：" + err.message);
 
   }
@@ -1084,11 +1114,16 @@ fileInput.addEventListener("change", async () => {
     return;
   }
 
+  const previousFile = selectedFile;
+  const previousFileText = selectedFileText;
+  const previousFileChunks = selectedFileChunks;
+  const previousRelevantChunkCount = lastRelevantChunkCount;
+
   try{
 
     selectedFile = file;
     selectedFileText = "";
-    fileStatus.textContent = "正在读取：" + file.name;
+    setContextStatus("\u6b63\u5728\u8bfb\u53d6\uff1a" + file.name);
 
     if(isPdfFile){
 
@@ -1113,14 +1148,21 @@ fileInput.addEventListener("change", async () => {
     }
     selectedFileChunks = splitTextIntoChunks(selectedFileText);
     clearFileBtn.style.display = "inline-block";
-    fileStatus.textContent =
-      "已读取：" + file.name + "（" + selectedFileText.length + " 字符，" + selectedFileChunks.length + " 段）";
+    setContextStatus(
+      "\u5df2\u8bfb\u53d6\uff1a" + file.name + "\uff08" + selectedFileText.length + " \u5b57\u7b26\uff0c" + selectedFileChunks.length + " \u6bb5\uff09"
+    );
 
   }catch(err){
 
     alert("文件读取失败：" + err.message);
 
-    clearSelectedFile();
+    selectedFile = previousFile;
+    selectedFileText = previousFileText;
+    selectedFileChunks = previousFileChunks;
+    lastRelevantChunkCount = previousRelevantChunkCount;
+    fileInput.value = "";
+    clearFileBtn.style.display = previousFile ? "inline-block" : "none";
+    setContextStatus(getCurrentContextStatus());
   }
 });
 
@@ -1389,7 +1431,7 @@ async function sendMessage(){
     "<span class='loading'>思考中...</span>";
 
   if(imageToSend){
-    uploadStatus.textContent = "图片上传中...";
+    setContextStatus("\u56fe\u7247\u4e0a\u4f20\u4e2d...");
   }
 
   if(fileToSend){
@@ -1451,9 +1493,12 @@ async function sendMessage(){
       clearSelectedImage();
     }
 
-    if(fileToSend){
-      fileStatus.textContent =
-        "当前文件：" + fileToSend.name + "（" + selectedFileChunks.length + " 段，上次使用 " + lastRelevantChunkCount + " 段）";
+    const currentContextStatus = getCurrentContextStatus();
+
+    if(currentContextStatus){
+      setContextStatus(currentContextStatus);
+    }else if(!networkTextForAI){
+      setContextStatus("");
     }
 
   }catch(err){
@@ -1462,11 +1507,11 @@ async function sendMessage(){
       "请求失败：" + err.message;
 
     if(imageToSend){
-      uploadStatus.textContent = "图片发送失败，可重试";
+      setContextStatus("\u56fe\u7247\u53d1\u9001\u5931\u8d25\uff0c\u53ef\u91cd\u8bd5");
     }
 
     if(fileToSend){
-      fileStatus.textContent = "文件问答失败，可重试：" + fileToSend.name;
+      setContextStatus("\u6587\u4ef6\u95ee\u7b54\u5931\u8d25\uff0c\u53ef\u91cd\u8bd5\uff1a" + fileToSend.name);
     }
   }
 

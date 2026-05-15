@@ -305,6 +305,34 @@ body.dark{
   padding:16px 20px;
   border-bottom:1px solid var(--border);
   font-weight:600;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+
+.summaryStatus{
+  display:none;
+  align-items:center;
+  gap:8px;
+  min-width:0;
+  color:var(--muted);
+  font-size:12px;
+  font-weight:400;
+}
+
+.summaryStatus.active{
+  display:flex;
+}
+
+.summaryStatus button{
+  border:1px solid var(--border);
+  background:transparent;
+  color:var(--text);
+  border-radius:999px;
+  padding:4px 8px;
+  font-size:12px;
+  cursor:pointer;
 }
 
 #chat{
@@ -602,7 +630,11 @@ body.dark{
     <section class="chatCard">
 
       <div class="chatHeader">
-        AI Chat
+        <span>AI Chat</span>
+        <div id="summaryStatus" class="summaryStatus">
+          <span>&#x5DF2;&#x542F;&#x7528;&#x957F;&#x4E0A;&#x4E0B;&#x6587;&#x6458;&#x8981;</span>
+          <button id="viewSummaryBtn" type="button">&#x67E5;&#x770B;&#x6458;&#x8981;</button>
+        </div>
       </div>
 
       <div id="chat">
@@ -693,6 +725,8 @@ if (window.pdfjsLib) {
 const chat = document.getElementById("chat");
 const newChatBtn = document.getElementById("newChatBtn");
 const conversationList = document.getElementById("conversationList");
+const summaryStatus = document.getElementById("summaryStatus");
+const viewSummaryBtn = document.getElementById("viewSummaryBtn");
 
 const input = document.getElementById("input");
 
@@ -1272,6 +1306,45 @@ function setActiveConversation(){
   });
 }
 
+function setSummaryStatus(enabled){
+  summaryStatus.classList.toggle("active", Boolean(enabled));
+}
+
+async function loadSummaryStatus(){
+  if(!currentConversationId){
+    setSummaryStatus(false);
+    return null;
+  }
+
+  try{
+    const res = await fetch("/api/conversations/" + encodeURIComponent(currentConversationId) + "/summary");
+    const data = await res.json();
+
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "加载摘要失败");
+    }
+
+    setSummaryStatus(Boolean((data.summary || "").trim()));
+    return data;
+  }catch(err){
+    console.log("load summary failed", err);
+    setSummaryStatus(false);
+    return null;
+  }
+}
+
+async function viewCurrentSummary(){
+  const data = await loadSummaryStatus();
+  const summary = (data?.summary || "").trim();
+
+  if(!summary){
+    alert("当前会话还没有摘要。");
+    return;
+  }
+
+  alert(summary);
+}
+
 function clearWebContext(){
   selectedWebPage = null;
   selectedWebPageChunks = [];
@@ -1292,6 +1365,7 @@ function enterBlankChat(){
   resetLocalConversation();
   resetChatView();
   resetTransientContext();
+  setSummaryStatus(false);
   setActiveConversation();
 }
 
@@ -1421,6 +1495,7 @@ async function loadConversationMessages(conversationId){
 
     setActiveConversation();
     setContextStatus(getCurrentContextStatus());
+    await loadSummaryStatus();
     scrollBottom();
   }catch(err){
     alert("加载会话失败：" + err.message);
@@ -1437,6 +1512,7 @@ input.addEventListener("keydown", e => {
 
 sendBtn.addEventListener("click", sendMessage);
 newChatBtn.addEventListener("click", createNewConversation);
+viewSummaryBtn.addEventListener("click", viewCurrentSummary);
 loadConversations();
 
 function toggleTheme(){
@@ -1757,6 +1833,7 @@ async function sendMessage(){
     webSearchContext = "";
     webSearchSources = [];
     await loadConversations();
+    await loadSummaryStatus();
 
     if(imageToSend){
       clearSelectedImage();

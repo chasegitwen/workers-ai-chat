@@ -21,6 +21,14 @@ export function isDefaultTitle(title) {
   return !clean || clean === "New Chat" || clean === "\u65b0\u4f1a\u8bdd";
 }
 
+export function cleanSummary(summary) {
+  if (typeof summary !== "string") {
+    return null;
+  }
+
+  return summary.trim().slice(0, 8000);
+}
+
 export function titleFromMessage(content) {
   const clean = (content || "").replace(/\s+/g, " ").trim();
 
@@ -83,15 +91,24 @@ export async function ensureConversation(db, conversationId, title) {
 
 export async function saveMessage(db, conversationId, role, content) {
   const timestamp = now();
+  const id = createId();
 
   await db.batch([
     db.prepare(
       "INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)"
-    ).bind(createId(), conversationId, role, content || "", timestamp),
+    ).bind(id, conversationId, role, content || "", timestamp),
     db.prepare(
       "UPDATE conversations SET updated_at = ? WHERE id = ?"
     ).bind(timestamp, conversationId)
   ]);
+
+  return {
+    id,
+    conversation_id: conversationId,
+    role,
+    content: content || "",
+    created_at: timestamp
+  };
 }
 
 export async function getRecentMessages(db, conversationId, limit = 20) {
@@ -176,6 +193,60 @@ export async function handleHistory(request, env, url) {
     return jsonResponse({
       ok: true,
       messages: result.results || []
+    });
+  }
+
+  const summaryMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/summary$/);
+
+  if (request.method === "GET" && summaryMatch) {
+    const conversationId = summaryMatch[1];
+    const conversation = await env.DB.prepare(
+      `SELECT id, summary, summarized_message_id, summarized_at
+       FROM conversations
+       WHERE id = ?`
+    ).bind(conversationId).first();
+
+    if (!conversation) {
+      return jsonResponse({
+        ok: false,
+        error: "conversation not found"
+      }, 404);
+    }
+
+    return jsonResponse({
+      ok: true,
+      conversationId,
+      summary: conversation.summary || "",
+      summarizedAt: conversation.summarized_at || null,
+      summarizedMessageId: conversation.summarized_message_id || null
+    });
+  }
+
+  if (request.method === "PATCH" && summaryMatch) {
+    const data = await request.json().catch(() => ({}));
+    const summary = cleanSummary(data.summary);
+
+    if (summary === null) {
+      return jsonResponse({
+        ok: false,
+        error: "summary must be a string"
+      }, 400);
+    }
+
+    const timestamp = now();
+
+    await env.DB.prepare(
+      `UPDATE conversations
+       SET summary = ?, summarized_at = ?, summarized_message_id = NULL
+       WHERE id = ?`
+    ).bind(summary, summary ? timestamp : null, summaryMatch[1]).run();
+
+    return jsonResponse({
+      ok: true,
+      conversationId: summaryMatch[1],
+      summary,
+      summarizedAt: summary ? timestamp : null,
+      summarizedMessageId: null
     });
   }
 

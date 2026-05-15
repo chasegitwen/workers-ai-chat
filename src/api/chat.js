@@ -1,10 +1,13 @@
 import { corsHeaders } from "../utils/response.js";
 import {
   ensureConversation,
-  getRecentMessages,
   saveMessage,
   titleFromMessage
 } from "./history.js";
+import {
+  buildConversationContext,
+  maybeUpdateConversationSummary
+} from "./summary.js";
 
 const allowedModels = [
   "@cf/zai-org/glm-4.7-flash",
@@ -88,6 +91,7 @@ function streamWithHistorySave(result, env, conversationId) {
 
       if (env.DB && reply) {
         await saveMessage(env.DB, conversationId, "assistant", reply);
+        await maybeUpdateConversationSummary(env, conversationId);
       }
 
       controller.enqueue(encoder.encode(
@@ -159,6 +163,7 @@ export async function handleChat(request, env) {
 
       if (env.DB) {
         await saveMessage(env.DB, conversation.id, "assistant", reply);
+        await maybeUpdateConversationSummary(env, conversation.id);
       }
 
       return new Response(
@@ -204,17 +209,19 @@ export async function handleChat(request, env) {
     }
   }
 
-  if (env.DB) {
-    await saveMessage(env.DB, conversation.id, "user", userContent);
-  }
+  const savedUserMessage = env.DB
+    ? await saveMessage(env.DB, conversation.id, "user", userContent)
+    : null;
 
   const historyMessages = env.DB
-    ? await getRecentMessages(env.DB, conversation.id, 20)
+    ? await buildConversationContext(env, conversation.id, {
+      limit: 14,
+      excludeMessageId: savedUserMessage?.id
+    })
     : messages.filter(message => message.role !== "system");
 
   const modelMessages = [
-    defaultSystemMessage,
-    ...historyMessages
+    defaultSystemMessage
   ];
 
   if (file && file.text) {
@@ -230,6 +237,12 @@ export async function handleChat(request, env) {
       content: filePrompt
     });
   }
+
+  modelMessages.push(...historyMessages);
+  modelMessages.push({
+    role: "user",
+    content: userContent
+  });
 
   const selectedModel = allowedModels.includes(model)
     ? model

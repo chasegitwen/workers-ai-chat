@@ -1,3 +1,4 @@
+import { handleAuth } from "./api/auth.js";
 import { handleChat } from "./api/chat.js";
 import { handleFiles } from "./api/files.js";
 import { handleFetchUrl } from "./api/fetchUrl.js";
@@ -5,11 +6,34 @@ import { handleHistory } from "./api/history.js";
 import { handleSearchAndFetch } from "./api/searchAndFetch.js";
 import { handleSearchWeb } from "./api/searchWeb.js";
 import { htmlPage } from "./frontend/page.js";
+import { requireAuth } from "./lib/auth.js";
 import { corsHeaders, jsonResponse } from "./utils/response.js";
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        headers: corsHeaders()
+      });
+    }
+
+    if (url.pathname.startsWith("/api/auth")) {
+      const authResponse = await handleAuth(request, env, url);
+
+      if (authResponse) {
+        return authResponse;
+      }
+    }
+
+    if (url.pathname.startsWith("/api/")) {
+      const auth = await requireAuth(request, env);
+
+      if (!auth.ok) {
+        return auth.response;
+      }
+    }
 
     if (url.pathname.startsWith("/api/conversations")) {
       const historyResponse = await handleHistory(request, env, url);
@@ -79,14 +103,14 @@ export default {
       });
     }
 
-    if (request.method === "OPTIONS") {
-      return new Response(null, {
-        headers: corsHeaders()
-      });
-    }
-
     if (request.method !== "POST") {
       return new Response("Use POST", { status: 405 });
+    }
+
+    const auth = await requireAuth(request, env);
+
+    if (!auth.ok) {
+      return auth.response;
     }
 
     console.log("POST pathname:", url.pathname);

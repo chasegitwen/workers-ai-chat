@@ -148,6 +148,80 @@ body.dark{
   background:linear-gradient(135deg,#020617,#0f172a);
 }
 
+.loginScreen{
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:24px;
+}
+
+.loginCard{
+  width:min(380px,100%);
+  border:1px solid var(--border);
+  border-radius:22px;
+  background:var(--panel);
+  box-shadow:0 8px 28px rgba(0,0,0,.08);
+  padding:24px;
+}
+
+.loginCard h1{
+  margin:0 0 8px;
+  font-size:22px;
+}
+
+.loginCard p{
+  margin:0 0 18px;
+  color:var(--muted);
+  font-size:13px;
+}
+
+.loginCard label{
+  display:block;
+  margin-top:12px;
+  color:var(--muted);
+  font-size:12px;
+}
+
+.loginCard input{
+  width:100%;
+  margin-top:6px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:transparent;
+  color:var(--text);
+  padding:11px 12px;
+  font-size:14px;
+  outline:none;
+}
+
+.loginCard button{
+  width:100%;
+  margin-top:16px;
+  border:none;
+  border-radius:14px;
+  background:var(--primary);
+  color:white;
+  padding:11px 12px;
+  cursor:pointer;
+  font-size:14px;
+}
+
+.loginError{
+  min-height:18px;
+  margin-top:10px;
+  color:#dc2626;
+  font-size:12px;
+}
+
+body:not(.authenticated) .app{
+  display:none;
+}
+
+body.authenticated .loginScreen{
+  display:none;
+}
+
 .app{
   height:100vh;
   max-height:100vh;
@@ -184,6 +258,12 @@ body.dark{
   border-radius:999px;
   padding:8px 14px;
   cursor:pointer;
+}
+
+.topbarActions{
+  display:flex;
+  align-items:center;
+  gap:8px;
 }
 
 .main{
@@ -846,11 +926,27 @@ body.dark{
 
 <body>
 
+<div id="loginScreen" class="loginScreen">
+  <form id="loginForm" class="loginCard">
+    <h1>Workers AI Chat</h1>
+    <p>&#x8BF7;&#x767B;&#x5F55;&#x540E;&#x7EE7;&#x7EED;&#x4F7F;&#x7528;</p>
+    <label for="loginUsername">&#x7528;&#x6237;&#x540D;</label>
+    <input id="loginUsername" autocomplete="username" />
+    <label for="loginPassword">&#x5BC6;&#x7801;</label>
+    <input id="loginPassword" type="password" autocomplete="current-password" />
+    <button id="loginBtn" type="submit">&#x767B;&#x5F55;</button>
+    <div id="loginError" class="loginError"></div>
+  </form>
+</div>
+
 <div class="app">
 
   <div class="topbar">
     <div class="brand">Workers <span>AI</span> Assistant</div>
-    <button class="themeBtn" onclick="toggleTheme()">深色 / 浅色</button>
+    <div class="topbarActions">
+      <button id="logoutBtn" class="themeBtn" type="button">Logout</button>
+      <button class="themeBtn" onclick="toggleTheme()">深色 / 浅色</button>
+    </div>
   </div>
 
   <div class="main">
@@ -1037,6 +1133,12 @@ if (window.pdfjsLib) {
 }
 
 const chat = document.getElementById("chat");
+const loginForm = document.getElementById("loginForm");
+const loginUsername = document.getElementById("loginUsername");
+const loginPassword = document.getElementById("loginPassword");
+const loginBtn = document.getElementById("loginBtn");
+const loginError = document.getElementById("loginError");
+const logoutBtn = document.getElementById("logoutBtn");
 const newChatBtn = document.getElementById("newChatBtn");
 const conversationList = document.getElementById("conversationList");
 const refreshFilesBtn = document.getElementById("refreshFilesBtn");
@@ -1098,6 +1200,82 @@ let expandedFileId = null;
 let fileDetailsCache = {};
 let fileChunksCache = {};
 let sourcePreviewCache = {};
+
+function showLogin(){
+  document.body.classList.remove("authenticated");
+}
+
+function showApp(){
+  document.body.classList.add("authenticated");
+}
+
+async function checkAuth(){
+  try{
+    const res = await fetch("/api/auth/me");
+    const data = await res.json();
+
+    if(res.ok && data.ok && data.authenticated){
+      showApp();
+      await loadConversations();
+      await loadFilesLibrary();
+      input.focus();
+      return;
+    }
+  }catch(err){
+    console.log("auth check failed", err);
+  }
+
+  showLogin();
+  loginUsername.focus();
+}
+
+async function login(event){
+  event.preventDefault();
+  loginError.textContent = "";
+  loginBtn.disabled = true;
+
+  try{
+    const res = await fetch("/api/auth/login", {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify({
+        username:loginUsername.value.trim(),
+        password:loginPassword.value
+      })
+    });
+    const data = await res.json();
+
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "\u767b\u5f55\u5931\u8d25");
+    }
+
+    loginPassword.value = "";
+    showApp();
+    await loadConversations();
+    await loadFilesLibrary();
+    input.focus();
+  }catch(err){
+    loginError.textContent = err.message || "\u767b\u5f55\u5931\u8d25";
+  }
+
+  loginBtn.disabled = false;
+}
+
+async function logout(){
+  try{
+    await fetch("/api/auth/logout", {
+      method:"POST"
+    });
+  }catch(err){
+    console.log("logout failed", err);
+  }
+
+  showLogin();
+  loginPassword.value = "";
+  loginUsername.focus();
+}
 
 function setContextStatus(text){
   contextStatus.textContent = text || "";
@@ -2205,8 +2383,9 @@ fileSortSelect.addEventListener("change", () => {
   renderFilesLibrary();
 });
 clearSelectedFilesBtn.addEventListener("click", clearSelectedLibraryFiles);
-loadConversations();
-loadFilesLibrary();
+loginForm.addEventListener("submit", login);
+logoutBtn.addEventListener("click", logout);
+checkAuth();
 
 function toggleTheme(){
   document.body.classList.toggle("dark");

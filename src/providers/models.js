@@ -73,6 +73,83 @@ export const MODELS = [
     enabled: true
   },
   {
+    id: "@cf/qwen/qwen2.5-coder-32b-instruct",
+    label: "Qwen2.5 Coder 32B",
+    providerType: "workers-ai",
+    provider: "workers-ai",
+    modelName: "@cf/qwen/qwen2.5-coder-32b-instruct",
+    capabilities: {
+      ...textCapabilities
+    },
+    contextWindow: 32768,
+    maxOutput: 4096,
+    recommended: false,
+    deprecated: false,
+    enabled: true
+  },
+  {
+    id: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+    label: "DeepSeek R1 Distill Qwen 32B",
+    providerType: "workers-ai",
+    provider: "workers-ai",
+    modelName: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+    capabilities: {
+      ...textCapabilities,
+      reasoning: true
+    },
+    contextWindow: 32768,
+    maxOutput: 4096,
+    recommended: false,
+    deprecated: false,
+    enabled: true
+  },
+  {
+    id: "@cf/qwen/qwq-32b",
+    label: "QwQ 32B",
+    providerType: "workers-ai",
+    provider: "workers-ai",
+    modelName: "@cf/qwen/qwq-32b",
+    capabilities: {
+      ...textCapabilities,
+      reasoning: true
+    },
+    contextWindow: 32768,
+    maxOutput: 4096,
+    recommended: false,
+    deprecated: false,
+    enabled: true
+  },
+  {
+    id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    label: "Llama 3.3 70B FP8 Fast",
+    providerType: "workers-ai",
+    provider: "workers-ai",
+    modelName: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    capabilities: {
+      ...textCapabilities
+    },
+    contextWindow: 32768,
+    maxOutput: 4096,
+    recommended: false,
+    deprecated: false,
+    enabled: true
+  },
+  {
+    id: "@cf/meta/llama-3.2-3b-instruct",
+    label: "Llama 3.2 3B Instruct",
+    providerType: "workers-ai",
+    provider: "workers-ai",
+    modelName: "@cf/meta/llama-3.2-3b-instruct",
+    capabilities: {
+      ...textCapabilities
+    },
+    contextWindow: 131072,
+    maxOutput: 4096,
+    recommended: false,
+    deprecated: false,
+    enabled: true
+  },
+  {
     id: "@cf/meta/llama-3.2-11b-vision-instruct",
     label: "Llama 3.2 11B Vision",
     providerType: "workers-ai",
@@ -115,12 +192,11 @@ export const MODELS = [
     enabled: false
   },
   {
-    id: "claude-opus-4.7",
+    id: "anthropic/claude-opus-4.7",
     label: "Claude Opus 4.7",
-    providerType: "anthropic",
-    provider: "anthropic",
-    apiKeyEnv: "ANTHROPIC_API_KEY",
-    modelName: "claude-opus-4-7",
+    providerType: "workers-ai",
+    provider: "cloudflare-proxied",
+    modelName: "anthropic/claude-opus-4.7",
     capabilities: {
       text: true,
       vision: true,
@@ -129,10 +205,10 @@ export const MODELS = [
       reasoning: true,
       embeddings: false
     },
-    contextWindow: 200000,
+    contextWindow: 1000000,
     maxOutput: 8192,
     recommended: false,
     deprecated: false,
-    enabled: false
+    enabled: true
   }
 ];

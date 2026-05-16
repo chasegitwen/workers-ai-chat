@@ -20,6 +20,7 @@ const defaultSystemMessage = {
 
 const MAX_AUTO_URL_LENGTH = 2048;
 const MAX_AUTO_SEARCH_QUERY_LENGTH = 300;
+const MAX_TOOL_DEBUG_SUMMARY_LENGTH = 120;
 const AUTO_SEARCH_PATTERN = /搜索|查一下|查询|联网查|最新|最近|今天|现在|当前|目前|官网|价格|新闻|发布|更新|\bsearch\b|\blook up\b|\blatest\b|\brecent\b|\btoday\b|\bcurrent\b|\bnow\b|\bnews\b|\bprice\b|\brelease\b|\bupdate\b|\bofficial\b/i;
 
 function getUserMessage(messages) {
@@ -309,6 +310,40 @@ function getToolArgUrl(args = {}) {
   return String(args.url || args.pageUrl || "").trim();
 }
 
+function truncateDebugValue(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_TOOL_DEBUG_SUMMARY_LENGTH);
+}
+
+function getToolTargetSummary(toolCall = {}) {
+  if (toolCall.name === "fetch_url") {
+    return {
+      url: truncateDebugValue(getToolArgUrl(toolCall.args))
+    };
+  }
+
+  if (toolCall.name === "web_search") {
+    return {
+      query: truncateDebugValue(toolCall.args?.query)
+    };
+  }
+
+  return {};
+}
+
+function withToolTrigger(toolCall, trigger) {
+  if (!toolCall) {
+    return null;
+  }
+
+  return {
+    ...toolCall,
+    trigger
+  };
+}
+
 function normalizeToolError(name, error, args = {}) {
   const rawMessage = String(error?.message || error || "");
   const recoverable = true;
@@ -443,14 +478,41 @@ async function runRequestedTool(toolCall, env) {
     return null;
   }
 
+  const startedAt = new Date().toISOString();
+  const startedAtMs = Date.now();
+  const trigger = toolCall.trigger || "explicit";
+  const target = getToolTargetSummary(toolCall);
+
+  console.log("[tool]", {
+    name: toolCall.name,
+    trigger,
+    started_at: startedAt,
+    target
+  });
+
   const validationError = validateToolCall(toolCall);
 
   if (validationError) {
+    const durationMs = Date.now() - startedAtMs;
+    const debug = {
+      name: toolCall.name,
+      trigger,
+      started_at: startedAt,
+      duration_ms: durationMs,
+      status: "error",
+      code: validationError.code || "unknown_tool_error",
+      target
+    };
+
+    console.warn("[tool]", debug);
+
     return {
       name: toolCall.name,
       args: toolCall.args || {},
+      trigger,
       error: validationError.message,
       toolError: validationError,
+      debug,
       result: {
         error: validationError.message
       }
@@ -458,15 +520,47 @@ async function runRequestedTool(toolCall, env) {
   }
 
   try {
-    return await runTool(toolCall.name, toolCall.args || {}, env);
+    const result = await runTool(toolCall.name, toolCall.args || {}, env);
+    const durationMs = Date.now() - startedAtMs;
+    const debug = {
+      name: toolCall.name,
+      trigger,
+      started_at: startedAt,
+      duration_ms: durationMs,
+      status: "success",
+      code: null,
+      target
+    };
+
+    console.log("[tool]", debug);
+
+    return {
+      ...result,
+      trigger,
+      debug
+    };
   } catch (err) {
     const toolError = normalizeToolError(toolCall.name, err, toolCall.args);
+    const durationMs = Date.now() - startedAtMs;
+    const debug = {
+      name: toolCall.name,
+      trigger,
+      started_at: startedAt,
+      duration_ms: durationMs,
+      status: "error",
+      code: toolError.code || "unknown_tool_error",
+      target
+    };
+
+    console.warn("[tool]", debug);
 
     return {
       name: toolCall.name,
       args: toolCall.args || {},
+      trigger,
       error: toolError.message,
       toolError,
+      debug,
       result: {
         error: toolError.message
       }
@@ -548,7 +642,8 @@ function streamChatWithToolStatus({
   historyMessages,
   userContent,
   requestedToolCall,
-  ragSources
+  ragSources,
+  debugTools
 }) {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -572,6 +667,17 @@ function streamChatWithToolStatus({
           enqueueText(encodeSseEvent("tool_error", toolError));
         }
       };
+      const enqueueToolDebug = debug => {
+        if (debugTools && debug) {
+          enqueueText(encodeSseEvent("tool_debug", {
+            name: debug.name,
+            trigger: debug.trigger,
+            duration_ms: debug.duration_ms,
+            status: debug.status,
+            code: debug.code || null
+          }));
+        }
+      };
 
       try {
         const finalMessages = [...modelMessages];
@@ -582,6 +688,7 @@ function streamChatWithToolStatus({
           executedToolCall = await runRequestedTool(requestedToolCall, env);
           enqueueToolStatus(requestedToolCall.name, executedToolCall.error ? "error" : "done");
           enqueueToolError(executedToolCall.toolError);
+          enqueueToolDebug(executedToolCall.debug);
           toolSources = buildToolSources(executedToolCall);
         }
 
@@ -740,7 +847,8 @@ export async function handleChat(request, env) {
     file,
     fileIds = [],
     conversationId,
-    toolCall
+    toolCall,
+    debugTools = false
   } = await request.json();
 
   const userContent = getUserMessage(messages) ||
@@ -844,9 +952,12 @@ export async function handleChat(request, env) {
   const ragFiles = [];
   let ragSources = [];
   const autoFetchToolCall = getAutoFetchToolCall(userContent);
+  const autoSearchToolCall = autoFetchToolCall ? null : getAutoSearchToolCall(userContent);
   const requestedToolCall = toolCall?.name
-    ? toolCall
-    : (autoFetchToolCall || getAutoSearchToolCall(userContent));
+    ? withToolTrigger(toolCall, "explicit")
+    : (autoFetchToolCall
+      ? withToolTrigger(autoFetchToolCall, "auto_url")
+      : withToolTrigger(autoSearchToolCall, "auto_search"));
 
   if (file && file.text) {
     ragFiles.push(file);
@@ -907,7 +1018,8 @@ export async function handleChat(request, env) {
     historyMessages,
     userContent,
     requestedToolCall,
-    ragSources
+    ragSources,
+    debugTools: Boolean(debugTools)
   }), {
     headers: {
       ...corsHeaders(),

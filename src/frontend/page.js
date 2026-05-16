@@ -884,6 +884,18 @@ body.dark .toolErrorNotice{
   background:rgba(220,38,38,.12);
 }
 
+.toolDebugInfo{
+  margin-top:8px;
+  padding:7px 9px;
+  border:1px dashed var(--border);
+  border-radius:10px;
+  color:var(--muted);
+  background:rgba(148,163,184,.07);
+  font-size:11px;
+  line-height:1.45;
+  white-space:pre-wrap;
+}
+
 .inputBar{
   flex:0 0 auto;
   display:flex;
@@ -2869,9 +2881,27 @@ function renderToolError(element, toolError){
   element.appendChild(notice);
 }
 
-function renderAssistantMessage(element, text, sources, toolSources, toolError){
+function renderToolDebug(element, toolDebug){
+  if(!toolDebug || !toolDebug.name){
+    return;
+  }
+
+  const info = document.createElement("div");
+  info.className = "toolDebugInfo";
+  info.textContent = [
+    "tool: " + toolDebug.name,
+    "trigger: " + (toolDebug.trigger || ""),
+    "duration: " + Number(toolDebug.duration_ms || 0) + "ms",
+    "status: " + (toolDebug.status || ""),
+    toolDebug.code ? "code: " + toolDebug.code : ""
+  ].filter(Boolean).join(String.fromCharCode(10));
+  element.appendChild(info);
+}
+
+function renderAssistantMessage(element, text, sources, toolSources, toolError, toolDebug){
   element.innerHTML = marked.parse(text || "");
   renderToolError(element, toolError);
+  renderToolDebug(element, toolDebug);
   renderSources(element, sources);
   renderToolSources(element, toolSources);
   scrollBottom();
@@ -2968,7 +2998,7 @@ function handleStreamEvent(eventText, state, element){
     try{
       const data = JSON.parse(event.data || "{}");
       state.sources = Array.isArray(data.sources) ? data.sources : [];
-      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError);
+      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug);
     }catch(err){
       console.log("parse sources failed", err);
     }
@@ -2980,7 +3010,7 @@ function handleStreamEvent(eventText, state, element){
     try{
       const data = JSON.parse(event.data || "{}");
       state.toolSources = Array.isArray(data.sources) ? data.sources : [];
-      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError);
+      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug);
     }catch(err){
       console.log("parse tool sources failed", err);
     }
@@ -3002,9 +3032,20 @@ function handleStreamEvent(eventText, state, element){
     try{
       state.toolError = JSON.parse(event.data || "{}");
       handleToolError(state.toolError);
-      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError);
+      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug);
     }catch(err){
       console.log("parse tool error failed", err);
+    }
+
+    return false;
+  }
+
+  if(event.type === "tool_debug"){
+    try{
+      state.toolDebug = JSON.parse(event.data || "{}");
+      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug);
+    }catch(err){
+      console.log("parse tool debug failed", err);
     }
 
     return false;
@@ -3026,7 +3067,7 @@ function handleStreamEvent(eventText, state, element){
 
   if(chunk.text){
     state.reply += chunk.text;
-    renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError);
+    renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug);
   }
 
   return false;
@@ -3041,7 +3082,8 @@ async function streamAIResponse(response, element){
     reply:"",
     sources:[],
     toolSources:[],
-    toolError:null
+    toolError:null,
+    toolDebug:null
   };
 
   while(true){
@@ -3192,6 +3234,7 @@ async function sendMessage(){
         ],
         model:modelSelect.value,
         toolCall:toolCallForRequest,
+        debugTools:localStorage.getItem("wa_tool_debug") === "1",
         image:imageToSend,
         fileIds:selectedFileIds,
         file:fileToSend ? {

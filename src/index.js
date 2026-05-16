@@ -3,10 +3,12 @@ import { handleChat } from "./api/chat.js";
 import { handleFiles } from "./api/files.js";
 import { handleFetchUrl } from "./api/fetchUrl.js";
 import { handleHistory } from "./api/history.js";
+import { handleProvider } from "./api/provider.js";
 import { handleSearchAndFetch } from "./api/searchAndFetch.js";
 import { handleSearchWeb } from "./api/searchWeb.js";
 import { htmlPage } from "./frontend/page.js";
 import { requireAuth } from "./lib/auth.js";
+import { getProviderModelOptions } from "./lib/providers/index.js";
 import { getEnabledModels } from "./providers/config.js";
 import { corsHeaders, jsonResponse } from "./utils/response.js";
 
@@ -38,7 +40,10 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/api/models") {
       return jsonResponse({
-        models: getEnabledModels()
+        models: [
+          ...getProviderModelOptions(env),
+          ...getEnabledModels()
+        ]
       });
     }
 
@@ -82,6 +87,14 @@ export default {
 
       if (filesResponse) {
         return filesResponse;
+      }
+    }
+
+    if (url.pathname.startsWith("/api/provider")) {
+      const providerResponse = await handleProvider(request, env, url);
+
+      if (providerResponse) {
+        return providerResponse;
       }
     }
 

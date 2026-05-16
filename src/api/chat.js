@@ -19,6 +19,8 @@ const defaultSystemMessage = {
 };
 
 const MAX_AUTO_URL_LENGTH = 2048;
+const MAX_AUTO_SEARCH_QUERY_LENGTH = 300;
+const AUTO_SEARCH_PATTERN = /搜索|查一下|查询|联网查|最新|最近|今天|现在|当前|目前|官网|价格|新闻|发布|更新|\bsearch\b|\blook up\b|\blatest\b|\brecent\b|\btoday\b|\bcurrent\b|\bnow\b|\bnews\b|\bprice\b|\brelease\b|\bupdate\b|\bofficial\b/i;
 
 function getUserMessage(messages) {
   const userMessage = [...(messages || [])]
@@ -103,6 +105,65 @@ function getAutoFetchToolCall(userContent) {
   } catch (err) {
     return null;
   }
+}
+
+function hasBlockedUrl(userContent) {
+  const matches = String(userContent || "").match(/https?:\/\/[^\s<>"']+/gi) || [];
+
+  return matches.some(value => {
+    const candidate = cleanCandidateUrl(value);
+
+    if (!candidate) {
+      return false;
+    }
+
+    try {
+      const url = new URL(candidate);
+      return isBlockedHostname(url.hostname);
+    } catch (err) {
+      return false;
+    }
+  });
+}
+
+function cleanSearchQuery(userContent) {
+  return String(userContent || "")
+    .replace(/^\s*(帮我|请|麻烦你|麻烦|给我)?\s*(搜索|查一下|查询|联网查)\s*/i, "")
+    .replace(/^\s*(please\s+)?(search|look up)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_AUTO_SEARCH_QUERY_LENGTH);
+}
+
+function isSearchQueryLongEnough(query) {
+  const compact = String(query || "").trim();
+  const chineseChars = compact.match(/[\u4e00-\u9fff]/g) || [];
+  const latinChars = compact.match(/[a-z]/gi) || [];
+
+  return chineseChars.length >= 2 || latinChars.length >= 3;
+}
+
+function getAutoSearchToolCall(userContent) {
+  if (!AUTO_SEARCH_PATTERN.test(userContent || "")) {
+    return null;
+  }
+
+  if (hasBlockedUrl(userContent)) {
+    return null;
+  }
+
+  const query = cleanSearchQuery(userContent);
+
+  if (!isSearchQueryLongEnough(query)) {
+    return null;
+  }
+
+  return {
+    name: "web_search",
+    args: {
+      query
+    }
+  };
 }
 
 function readStreamText(value) {
@@ -453,9 +514,10 @@ export async function handleChat(request, env) {
 
   const ragFiles = [];
   let ragSources = [];
+  const autoFetchToolCall = getAutoFetchToolCall(userContent);
   const requestedToolCall = toolCall?.name
     ? toolCall
-    : getAutoFetchToolCall(userContent);
+    : (autoFetchToolCall || getAutoSearchToolCall(userContent));
   const executedToolCall = await runRequestedTool(requestedToolCall, env);
   const toolSources = buildToolSources(executedToolCall);
 

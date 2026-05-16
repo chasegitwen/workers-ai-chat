@@ -11,6 +11,11 @@ import {
 } from "./summary.js";
 import { DEFAULT_TEXT_MODEL } from "../providers/models.js";
 import { callModel } from "../providers/router.js";
+import {
+  callProvider,
+  getFallbackProvider,
+  shouldFallbackProvider
+} from "../lib/providers/index.js";
 import { runTool } from "../tools/registry.js";
 
 const defaultSystemMessage = {
@@ -637,6 +642,7 @@ function appendToolContext(modelMessages, executedToolCall) {
 function streamChatWithToolStatus({
   env,
   conversationId,
+  provider,
   model,
   modelMessages,
   historyMessages,
@@ -678,6 +684,22 @@ function streamChatWithToolStatus({
           }));
         }
       };
+      const enqueueProviderStatus = data => {
+        enqueueText(encodeSseEvent("tool_status", {
+          ...data,
+          message: data.message || ""
+        }));
+      };
+      const enqueueProviderError = error => {
+        enqueueText(encodeSseEvent("tool_error", {
+          type: "provider_error",
+          provider: error.provider || provider || "",
+          message: error.message || "Provider request failed",
+          status: error.status || 0,
+          code: error.code || "provider_error",
+          recoverable: true
+        }));
+      };
 
       try {
         const finalMessages = [...modelMessages];
@@ -699,12 +721,54 @@ function streamChatWithToolStatus({
           content: userContent
         });
 
-        const result = await callModel({
-          env,
-          model: model || DEFAULT_TEXT_MODEL,
-          messages: finalMessages,
-          stream: true
-        });
+        let result;
+        const requestedProvider = provider || "";
+
+        try {
+          enqueueProviderStatus({
+            type: "provider_status",
+            provider: requestedProvider || "default",
+            status: "calling",
+            message: "\u6b63\u5728\u8c03\u7528\u6a21\u578b..."
+          });
+
+          result = await callProvider({
+            env,
+            provider: requestedProvider,
+            model: model || DEFAULT_TEXT_MODEL,
+            messages: finalMessages,
+            stream: true
+          });
+        } catch (err) {
+          console.warn("[provider]", {
+            provider: err.provider || requestedProvider || "default",
+            status: err.status || 0,
+            code: err.code || "provider_error",
+            message: err.message || String(err)
+          });
+          enqueueProviderError(err);
+
+          if (!shouldFallbackProvider(err.provider || requestedProvider, env)) {
+            throw err;
+          }
+
+          const fallback = getFallbackProvider(env);
+          enqueueProviderStatus({
+            type: "provider_fallback",
+            from: err.provider || requestedProvider,
+            to: fallback,
+            status: "fallback",
+            message: "\u5916\u90e8\u6a21\u578b\u5931\u8d25\uff0c\u5df2\u5207\u6362\u5230 Workers AI"
+          });
+
+          result = await callProvider({
+            env,
+            provider: fallback,
+            model: DEFAULT_TEXT_MODEL,
+            messages: finalMessages,
+            stream: true
+          });
+        }
 
         const reader = result.response.getReader();
 
@@ -843,6 +907,7 @@ export async function handleChat(request, env) {
   const {
     messages = [],
     model,
+    provider,
     image,
     file,
     fileIds = [],
@@ -1013,6 +1078,7 @@ export async function handleChat(request, env) {
   return new Response(streamChatWithToolStatus({
     env,
     conversationId: conversation.id,
+    provider,
     model,
     modelMessages,
     historyMessages,

@@ -129,6 +129,42 @@ function formatToolContext(toolCall) {
   ].join("\n");
 }
 
+function buildToolSources(toolCall) {
+  if (!toolCall || toolCall.error) {
+    return [];
+  }
+
+  const result = toolCall.result || {};
+
+  if (toolCall.name === "web_search") {
+    return (Array.isArray(result.results) ? result.results : [])
+      .map(item => ({
+        type: "web_search",
+        title: item.title || "Untitled",
+        url: item.url || "",
+        snippet: item.snippet || item.description || ""
+      }))
+      .filter(source => source.url)
+      .slice(0, 8);
+  }
+
+  if (toolCall.name === "fetch_url") {
+    const preview = String(result.text || result.content || "").slice(0, 500);
+
+    return result.url
+      ? [{
+        type: "fetch_url",
+        title: result.title || "Untitled Page",
+        url: result.url,
+        snippet: preview,
+        preview
+      }]
+      : [];
+  }
+
+  return [];
+}
+
 async function runRequestedTool(toolCall, env) {
   if (!toolCall || !toolCall.name) {
     return null;
@@ -148,7 +184,7 @@ async function runRequestedTool(toolCall, env) {
   }
 }
 
-function streamWithHistorySave(result, env, conversationId, sources = []) {
+function streamWithHistorySave(result, env, conversationId, sources = [], toolSources = []) {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
   let buffer = "";
@@ -194,6 +230,13 @@ function streamWithHistorySave(result, env, conversationId, sources = []) {
         controller.enqueue(encoder.encode(
           "event: sources\n" +
           "data: " + JSON.stringify({ sources }) + "\n\n"
+        ));
+      }
+
+      if (toolSources.length) {
+        controller.enqueue(encoder.encode(
+          "event: tool_sources\n" +
+          "data: " + JSON.stringify({ sources: toolSources }) + "\n\n"
         ));
       }
 
@@ -332,6 +375,7 @@ export async function handleChat(request, env) {
   const ragFiles = [];
   let ragSources = [];
   const executedToolCall = await runRequestedTool(toolCall, env);
+  const toolSources = buildToolSources(executedToolCall);
 
   if (file && file.text) {
     ragFiles.push(file);
@@ -420,7 +464,7 @@ export async function handleChat(request, env) {
     });
     const aiResponse = result.response;
 
-    return new Response(streamWithHistorySave(aiResponse, env, conversation.id, ragSources), {
+    return new Response(streamWithHistorySave(aiResponse, env, conversation.id, ragSources, toolSources), {
       headers: {
         ...corsHeaders(),
         "X-Conversation-Id": conversation.id,

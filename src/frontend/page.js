@@ -844,6 +844,7 @@ body.authenticated .loginScreen{
   overflow:hidden;
   text-overflow:ellipsis;
   font-size:12px;
+  text-decoration:none;
 }
 
 .sourceCitationBtn:hover{
@@ -2800,9 +2801,51 @@ function renderSources(element, sources){
   element.appendChild(wrapper);
 }
 
-function renderAssistantMessage(element, text, sources){
+function renderToolSources(element, sources){
+  if(!Array.isArray(sources) || !sources.length){
+    return;
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "sourceCitations toolSourceCitations";
+
+  const title = document.createElement("div");
+  title.className = "sourceCitationsTitle";
+  title.textContent = sources.some(source => source.type === "fetch_url")
+    ? "\u7f51\u9875\u6765\u6e90\uff1a"
+    : "\u8054\u7f51\u6765\u6e90\uff1a";
+  wrapper.appendChild(title);
+
+  sources.forEach(source => {
+    const item = document.createElement("div");
+    item.className = "sourceCitationItem";
+
+    const link = document.createElement("a");
+    link.className = "sourceCitationBtn";
+    link.href = source.url || "#";
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = (source.title || source.url || "Untitled") + (source.url ? " - " + source.url : "");
+    link.title = link.textContent;
+
+    const preview = document.createElement("div");
+    preview.className = "sourceCitationPreview active";
+    preview.textContent = String(source.snippet || source.preview || "").slice(0, 500);
+
+    item.appendChild(link);
+    if(preview.textContent){
+      item.appendChild(preview);
+    }
+    wrapper.appendChild(item);
+  });
+
+  element.appendChild(wrapper);
+}
+
+function renderAssistantMessage(element, text, sources, toolSources){
   element.innerHTML = marked.parse(text || "");
   renderSources(element, sources);
+  renderToolSources(element, toolSources);
   scrollBottom();
 }
 
@@ -2873,9 +2916,21 @@ function handleStreamEvent(eventText, state, element){
     try{
       const data = JSON.parse(event.data || "{}");
       state.sources = Array.isArray(data.sources) ? data.sources : [];
-      renderAssistantMessage(element, state.reply, state.sources);
+      renderAssistantMessage(element, state.reply, state.sources, state.toolSources);
     }catch(err){
       console.log("parse sources failed", err);
+    }
+
+    return false;
+  }
+
+  if(event.type === "tool_sources"){
+    try{
+      const data = JSON.parse(event.data || "{}");
+      state.toolSources = Array.isArray(data.sources) ? data.sources : [];
+      renderAssistantMessage(element, state.reply, state.sources, state.toolSources);
+    }catch(err){
+      console.log("parse tool sources failed", err);
     }
 
     return false;
@@ -2897,7 +2952,7 @@ function handleStreamEvent(eventText, state, element){
 
   if(chunk.text){
     state.reply += chunk.text;
-    renderAssistantMessage(element, state.reply, state.sources);
+    renderAssistantMessage(element, state.reply, state.sources, state.toolSources);
   }
 
   return false;
@@ -2910,7 +2965,8 @@ async function streamAIResponse(response, element){
   let buffer = "";
   const state = {
     reply:"",
-    sources:[]
+    sources:[],
+    toolSources:[]
   };
 
   while(true){
@@ -3022,6 +3078,12 @@ async function sendMessage(){
   sendBtn.disabled = true;
 
   const aiDiv = addAIMessage();
+  const toolCallForRequest = pendingToolCall || (webPageToSend ? {
+    name:"fetch_url",
+    args:{
+      url:webPageToSend.url
+    }
+  } : null);
 
   aiDiv.innerHTML =
     "<span class='loading'>思考中...</span>";
@@ -3054,7 +3116,7 @@ async function sendMessage(){
           }
         ],
         model:modelSelect.value,
-        toolCall:pendingToolCall,
+        toolCall:toolCallForRequest,
         image:imageToSend,
         fileIds:selectedFileIds,
         file:fileToSend ? {
@@ -3097,7 +3159,8 @@ async function sendMessage(){
     conversation.push({
       role:"assistant",
       content:reply || "",
-      sources:streamResult.sources || []
+      sources:streamResult.sources || [],
+      toolSources:streamResult.toolSources || []
     });
     webSearchContext = "";
     webSearchSources = [];

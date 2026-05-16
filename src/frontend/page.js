@@ -2849,6 +2849,22 @@ function renderAssistantMessage(element, text, sources, toolSources){
   scrollBottom();
 }
 
+function handleToolStatus(status){
+  if(!status || !status.message){
+    return;
+  }
+
+  setContextStatus(status.message);
+
+  if(status.status === "done"){
+    setTimeout(() => {
+      if(contextStatus.textContent === status.message){
+        setContextStatus(getCurrentContextStatus());
+      }
+    }, 1200);
+  }
+}
+
 async function typeWriter(element, text){
 
   let current = "";
@@ -2931,6 +2947,16 @@ function handleStreamEvent(eventText, state, element){
       renderAssistantMessage(element, state.reply, state.sources, state.toolSources);
     }catch(err){
       console.log("parse tool sources failed", err);
+    }
+
+    return false;
+  }
+
+  if(event.type === "tool_status"){
+    try{
+      handleToolStatus(JSON.parse(event.data || "{}"));
+    }catch(err){
+      console.log("parse tool status failed", err);
     }
 
     return false;

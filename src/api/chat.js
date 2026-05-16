@@ -324,6 +324,178 @@ async function runRequestedTool(toolCall, env) {
   }
 }
 
+function getToolStatusMessage(name, status) {
+  const messages = {
+    web_search: {
+      running: "\u6b63\u5728\u8054\u7f51\u641c\u7d22...",
+      done: "\u8054\u7f51\u641c\u7d22\u5b8c\u6210",
+      error: "\u8054\u7f51\u641c\u7d22\u5931\u8d25"
+    },
+    fetch_url: {
+      running: "\u6b63\u5728\u6293\u53d6\u7f51\u9875...",
+      done: "\u7f51\u9875\u6293\u53d6\u5b8c\u6210",
+      error: "\u7f51\u9875\u6293\u53d6\u5931\u8d25"
+    }
+  };
+
+  return messages[name]?.[status] || "";
+}
+
+function encodeSseEvent(event, data) {
+  return (
+    (event ? "event: " + event + "\n" : "") +
+    "data: " + JSON.stringify(data) + "\n\n"
+  );
+}
+
+function appendReplyFromSseBuffer(bufferState, replyState) {
+  const events = bufferState.value.split("\n\n");
+  bufferState.value = events.pop() || "";
+
+  for (const event of events) {
+    const lines = event
+      .split("\n")
+      .filter(line => line.startsWith("data:"))
+      .map(line => line.slice(5).trimStart());
+
+    for (const line of lines) {
+      replyState.value += readStreamText(line);
+    }
+  }
+}
+
+function appendToolContext(modelMessages, executedToolCall) {
+  if (!executedToolCall) {
+    return;
+  }
+
+  const toolContext = executedToolCall.error
+    ? [
+      "A requested tool call failed.",
+      "Tool: " + executedToolCall.name,
+      "Error: " + executedToolCall.error,
+      "Please explain the failure clearly and continue with any available context."
+    ].join("\n")
+    : [
+      "The user requested a single tool call before answering.",
+      "Use the following tool result as context. Do not claim to have browsed beyond this result.",
+      "",
+      formatToolContext(executedToolCall)
+    ].join("\n");
+
+  modelMessages.push({
+    role: "user",
+    content: toolContext
+  });
+}
+
+function streamChatWithToolStatus({
+  env,
+  conversationId,
+  model,
+  modelMessages,
+  historyMessages,
+  userContent,
+  requestedToolCall,
+  ragSources
+}) {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+
+  return new ReadableStream({
+    async start(controller) {
+      const bufferState = { value: "" };
+      const replyState = { value: "" };
+      let toolSources = [];
+
+      const enqueueText = text => controller.enqueue(encoder.encode(text));
+      const enqueueToolStatus = (name, status) => {
+        enqueueText(encodeSseEvent("tool_status", {
+          name,
+          status,
+          message: getToolStatusMessage(name, status)
+        }));
+      };
+
+      try {
+        const finalMessages = [...modelMessages];
+        let executedToolCall = null;
+
+        if (requestedToolCall?.name) {
+          enqueueToolStatus(requestedToolCall.name, "running");
+          executedToolCall = await runRequestedTool(requestedToolCall, env);
+          enqueueToolStatus(requestedToolCall.name, executedToolCall.error ? "error" : "done");
+          toolSources = buildToolSources(executedToolCall);
+        }
+
+        appendToolContext(finalMessages, executedToolCall);
+        finalMessages.push(...historyMessages);
+        finalMessages.push({
+          role: "user",
+          content: userContent
+        });
+
+        const result = await callModel({
+          env,
+          model: model || DEFAULT_TEXT_MODEL,
+          messages: finalMessages,
+          stream: true
+        });
+
+        const reader = result.response.getReader();
+
+        while (true) {
+          const { value, done } = await reader.read();
+
+          if (done) {
+            break;
+          }
+
+          controller.enqueue(value);
+          bufferState.value += decoder.decode(value, { stream: true });
+          appendReplyFromSseBuffer(bufferState, replyState);
+        }
+
+        if (bufferState.value.trim()) {
+          appendReplyFromSseBuffer({ value: bufferState.value + "\n\n" }, replyState);
+        }
+
+        if (env.DB && replyState.value) {
+          await saveMessage(env.DB, conversationId, "assistant", replyState.value);
+          await maybeUpdateConversationSummary(env, conversationId);
+        }
+
+        if (ragSources.length) {
+          enqueueText(encodeSseEvent("sources", { sources: ragSources }));
+        }
+
+        if (toolSources.length) {
+          enqueueText(encodeSseEvent("tool_sources", { sources: toolSources }));
+        }
+
+        enqueueText("data: " + JSON.stringify({ conversationId }) + "\n\n");
+        enqueueText("event: done\ndata: {}\n\n");
+        enqueueText("data: [DONE]\n\n");
+      } catch (err) {
+        console.log("AI request failed", err);
+
+        enqueueText("data: " + JSON.stringify({
+          response:
+            "AI \u8bf7\u6c42\u5931\u8d25\uff1a\n\n" +
+            "name: " + err.name + "\n" +
+            "message: " + err.message + "\n" +
+            "stack: " + err.stack
+        }) + "\n\n");
+        enqueueText("data: " + JSON.stringify({ conversationId }) + "\n\n");
+        enqueueText("event: done\ndata: {}\n\n");
+        enqueueText("data: [DONE]\n\n");
+      } finally {
+        controller.close();
+      }
+    }
+  });
+}
+
 function streamWithHistorySave(result, env, conversationId, sources = [], toolSources = []) {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
@@ -518,8 +690,6 @@ export async function handleChat(request, env) {
   const requestedToolCall = toolCall?.name
     ? toolCall
     : (autoFetchToolCall || getAutoSearchToolCall(userContent));
-  const executedToolCall = await runRequestedTool(requestedToolCall, env);
-  const toolSources = buildToolSources(executedToolCall);
 
   if (file && file.text) {
     ragFiles.push(file);
@@ -572,70 +742,22 @@ export async function handleChat(request, env) {
     });
   }
 
-  if (executedToolCall) {
-    const toolContext = executedToolCall.error
-      ? [
-        "A requested tool call failed.",
-        "Tool: " + executedToolCall.name,
-        "Error: " + executedToolCall.error,
-        "Please explain the failure clearly and continue with any available context."
-      ].join("\n")
-      : [
-        "The user requested a single tool call before answering.",
-        "Use the following tool result as context. Do not claim to have browsed beyond this result.",
-        "",
-        formatToolContext(executedToolCall)
-      ].join("\n");
-
-    modelMessages.push({
-      role: "user",
-      content: toolContext
-    });
-  }
-
-  modelMessages.push(...historyMessages);
-  modelMessages.push({
-    role: "user",
-    content: userContent
+  return new Response(streamChatWithToolStatus({
+    env,
+    conversationId: conversation.id,
+    model,
+    modelMessages,
+    historyMessages,
+    userContent,
+    requestedToolCall,
+    ragSources
+  }), {
+    headers: {
+      ...corsHeaders(),
+      "X-Conversation-Id": conversation.id,
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive"
+    }
   });
-
-  try {
-    const result = await callModel({
-      env,
-      model: model || DEFAULT_TEXT_MODEL,
-      messages: modelMessages,
-      stream: true
-    });
-    const aiResponse = result.response;
-
-    return new Response(streamWithHistorySave(aiResponse, env, conversation.id, ragSources, toolSources), {
-      headers: {
-        ...corsHeaders(),
-        "X-Conversation-Id": conversation.id,
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache"
-      }
-    });
-  } catch (err) {
-    console.log("AI request failed", err);
-
-    return new Response(
-      "data: " + JSON.stringify({
-        response:
-          "AI \u8bf7\u6c42\u5931\u8d25\uff1a\n\n" +
-          "name: " + err.name + "\n" +
-          "message: " + err.message + "\n" +
-          "stack: " + err.stack
-      }) + "\n\n",
-      {
-        headers: {
-          ...corsHeaders(),
-          "X-Conversation-Id": conversation.id,
-          "Content-Type": "text/event-stream; charset=utf-8",
-          "Cache-Control": "no-cache",
-          "Connection": "keep-alive"
-        }
-      }
-    );
-  }
 }

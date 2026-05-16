@@ -18,12 +18,91 @@ const defaultSystemMessage = {
   content: "\u4f60\u662f\u4e00\u4e2a\u7f51\u9875 AI \u52a9\u624b\uff0c\u8bf7\u7b80\u6d01\u3001\u51c6\u786e\u3001\u53cb\u597d\u5730\u56de\u7b54\u3002\u53ef\u4ee5\u4f7f\u7528 Markdown\u3002"
 };
 
+const MAX_AUTO_URL_LENGTH = 2048;
+
 function getUserMessage(messages) {
   const userMessage = [...(messages || [])]
     .reverse()
     .find(message => message.role === "user");
 
   return (userMessage?.content || "").trim();
+}
+
+function cleanCandidateUrl(value) {
+  return String(value || "").replace(/[)\].,;!?，。；！？）】]+$/u, "");
+}
+
+function isPrivateIPv4(hostname) {
+  const parts = hostname.split(".");
+
+  if (parts.length !== 4 || !parts.every(part => /^\d+$/.test(part))) {
+    return false;
+  }
+
+  const numbers = parts.map(part => Number(part));
+
+  if (numbers.some(value => value < 0 || value > 255)) {
+    return true;
+  }
+
+  const [a, b] = numbers;
+
+  return (
+    a === 10 ||
+    a === 127 ||
+    a === 0 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168)
+  );
+}
+
+function isBlockedHostname(hostname) {
+  const host = String(hostname || "").toLowerCase();
+
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "0.0.0.0" ||
+    host === "::1" ||
+    host === "[::1]" ||
+    isPrivateIPv4(host)
+  );
+}
+
+function getAutoFetchToolCall(userContent) {
+  const match = String(userContent || "").match(/https?:\/\/[^\s<>"']+/i);
+
+  if (!match) {
+    return null;
+  }
+
+  const candidate = cleanCandidateUrl(match[0]);
+
+  if (!candidate || candidate.length > MAX_AUTO_URL_LENGTH) {
+    return null;
+  }
+
+  try {
+    const url = new URL(candidate);
+
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+
+    if (isBlockedHostname(url.hostname)) {
+      return null;
+    }
+
+    return {
+      name: "fetch_url",
+      args: {
+        url: url.href
+      }
+    };
+  } catch (err) {
+    return null;
+  }
 }
 
 function readStreamText(value) {
@@ -374,7 +453,10 @@ export async function handleChat(request, env) {
 
   const ragFiles = [];
   let ragSources = [];
-  const executedToolCall = await runRequestedTool(toolCall, env);
+  const requestedToolCall = toolCall?.name
+    ? toolCall
+    : getAutoFetchToolCall(userContent);
+  const executedToolCall = await runRequestedTool(requestedToolCall, env);
   const toolSources = buildToolSources(executedToolCall);
 
   if (file && file.text) {

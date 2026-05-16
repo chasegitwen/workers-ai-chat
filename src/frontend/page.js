@@ -18,28 +18,62 @@ export function htmlPage() {
 
 <style>
 
-  #imageBtn{
+  .menuButton{
     border:none;
-    background:#666;
+    background:#4b5563;
     color:white;
+    min-width:38px;
     min-height:38px;
-    padding:0 14px;
+    padding:0 11px;
     border-radius:999px;
-    font-size:14px;
+    font-size:18px;
+    line-height:1;
     cursor:pointer;
     flex:0 0 auto;
   }
 
-  #fileBtn{
-    border:none;
-    background:#4b5563;
-    color:white;
-    min-height:38px;
-    padding:0 14px;
-    border-radius:999px;
-    font-size:14px;
-    cursor:pointer;
+  .inputMenuWrap{
+    position:relative;
+    display:flex;
+    align-items:center;
     flex:0 0 auto;
+  }
+
+  .inputMenu{
+    position:absolute;
+    bottom:calc(100% + 8px);
+    left:0;
+    min-width:128px;
+    display:none;
+    flex-direction:column;
+    gap:4px;
+    padding:6px;
+    border:1px solid var(--border);
+    border-radius:12px;
+    background:var(--panel);
+    box-shadow:0 12px 32px rgba(15,23,42,.16);
+    z-index:10;
+  }
+
+  .inputMenu.open{
+    display:flex;
+  }
+
+  .inputMenu button{
+    border:none;
+    background:transparent;
+    color:var(--text);
+    border-radius:8px;
+    padding:8px 10px;
+    font-size:13px;
+    text-align:left;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+
+  .inputMenu button:hover{
+    background:rgba(37,99,235,.08);
+    color:var(--primary);
   }
   
   #fileStatus{
@@ -344,28 +378,39 @@ body.authenticated .loginScreen{
 .historyList{
   display:flex;
   flex-direction:column;
-  gap:8px;
+  gap:2px;
   flex:1 1 auto;
   min-height:120px;
   overflow-y:auto;
-  margin-bottom:14px;
+  margin-bottom:10px;
 }
 
 .historyRow{
   display:flex;
   align-items:center;
-  gap:6px;
+  gap:8px;
+  min-height:32px;
+  padding:0 4px 0 8px;
+  border-radius:8px;
+}
+
+.historyRow:hover{
+  background:rgba(37,99,235,.06);
+}
+
+.historyRow.active{
+  background:rgba(37,99,235,.1);
 }
 
 .historyItem{
   min-width:0;
   flex:1;
   width:100%;
-  border:1px solid var(--border);
+  border:none;
   background:transparent;
   color:var(--text);
-  border-radius:12px;
-  padding:9px 10px;
+  border-radius:0;
+  padding:7px 0;
   font-size:13px;
   text-align:left;
   cursor:pointer;
@@ -375,26 +420,48 @@ body.authenticated .loginScreen{
 }
 
 .historyItem.active{
-  border-color:var(--primary);
-  background:rgba(37,99,235,.1);
+  background:transparent;
   color:var(--primary);
+  font-weight:600;
+}
+
+.historyTime{
+  flex:0 0 auto;
+  max-width:58px;
+  color:var(--muted);
+  font-size:11px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 
 .deleteConversationBtn{
-  width:30px;
-  height:30px;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  width:26px;
+  height:26px;
   flex:0 0 auto;
-  border:1px solid var(--border);
+  border:none;
   background:transparent;
   color:var(--muted);
-  border-radius:10px;
+  border-radius:8px;
   cursor:pointer;
+  font-size:16px;
+  line-height:1;
+}
+
+.historyRow:hover .historyTime{
+  display:none;
+}
+
+.historyRow:hover .deleteConversationBtn{
+  display:flex;
 }
 
 .deleteConversationBtn:hover{
   color:white;
   background:#dc2626;
-  border-color:#dc2626;
 }
 
 .libraryPanel{
@@ -410,12 +477,54 @@ body.authenticated .loginScreen{
   margin:0 0 14px;
 }
 
+.libraryPanel.collapsed{
+  max-height:none;
+  padding:8px 0;
+}
+
 .libraryHeader{
   display:flex;
   align-items:center;
   justify-content:space-between;
   gap:8px;
-  margin-bottom:8px;
+  margin-bottom:0;
+  padding:2px 0;
+}
+
+#libraryToggle{
+  cursor:pointer;
+}
+
+.libraryTitle{
+  min-width:0;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  color:var(--text);
+}
+
+.libraryTitle strong{
+  font-size:14px;
+}
+
+.libraryChevron{
+  color:var(--muted);
+  transition:transform .16s ease;
+}
+
+.libraryPanel.expanded .libraryChevron{
+  transform:rotate(90deg);
+}
+
+.libraryBody{
+  display:none;
+  min-height:0;
+  flex-direction:column;
+  margin-top:8px;
+}
+
+.libraryPanel.expanded .libraryBody{
+  display:flex;
 }
 
 .libraryHeader strong{
@@ -801,9 +910,9 @@ body.authenticated .loginScreen{
 .inputPrimaryActions{
   display:flex;
   align-items:center;
-  gap:8px;
+  gap:6px;
   flex:0 1 auto;
-  flex-wrap:wrap;
+  flex-wrap:nowrap;
   justify-content:flex-end;
 }
 
@@ -811,12 +920,18 @@ body.authenticated .loginScreen{
   min-height:38px;
   border:none;
   color:white;
-  padding:0 14px;
+  padding:0 12px;
   border-radius:999px;
   font-size:14px;
   cursor:pointer;
   white-space:nowrap;
   flex:0 0 auto;
+  background:#475569;
+}
+
+.toolMenuWrap .inputMenu{
+  left:auto;
+  right:0;
 }
 
 .toolBtn:disabled{
@@ -824,16 +939,9 @@ body.authenticated .loginScreen{
   cursor:not-allowed;
 }
 
-#searchBtn{
-  background:#7c3aed;
-}
-
-#webAnswerBtn{
-  background:#dc2626;
-}
-
-#fetchUrlBtn{
-  background:#059669;
+.inputMenu button:disabled{
+  opacity:.55;
+  cursor:not-allowed;
 }
 
 #modelSelect{
@@ -963,25 +1071,34 @@ body.authenticated .loginScreen{
 
         <div id="conversationList" class="historyList"></div>
 
-        <div class="libraryPanel">
-          <div class="libraryHeader">
-            <strong>&#x6587;&#x4EF6;&#x5E93;</strong>
-            <button id="refreshFilesBtn" type="button">&#x5237;&#x65B0;</button>
+        <div id="libraryPanel" class="libraryPanel collapsed">
+          <div id="libraryToggle" class="libraryHeader" role="button" tabindex="0" aria-expanded="false">
+            <div class="libraryTitle">
+              <span aria-hidden="true">&#x1F4C1;</span>
+              <strong>&#x6587;&#x4EF6;&#x5E93;&#xFF08;<span id="fileLibraryCount">0</span>&#xFF09;</strong>
+            </div>
+            <span class="libraryChevron" aria-hidden="true">&#x203A;</span>
           </div>
-          <div class="librarySearch">
-            <input id="fileSearchInput" type="search" placeholder="&#x641C;&#x7D22;&#x6587;&#x4EF6;" />
-            <button id="fileSearchBtn" type="button">&#x641C;&#x7D22;</button>
+          <div id="filesLibraryBody" class="libraryBody">
+            <div class="libraryHeader">
+              <strong>&#x6587;&#x4EF6;</strong>
+              <button id="refreshFilesBtn" type="button">&#x5237;&#x65B0;</button>
+            </div>
+            <div class="librarySearch">
+              <input id="fileSearchInput" type="search" placeholder="&#x641C;&#x7D22;&#x6587;&#x4EF6;" />
+              <button id="fileSearchBtn" type="button">&#x641C;&#x7D22;</button>
+            </div>
+            <select id="fileSortSelect" class="librarySort">
+              <option value="latest">&#x6700;&#x65B0;&#x4F18;&#x5148;</option>
+              <option value="name">&#x6587;&#x4EF6;&#x540D; A-Z</option>
+              <option value="size">&#x6587;&#x4EF6;&#x5927;&#x5C0F;</option>
+            </select>
+            <div class="librarySelectedRow">
+              <div id="selectedFilesCount" class="libraryCount">&#x5DF2;&#x9009;&#x62E9; 0 &#x4E2A;&#x6587;&#x4EF6;</div>
+              <button id="clearSelectedFilesBtn" class="clearSelectedFilesBtn" type="button">&#x6E05;&#x7A7A;</button>
+            </div>
+            <div id="filesList" class="filesList"></div>
           </div>
-          <select id="fileSortSelect" class="librarySort">
-            <option value="latest">&#x6700;&#x65B0;&#x4F18;&#x5148;</option>
-            <option value="name">&#x6587;&#x4EF6;&#x540D; A-Z</option>
-            <option value="size">&#x6587;&#x4EF6;&#x5927;&#x5C0F;</option>
-          </select>
-          <div class="librarySelectedRow">
-            <div id="selectedFilesCount" class="libraryCount">&#x5DF2;&#x9009;&#x62E9; 0 &#x4E2A;&#x6587;&#x4EF6;</div>
-            <button id="clearSelectedFilesBtn" class="clearSelectedFilesBtn" type="button">&#x6E05;&#x7A7A;</button>
-          </div>
-          <div id="filesList" class="filesList"></div>
         </div>
 
       </div>
@@ -1073,13 +1190,13 @@ body.authenticated .loginScreen{
   <div class="inputShell">
 
     <div class="inputActions">
-      <button id="fileBtn" type="button">
-        &#x6587;&#x4EF6;
-      </button>
-
-      <button id="imageBtn" type="button">
-        &#x56FE;&#x7247;
-      </button>
+      <div class="inputMenuWrap">
+        <button id="attachmentMenuBtn" class="menuButton" type="button" aria-haspopup="menu" aria-expanded="false" title="&#x6DFB;&#x52A0;&#x9644;&#x4EF6;">+</button>
+        <div id="attachmentMenu" class="inputMenu" role="menu">
+          <button id="fileBtn" type="button" role="menuitem">&#x4E0A;&#x4F20;&#x6587;&#x4EF6;</button>
+          <button id="imageBtn" type="button" role="menuitem">&#x4E0A;&#x4F20;&#x56FE;&#x7247;</button>
+        </div>
+      </div>
     </div>
 
     <input
@@ -1088,17 +1205,14 @@ body.authenticated .loginScreen{
     />
 
     <div class="inputPrimaryActions">
-      <button id="searchBtn" class="toolBtn" type="button">
-        &#x641C;&#x7D22;
-      </button>
-
-      <button id="webAnswerBtn" class="toolBtn" type="button">
-        &#x8054;&#x7F51;&#x56DE;&#x7B54;
-      </button>
-
-      <button id="fetchUrlBtn" class="toolBtn" type="button">
-        &#x6293;&#x53D6;&#x7F51;&#x9875;
-      </button>
+      <div class="inputMenuWrap toolMenuWrap">
+        <button id="toolMenuBtn" class="toolBtn" type="button" aria-haspopup="menu" aria-expanded="false" title="&#x8054;&#x7F51;&#x002F;&#x5DE5;&#x5177;">&#x8054;&#x7F51;</button>
+        <div id="toolMenu" class="inputMenu toolMenu" role="menu">
+          <button id="searchBtn" type="button" role="menuitem">&#x641C;&#x7D22;</button>
+          <button id="webAnswerBtn" type="button" role="menuitem">&#x8054;&#x7F51;&#x67E5;&#x8BE2;</button>
+          <button id="fetchUrlBtn" type="button" role="menuitem">&#x6293;&#x53D6;&#x7F51;&#x9875;</button>
+        </div>
+      </div>
 
       <button id="sendBtn" type="button">
         &#x53D1;&#x9001;
@@ -1141,6 +1255,9 @@ const loginError = document.getElementById("loginError");
 const logoutBtn = document.getElementById("logoutBtn");
 const newChatBtn = document.getElementById("newChatBtn");
 const conversationList = document.getElementById("conversationList");
+const libraryPanel = document.getElementById("libraryPanel");
+const libraryToggle = document.getElementById("libraryToggle");
+const fileLibraryCount = document.getElementById("fileLibraryCount");
 const refreshFilesBtn = document.getElementById("refreshFilesBtn");
 const fileSearchInput = document.getElementById("fileSearchInput");
 const fileSearchBtn = document.getElementById("fileSearchBtn");
@@ -1152,9 +1269,13 @@ const summaryStatus = document.getElementById("summaryStatus");
 const viewSummaryBtn = document.getElementById("viewSummaryBtn");
 
 const input = document.getElementById("input");
+const attachmentMenuBtn = document.getElementById("attachmentMenuBtn");
+const attachmentMenu = document.getElementById("attachmentMenu");
 
 const contextStatus = document.getElementById("contextStatus");
 
+const toolMenuBtn = document.getElementById("toolMenuBtn");
+const toolMenu = document.getElementById("toolMenu");
 const searchBtn = document.getElementById("searchBtn");
 
 const webAnswerBtn = document.getElementById("webAnswerBtn");
@@ -1196,6 +1317,8 @@ let filesLibrary = [];
 let selectedFileIds = [];
 let fileLibraryQuery = "";
 let fileLibrarySort = "latest";
+let isFileLibraryExpanded = false;
+let activeInputMenu = null;
 let expandedFileId = null;
 let fileDetailsCache = {};
 let fileChunksCache = {};
@@ -1357,6 +1480,56 @@ function formatDate(value){
   return date.toLocaleString();
 }
 
+function formatHistoryTime(value){
+  if(!value){
+    return "";
+  }
+
+  const date = new Date(value);
+
+  if(Number.isNaN(date.getTime())){
+    return "";
+  }
+
+  return date.toLocaleDateString([], { month:"2-digit", day:"2-digit" });
+}
+
+function setFileLibraryExpanded(expanded){
+  isFileLibraryExpanded = Boolean(expanded);
+  libraryPanel.classList.toggle("expanded", isFileLibraryExpanded);
+  libraryPanel.classList.toggle("collapsed", !isFileLibraryExpanded);
+  libraryToggle.setAttribute("aria-expanded", String(isFileLibraryExpanded));
+}
+
+function toggleFileLibrary(){
+  setFileLibraryExpanded(!isFileLibraryExpanded);
+}
+
+function closeInputMenus(){
+  activeInputMenu = null;
+  attachmentMenu.classList.remove("open");
+  toolMenu.classList.remove("open");
+  attachmentMenuBtn.setAttribute("aria-expanded", "false");
+  toolMenuBtn.setAttribute("aria-expanded", "false");
+}
+
+function toggleInputMenu(menuName){
+  const nextMenu = activeInputMenu === menuName ? null : menuName;
+  closeInputMenus();
+
+  if(nextMenu === "attachment"){
+    activeInputMenu = nextMenu;
+    attachmentMenu.classList.add("open");
+    attachmentMenuBtn.setAttribute("aria-expanded", "true");
+  }
+
+  if(nextMenu === "tool"){
+    activeInputMenu = nextMenu;
+    toolMenu.classList.add("open");
+    toolMenuBtn.setAttribute("aria-expanded", "true");
+  }
+}
+
 function updateSelectedFilesStatus(){
   selectedFilesCount.textContent = "\u5df2\u9009\u62e9 " + selectedFileIds.length + " \u4e2a\u6587\u4ef6";
   clearSelectedFilesBtn.style.display = selectedFileIds.length ? "inline-block" : "none";
@@ -1439,6 +1612,7 @@ function renderFileDetailPanel(fileId){
 }
 
 function renderFilesLibrary(){
+  fileLibraryCount.textContent = String(filesLibrary.length);
   filesList.innerHTML = "";
   updateSelectedFilesStatus();
 
@@ -1657,6 +1831,7 @@ function clearSelectedImage(){
   setContextStatus(getCurrentContextStatus());
 }
 imageBtn.addEventListener("click", () => {
+  closeInputMenus();
   imageInput.click();
 });
 
@@ -1690,6 +1865,7 @@ imageInput.addEventListener("change", () => {
 removeImageBtn.addEventListener("click", clearSelectedImage);
 
 fileBtn.addEventListener("click", () => {
+  closeInputMenus();
   fileInput.click();
 });
 
@@ -1816,8 +1992,14 @@ function renderSearchResults(results){
 
 clearFileBtn.addEventListener("click", clearSelectedFile);
 
-searchBtn.addEventListener("click", searchWeb);
-webAnswerBtn.addEventListener("click", webAnswer);
+searchBtn.addEventListener("click", () => {
+  closeInputMenus();
+  searchWeb();
+});
+webAnswerBtn.addEventListener("click", () => {
+  closeInputMenus();
+  webAnswer();
+});
 async function webAnswer(){
 
   const query = input.value.trim();
@@ -1882,10 +2064,13 @@ async function webAnswer(){
   }
 
   webAnswerBtn.disabled = false;
-  webAnswerBtn.textContent = "\u8054\u7f51\u56de\u7b54";
+  webAnswerBtn.textContent = "\u8054\u7f51\u67e5\u8be2";
 }
 
-fetchUrlBtn.addEventListener("click", fetchWebPage);
+fetchUrlBtn.addEventListener("click", () => {
+  closeInputMenus();
+  fetchWebPage();
+});
 
 async function fetchWebPage(pageUrlFromResult){
   const pageUrl = (typeof pageUrlFromResult === "string" ? pageUrlFromResult : input.value).trim();
@@ -2191,6 +2376,9 @@ function setActiveConversation(){
   conversationList.querySelectorAll(".historyItem").forEach(item => {
     item.classList.toggle("active", item.dataset.id === currentConversationId);
   });
+  conversationList.querySelectorAll(".historyRow").forEach(row => {
+    row.classList.toggle("active", row.dataset.id === currentConversationId);
+  });
 }
 
 function setSummaryStatus(enabled){
@@ -2274,6 +2462,7 @@ async function loadConversations(){
     conversationsCache.forEach(item => {
       const row = document.createElement("div");
       row.className = "historyRow";
+      row.dataset.id = item.id;
 
       const btn = document.createElement("button");
       btn.type = "button";
@@ -2284,6 +2473,10 @@ async function loadConversations(){
         ? btn.textContent + "\\n" + item.last_message_preview
         : btn.textContent;
       btn.addEventListener("click", () => loadConversationMessages(item.id));
+
+      const time = document.createElement("span");
+      time.className = "historyTime";
+      time.textContent = formatHistoryTime(item.updated_at || item.created_at);
 
       const deleteBtn = document.createElement("button");
       deleteBtn.type = "button";
@@ -2296,6 +2489,7 @@ async function loadConversations(){
       });
 
       row.appendChild(btn);
+      row.appendChild(time);
       row.appendChild(deleteBtn);
       conversationList.appendChild(row);
     });
@@ -2403,6 +2597,13 @@ input.addEventListener("keydown", e => {
 sendBtn.addEventListener("click", sendMessage);
 newChatBtn.addEventListener("click", createNewConversation);
 viewSummaryBtn.addEventListener("click", viewCurrentSummary);
+libraryToggle.addEventListener("click", toggleFileLibrary);
+libraryToggle.addEventListener("keydown", e => {
+  if(e.key === "Enter" || e.key === " "){
+    e.preventDefault();
+    toggleFileLibrary();
+  }
+});
 refreshFilesBtn.addEventListener("click", loadFilesLibrary);
 fileSearchBtn.addEventListener("click", searchFilesLibrary);
 fileSearchInput.addEventListener("keydown", e => {
@@ -2415,8 +2616,25 @@ fileSortSelect.addEventListener("change", () => {
   renderFilesLibrary();
 });
 clearSelectedFilesBtn.addEventListener("click", clearSelectedLibraryFiles);
+attachmentMenuBtn.addEventListener("click", event => {
+  event.stopPropagation();
+  toggleInputMenu("attachment");
+});
+toolMenuBtn.addEventListener("click", event => {
+  event.stopPropagation();
+  toggleInputMenu("tool");
+});
+attachmentMenu.addEventListener("click", event => event.stopPropagation());
+toolMenu.addEventListener("click", event => event.stopPropagation());
+document.addEventListener("click", closeInputMenus);
+document.addEventListener("keydown", event => {
+  if(event.key === "Escape"){
+    closeInputMenus();
+  }
+});
 loginForm.addEventListener("submit", login);
 logoutBtn.addEventListener("click", logout);
+setFileLibraryExpanded(false);
 checkAuth();
 
 function toggleTheme(){

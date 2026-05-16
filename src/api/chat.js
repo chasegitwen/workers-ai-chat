@@ -305,20 +305,170 @@ function buildToolSources(toolCall) {
   return [];
 }
 
+function getToolArgUrl(args = {}) {
+  return String(args.url || args.pageUrl || "").trim();
+}
+
+function normalizeToolError(name, error, args = {}) {
+  const rawMessage = String(error?.message || error || "");
+  const recoverable = true;
+
+  if (name === "web_search") {
+    if (/BRAVE_SEARCH_API_KEY/i.test(rawMessage)) {
+      return {
+        name,
+        message: "\u8054\u7f51\u641c\u7d22\u5931\u8d25\uff1a\u7f3a\u5c11 BRAVE_SEARCH_API_KEY",
+        recoverable,
+        code: "missing_brave_search_api_key"
+      };
+    }
+
+    if (/HTTP\s+\d+/i.test(rawMessage)) {
+      return {
+        name,
+        message: "\u8054\u7f51\u641c\u7d22\u5931\u8d25\uff1a\u641c\u7d22 API \u8fd4\u56de\u9519\u8bef",
+        recoverable,
+        code: "search_api_error"
+      };
+    }
+
+    if (/timeout|timed out|network|fetch failed|AbortError/i.test(rawMessage)) {
+      return {
+        name,
+        message: "\u8054\u7f51\u641c\u7d22\u5931\u8d25\uff1a\u7f51\u7edc\u8bf7\u6c42\u5931\u8d25\u6216\u8d85\u65f6",
+        recoverable,
+        code: "network_or_timeout"
+      };
+    }
+
+    return {
+      name,
+      message: "\u8054\u7f51\u641c\u7d22\u5931\u8d25\uff1a\u672a\u77e5\u5de5\u5177\u9519\u8bef",
+      recoverable,
+      code: "unknown_tool_error"
+    };
+  }
+
+  if (name === "fetch_url") {
+    if (rawMessage === "invalid_url") {
+      return {
+        name,
+        message: "\u7f51\u9875\u6293\u53d6\u5931\u8d25\uff1aURL \u4e0d\u5408\u6cd5",
+        recoverable,
+        code: "invalid_url"
+      };
+    }
+
+    if (rawMessage === "blocked_private_url") {
+      return {
+        name,
+        message: "\u7f51\u9875\u6293\u53d6\u5931\u8d25\uff1a\u5185\u7f51\u6216\u672c\u5730\u5730\u5740\u5df2\u88ab\u62e6\u622a",
+        recoverable,
+        code: "blocked_private_url"
+      };
+    }
+
+    if (/valid http:\/\/ or https:\/\/ url|invalid url/i.test(rawMessage)) {
+      return normalizeToolError(name, "invalid_url", args);
+    }
+
+    if (/HTTP\s+\d+/i.test(rawMessage)) {
+      return {
+        name,
+        message: "\u7f51\u9875\u6293\u53d6\u5931\u8d25\uff1a\u65e0\u6cd5\u8bbf\u95ee\u8be5\u7f51\u9875",
+        recoverable,
+        code: "fetch_http_error"
+      };
+    }
+
+    if (/timeout|timed out|network|fetch failed|AbortError/i.test(rawMessage)) {
+      return {
+        name,
+        message: "\u7f51\u9875\u6293\u53d6\u5931\u8d25\uff1a\u7f51\u7edc\u8bf7\u6c42\u5931\u8d25\u6216\u8d85\u65f6",
+        recoverable,
+        code: "network_or_timeout"
+      };
+    }
+
+    return {
+      name,
+      message: "\u7f51\u9875\u6293\u53d6\u5931\u8d25\uff1a\u672a\u77e5\u5de5\u5177\u9519\u8bef",
+      recoverable,
+      code: "unknown_tool_error"
+    };
+  }
+
+  return {
+    name,
+    message: "\u5de5\u5177\u8c03\u7528\u5931\u8d25\uff1a\u672a\u77e5\u5de5\u5177\u9519\u8bef",
+    recoverable,
+    code: "unknown_tool_error"
+  };
+}
+
+function validateToolCall(toolCall) {
+  if (!toolCall?.name) {
+    return null;
+  }
+
+  if (toolCall.name !== "fetch_url") {
+    return null;
+  }
+
+  const targetUrl = getToolArgUrl(toolCall.args);
+
+  if (!targetUrl || targetUrl.length > MAX_AUTO_URL_LENGTH) {
+    return normalizeToolError("fetch_url", "invalid_url", toolCall.args);
+  }
+
+  try {
+    const url = new URL(targetUrl);
+
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return normalizeToolError("fetch_url", "invalid_url", toolCall.args);
+    }
+
+    if (isBlockedHostname(url.hostname)) {
+      return normalizeToolError("fetch_url", "blocked_private_url", toolCall.args);
+    }
+  } catch (err) {
+    return normalizeToolError("fetch_url", "invalid_url", toolCall.args);
+  }
+
+  return null;
+}
+
 async function runRequestedTool(toolCall, env) {
   if (!toolCall || !toolCall.name) {
     return null;
   }
 
-  try {
-    return await runTool(toolCall.name, toolCall.args || {}, env);
-  } catch (err) {
+  const validationError = validateToolCall(toolCall);
+
+  if (validationError) {
     return {
       name: toolCall.name,
       args: toolCall.args || {},
-      error: err.message || String(err),
+      error: validationError.message,
+      toolError: validationError,
       result: {
-        error: err.message || String(err)
+        error: validationError.message
+      }
+    };
+  }
+
+  try {
+    return await runTool(toolCall.name, toolCall.args || {}, env);
+  } catch (err) {
+    const toolError = normalizeToolError(toolCall.name, err, toolCall.args);
+
+    return {
+      name: toolCall.name,
+      args: toolCall.args || {},
+      error: toolError.message,
+      toolError,
+      result: {
+        error: toolError.message
       }
     };
   }
@@ -374,7 +524,8 @@ function appendToolContext(modelMessages, executedToolCall) {
       "A requested tool call failed.",
       "Tool: " + executedToolCall.name,
       "Error: " + executedToolCall.error,
-      "Please explain the failure clearly and continue with any available context."
+      "The tool call failed, so you cannot use real-time network results from this request.",
+      "Answer only from existing knowledge and any other provided context, and clearly say that live tool data was unavailable."
     ].join("\n")
     : [
       "The user requested a single tool call before answering.",
@@ -416,6 +567,11 @@ function streamChatWithToolStatus({
           message: getToolStatusMessage(name, status)
         }));
       };
+      const enqueueToolError = toolError => {
+        if (toolError) {
+          enqueueText(encodeSseEvent("tool_error", toolError));
+        }
+      };
 
       try {
         const finalMessages = [...modelMessages];
@@ -425,6 +581,7 @@ function streamChatWithToolStatus({
           enqueueToolStatus(requestedToolCall.name, "running");
           executedToolCall = await runRequestedTool(requestedToolCall, env);
           enqueueToolStatus(requestedToolCall.name, executedToolCall.error ? "error" : "done");
+          enqueueToolError(executedToolCall.toolError);
           toolSources = buildToolSources(executedToolCall);
         }
 

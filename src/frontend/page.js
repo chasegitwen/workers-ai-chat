@@ -868,6 +868,22 @@ body.authenticated .loginScreen{
   display:block;
 }
 
+.toolErrorNotice{
+  margin-top:10px;
+  padding:8px 10px;
+  border:1px solid rgba(220,38,38,.25);
+  border-radius:10px;
+  background:rgba(220,38,38,.06);
+  color:#b91c1c;
+  font-size:12px;
+  line-height:1.45;
+}
+
+body.dark .toolErrorNotice{
+  color:#fca5a5;
+  background:rgba(220,38,38,.12);
+}
+
 .inputBar{
   flex:0 0 auto;
   display:flex;
@@ -2842,8 +2858,20 @@ function renderToolSources(element, sources){
   element.appendChild(wrapper);
 }
 
-function renderAssistantMessage(element, text, sources, toolSources){
+function renderToolError(element, toolError){
+  if(!toolError || !toolError.message){
+    return;
+  }
+
+  const notice = document.createElement("div");
+  notice.className = "toolErrorNotice";
+  notice.textContent = toolError.message;
+  element.appendChild(notice);
+}
+
+function renderAssistantMessage(element, text, sources, toolSources, toolError){
   element.innerHTML = marked.parse(text || "");
+  renderToolError(element, toolError);
   renderSources(element, sources);
   renderToolSources(element, toolSources);
   scrollBottom();
@@ -2863,6 +2891,14 @@ function handleToolStatus(status){
       }
     }, 1200);
   }
+}
+
+function handleToolError(error){
+  if(!error || !error.message){
+    return;
+  }
+
+  setContextStatus(error.message);
 }
 
 async function typeWriter(element, text){
@@ -2932,7 +2968,7 @@ function handleStreamEvent(eventText, state, element){
     try{
       const data = JSON.parse(event.data || "{}");
       state.sources = Array.isArray(data.sources) ? data.sources : [];
-      renderAssistantMessage(element, state.reply, state.sources, state.toolSources);
+      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError);
     }catch(err){
       console.log("parse sources failed", err);
     }
@@ -2944,7 +2980,7 @@ function handleStreamEvent(eventText, state, element){
     try{
       const data = JSON.parse(event.data || "{}");
       state.toolSources = Array.isArray(data.sources) ? data.sources : [];
-      renderAssistantMessage(element, state.reply, state.sources, state.toolSources);
+      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError);
     }catch(err){
       console.log("parse tool sources failed", err);
     }
@@ -2957,6 +2993,18 @@ function handleStreamEvent(eventText, state, element){
       handleToolStatus(JSON.parse(event.data || "{}"));
     }catch(err){
       console.log("parse tool status failed", err);
+    }
+
+    return false;
+  }
+
+  if(event.type === "tool_error"){
+    try{
+      state.toolError = JSON.parse(event.data || "{}");
+      handleToolError(state.toolError);
+      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError);
+    }catch(err){
+      console.log("parse tool error failed", err);
     }
 
     return false;
@@ -2978,7 +3026,7 @@ function handleStreamEvent(eventText, state, element){
 
   if(chunk.text){
     state.reply += chunk.text;
-    renderAssistantMessage(element, state.reply, state.sources, state.toolSources);
+    renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError);
   }
 
   return false;
@@ -2992,7 +3040,8 @@ async function streamAIResponse(response, element){
   const state = {
     reply:"",
     sources:[],
-    toolSources:[]
+    toolSources:[],
+    toolError:null
   };
 
   while(true){

@@ -11,6 +11,7 @@ import {
 } from "./summary.js";
 import { DEFAULT_TEXT_MODEL } from "../providers/models.js";
 import { callModel } from "../providers/router.js";
+import { runTool } from "../tools/registry.js";
 
 const defaultSystemMessage = {
   role: "system",
@@ -85,6 +86,66 @@ function buildFileSources(fileChunks) {
       return Number(a.chunk_index || 0) - Number(b.chunk_index || 0);
     })
     .slice(0, 8);
+}
+
+function formatToolContext(toolCall) {
+  if (!toolCall) {
+    return "";
+  }
+
+  const result = toolCall.result || {};
+
+  if (toolCall.name === "web_search") {
+    const results = Array.isArray(result.results) ? result.results : [];
+
+    return [
+      "Tool result: web_search",
+      "Query: " + (result.query || toolCall.args?.query || ""),
+      "",
+      results.length
+        ? results.map((item, index) => [
+          "[" + (index + 1) + "] " + (item.title || "Untitled"),
+          "URL: " + (item.url || ""),
+          "Snippet: " + (item.snippet || item.description || "")
+        ].join("\n")).join("\n\n")
+        : "No search results returned."
+    ].join("\n");
+  }
+
+  if (toolCall.name === "fetch_url") {
+    return [
+      "Tool result: fetch_url",
+      "Title: " + (result.title || "Untitled Page"),
+      "URL: " + (result.url || toolCall.args?.url || ""),
+      result.truncated ? "Note: content was truncated for prompt size." : "",
+      "",
+      result.text || result.content || ""
+    ].filter(Boolean).join("\n");
+  }
+
+  return [
+    "Tool result: " + toolCall.name,
+    JSON.stringify(result, null, 2)
+  ].join("\n");
+}
+
+async function runRequestedTool(toolCall, env) {
+  if (!toolCall || !toolCall.name) {
+    return null;
+  }
+
+  try {
+    return await runTool(toolCall.name, toolCall.args || {}, env);
+  } catch (err) {
+    return {
+      name: toolCall.name,
+      args: toolCall.args || {},
+      error: err.message || String(err),
+      result: {
+        error: err.message || String(err)
+      }
+    };
+  }
 }
 
 function streamWithHistorySave(result, env, conversationId, sources = []) {
@@ -166,7 +227,8 @@ export async function handleChat(request, env) {
     image,
     file,
     fileIds = [],
-    conversationId
+    conversationId,
+    toolCall
   } = await request.json();
 
   const userContent = getUserMessage(messages) ||
@@ -269,6 +331,7 @@ export async function handleChat(request, env) {
 
   const ragFiles = [];
   let ragSources = [];
+  const executedToolCall = await runRequestedTool(toolCall, env);
 
   if (file && file.text) {
     ragFiles.push(file);
@@ -318,6 +381,27 @@ export async function handleChat(request, env) {
     modelMessages.push({
       role: "user",
       content: filePrompt
+    });
+  }
+
+  if (executedToolCall) {
+    const toolContext = executedToolCall.error
+      ? [
+        "A requested tool call failed.",
+        "Tool: " + executedToolCall.name,
+        "Error: " + executedToolCall.error,
+        "Please explain the failure clearly and continue with any available context."
+      ].join("\n")
+      : [
+        "The user requested a single tool call before answering.",
+        "Use the following tool result as context. Do not claim to have browsed beyond this result.",
+        "",
+        formatToolContext(executedToolCall)
+      ].join("\n");
+
+    modelMessages.push({
+      role: "user",
+      content: toolContext
     });
   }
 

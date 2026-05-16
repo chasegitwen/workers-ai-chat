@@ -1281,6 +1281,7 @@ const searchBtn = document.getElementById("searchBtn");
 const webAnswerBtn = document.getElementById("webAnswerBtn");
 let webSearchContext = "";
 let webSearchSources = [];
+let pendingToolCall = null;
 
 let searchResults = document.getElementById("searchResults");
 let currentConversationId = null;
@@ -2003,6 +2004,35 @@ webAnswerBtn.addEventListener("click", () => {
 async function webAnswer(){
 
   const query = input.value.trim();
+
+  if(!query){
+    alert("Please enter a question first.");
+    return;
+  }
+
+  pendingToolCall = {
+    name:"web_search",
+    args:{
+      query
+    }
+  };
+
+  webAnswerBtn.disabled = true;
+  webAnswerBtn.textContent = "\u8054\u7f51\u4e2d...";
+  setContextStatus("\u6b63\u5728\u8054\u7f51\u67e5\u8be2...");
+
+  try{
+    await sendMessage();
+  }catch(err){
+    pendingToolCall = null;
+    setContextStatus("\u8054\u7f51\u56de\u7b54\u5931\u8d25");
+    alert("Web answer failed: " + err.message);
+  }
+
+  pendingToolCall = null;
+  webAnswerBtn.disabled = false;
+  webAnswerBtn.textContent = "\u8054\u7f51\u67e5\u8be2";
+  return;
 
   if(!query){
     alert("请先在聊天框或搜索框输入问题");
@@ -3024,6 +3054,7 @@ async function sendMessage(){
           }
         ],
         model:modelSelect.value,
+        toolCall:pendingToolCall,
         image:imageToSend,
         fileIds:selectedFileIds,
         file:fileToSend ? {

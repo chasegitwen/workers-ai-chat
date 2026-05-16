@@ -1,47 +1,30 @@
+import { runTool } from "../tools/registry.js";
 import { jsonResponse } from "../utils/response.js";
-import { cleanText, extractReadableTextFromHtml } from "../utils/text.js";
 
-export async function handleFetchUrl(request) {
-  const { pageUrl } = await request.json();
+export async function handleFetchUrl(request, env) {
+  const { pageUrl, url } = await request.json();
+  const targetUrl = pageUrl || url;
 
-  if (!pageUrl || !/^https?:\/\//i.test(pageUrl)) {
-    return jsonResponse({ error: "请输入有效的网址" }, 400);
+  if (!targetUrl || !/^https?:\/\//i.test(targetUrl)) {
+    return jsonResponse({ error: "Please provide a valid http:// or https:// URL" }, 400);
   }
 
   try {
-    const response = await fetch(pageUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-      }
-    });
-
-    if (!response.ok) {
-      return jsonResponse({
-        error: "网页抓取失败：HTTP " + response.status
-      }, 500);
-    }
-
-    const html = await response.text();
-
-    const titleMatch = html.match(/<title[^>]*>(.*?)<\/title>/i);
-
-    const title = cleanText(
-      titleMatch?.[1] || "Untitled Page"
-    );
-
-    const text = extractReadableTextFromHtml(html);
+    const toolCall = await runTool("fetch_url", { url: targetUrl }, env);
+    const result = toolCall.result;
 
     return jsonResponse({
       ok: true,
-      url: pageUrl,
-      title,
-      text,
-      length: text.length
+      url: result.url,
+      title: result.title,
+      text: result.text,
+      content: result.content,
+      length: result.length,
+      truncated: result.truncated
     });
   } catch (err) {
     return jsonResponse({
-      error: "网页抓取失败：" + err.message
+      error: "Fetch URL failed: " + err.message
     }, 500);
   }
 }

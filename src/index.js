@@ -150,7 +150,7 @@ export default {
     console.log("POST pathname:", url.pathname);
 
     if (url.pathname === "/fetch-url") {
-      return handleFetchUrl(request);
+      return handleFetchUrl(request, env);
     }
 
     if (url.pathname === "/search-web") {

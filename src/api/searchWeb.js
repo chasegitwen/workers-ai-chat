@@ -1,46 +1,24 @@
+import { runTool } from "../tools/registry.js";
 import { jsonResponse } from "../utils/response.js";
 
 export async function handleSearchWeb(request, env) {
   const { query } = await request.json();
 
   if (!query || !query.trim()) {
-    return jsonResponse({ error: "请输入搜索关键词" }, 400);
+    return jsonResponse({ error: "Please provide a search query" }, 400);
   }
 
   try {
-    const res = await fetch(
-      "https://api.search.brave.com/res/v1/web/search?q=" +
-      encodeURIComponent(query),
-      {
-        headers: {
-          "Accept": "application/json",
-          "X-Subscription-Token": env.BRAVE_SEARCH_API_KEY
-        }
-      }
-    );
-
-    if (!res.ok) {
-      return jsonResponse({
-        error: "搜索失败：HTTP " + res.status
-      }, 500);
-    }
-
-    const data = await res.json();
-
-    const results = (data.web?.results || []).slice(0, 5).map(item => ({
-      title: item.title || "",
-      url: item.url || "",
-      description: item.description || ""
-    }));
+    const toolCall = await runTool("web_search", { query }, env);
 
     return jsonResponse({
       ok: true,
-      query,
-      results
+      query: toolCall.result.query,
+      results: toolCall.result.results
     });
   } catch (err) {
     return jsonResponse({
-      error: "搜索失败：" + err.message
-    }, 500);
+      error: err.message
+    }, err.message === "Missing BRAVE_SEARCH_API_KEY" ? 500 : 500);
   }
 }

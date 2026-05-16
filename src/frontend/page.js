@@ -1435,6 +1435,7 @@ async function logout(){
 async function loadModels(){
   try{
     const currentValue = modelSelect.value;
+    const currentProvider = modelSelect.selectedOptions[0]?.dataset.provider || "";
     const res = await fetch("/api/models");
     const data = await res.json();
 
@@ -1456,6 +1457,11 @@ async function loadModels(){
 
     if([...modelSelect.options].some(option => option.value === currentValue)){
       modelSelect.value = currentValue;
+    }else if(currentProvider){
+      const providerOption = [...modelSelect.options].find(option => option.dataset.provider === currentProvider);
+      if(providerOption){
+        modelSelect.value = providerOption.value;
+      }
     }
   }catch(err){
     console.log("load models failed, using fallback options", err);
@@ -3233,6 +3239,7 @@ async function sendMessage(){
           }
         ],
         model:modelSelect.value,
+        provider:modelSelect.selectedOptions[0]?.dataset.provider || "workers-ai",
         toolCall:toolCallForRequest,
         debugTools:localStorage.getItem("wa_tool_debug") === "1",
         image:imageToSend,

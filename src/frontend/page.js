@@ -485,7 +485,7 @@ body.authenticated .loginScreen{
 .libraryPanel{
   flex:0 0 auto;
   min-height:0;
-  max-height:260px;
+  max-height:none;
   overflow:hidden;
   display:flex;
   flex-direction:column;
@@ -496,7 +496,7 @@ body.authenticated .loginScreen{
 }
 
 .libraryPanel.collapsed{
-  max-height:none;
+  max-height:48px;
   padding:8px 0;
 }
 
@@ -537,8 +537,10 @@ body.authenticated .loginScreen{
 .libraryBody{
   display:none;
   min-height:0;
+  flex:1 1 auto;
   flex-direction:column;
   margin-top:8px;
+  overflow:hidden;
 }
 
 .libraryPanel.expanded .libraryBody{
@@ -619,9 +621,9 @@ body.authenticated .loginScreen{
   display:flex;
   flex-direction:column;
   gap:8px;
-  flex:1 1 auto;
-  min-height:0;
-  max-height:none;
+  flex:0 1 auto;
+  min-height:120px;
+  max-height:420px;
   overflow-y:auto;
 }
 

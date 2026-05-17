@@ -2460,10 +2460,12 @@ async function searchWeb(){
       throw new Error(data.error || "搜索失败");
     }
 
-    renderSearchResults(data.results || []);
+    renderSearchResults(data.results || [], data);
 
     setContextStatus(
-      "\u641c\u7d22\u5b8c\u6210\uff1a" + query + "\uff08" + (data.results || []).length + " \u6761\u7ed3\u679c\uff09"
+      "\u641c\u7d22\u5b8c\u6210\uff1a" + query +
+      "\uff08freshness: " + (data.freshness || "none") +
+      "\uff0c" + (data.results || []).length + " \u6761\u7ed3\u679c\uff09"
     );
 
   }catch(err){
@@ -2477,7 +2479,16 @@ async function searchWeb(){
   searchBtn.textContent = "\u641c\u7d22";
 }
 
-function renderSearchResults(results){
+function formatSearchTimeMeta(item){
+  return [
+    item.source ? "source: " + item.source : "",
+    item.age ? "age: " + item.age : "",
+    item.page_age ? "page_age: " + item.page_age : "",
+    item.published ? "published: " + item.published : ""
+  ].filter(Boolean).join(" | ");
+}
+
+function renderSearchResults(results, meta){
 
   searchResults.innerHTML = "";
 
@@ -2497,6 +2508,15 @@ function renderSearchResults(results){
   title.textContent = "搜索结果";
   box.appendChild(title);
 
+  const debugMeta = document.createElement("div");
+  debugMeta.style.fontSize = "12px";
+  debugMeta.style.color = "var(--muted)";
+  debugMeta.style.marginBottom = "10px";
+  debugMeta.textContent = "query: " + (meta?.query || "") +
+    " | freshness: " + (meta?.freshness || "none") +
+    " | result count: " + results.length;
+  box.appendChild(debugMeta);
+
   results.forEach((item, index) => {
 
     const card = document.createElement("div");
@@ -2515,6 +2535,12 @@ function renderSearchResults(results){
     desc.style.color = "var(--muted)";
     desc.style.marginTop = "6px";
     desc.textContent = item.description || "";
+
+    const timeMeta = document.createElement("div");
+    timeMeta.style.fontSize = "12px";
+    timeMeta.style.color = "var(--muted)";
+    timeMeta.style.marginTop = "6px";
+    timeMeta.textContent = formatSearchTimeMeta(item);
 
     const link = document.createElement("div");
     link.style.fontSize = "12px";
@@ -2540,6 +2566,9 @@ function renderSearchResults(results){
 
     card.appendChild(h);
     card.appendChild(desc);
+    if(timeMeta.textContent){
+      card.appendChild(timeMeta);
+    }
     card.appendChild(link);
     card.appendChild(btn);
 
@@ -4563,7 +4592,10 @@ function renderToolSources(element, sources){
 
     const preview = document.createElement("div");
     preview.className = "sourceCitationPreview active";
-    preview.textContent = String(source.snippet || source.preview || "").slice(0, 500);
+    preview.textContent = [
+      formatSearchTimeMeta(source),
+      String(source.snippet || source.preview || "").slice(0, 500)
+    ].filter(Boolean).join(String.fromCharCode(10));
 
     item.appendChild(link);
     if(preview.textContent){
@@ -4593,12 +4625,28 @@ function renderToolDebug(element, toolDebug){
 
   const info = document.createElement("div");
   info.className = "toolDebugInfo";
+  const result = toolDebug.result || {};
+  const resultLines = Array.isArray(result.results)
+    ? result.results.map((item, index) => {
+      return [
+        "result " + (index + 1) + ": " + (item.title || ""),
+        item.source ? "  source: " + item.source : "",
+        item.age ? "  age: " + item.age : "",
+        item.page_age ? "  page_age: " + item.page_age : "",
+        item.published ? "  published: " + item.published : ""
+      ].filter(Boolean).join(String.fromCharCode(10));
+    })
+    : [];
   info.textContent = [
     "tool: " + toolDebug.name,
     "trigger: " + (toolDebug.trigger || ""),
+    result.query ? "query: " + result.query : "",
+    "freshness: " + (result.freshness || "none"),
+    result.result_count !== undefined ? "result count: " + result.result_count : "",
     "duration: " + Number(toolDebug.duration_ms || 0) + "ms",
     "status: " + (toolDebug.status || ""),
-    toolDebug.code ? "code: " + toolDebug.code : ""
+    toolDebug.code ? "code: " + toolDebug.code : "",
+    ...resultLines
   ].filter(Boolean).join(String.fromCharCode(10));
   element.appendChild(info);
 }

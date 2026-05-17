@@ -14,6 +14,7 @@ export async function handleSearchAndFetch(request, env) {
     return jsonResponse({
       ok: true,
       query: searchCall.result.query,
+      freshness: searchCall.result.freshness || "",
       results: searchCall.result.results || [],
       pages: []
     });

@@ -617,17 +617,34 @@ function formatToolContext(toolCall) {
 
   if (toolCall.name === "web_search") {
     const results = Array.isArray(result.results) ? result.results : [];
+    const freshness = result.freshness || "";
+    const freshnessLines = freshness
+      ? [
+        "Freshness: " + freshness,
+        "",
+        "本次问题需要最新信息。请只依据下面搜索结果回答。",
+        "优先使用带有发布日期、age 或 page_age 的最新结果。",
+        "不要使用模型旧知识补充未经搜索结果支持的新闻细节。",
+        "如果搜索结果不足，请明确说明“当前搜索结果不足以确认”。",
+        ""
+      ]
+      : [];
 
     return [
       "Tool result: web_search",
       "Query: " + (result.query || toolCall.args?.query || ""),
+      ...freshnessLines,
       "",
       results.length
         ? results.map((item, index) => [
           "[" + (index + 1) + "] " + (item.title || "Untitled"),
           "URL: " + (item.url || ""),
+          item.source ? "Source: " + item.source : "",
+          item.age ? "Age: " + item.age : "",
+          item.page_age ? "Page age: " + item.page_age : "",
+          item.published ? "Published: " + item.published : "",
           "Snippet: " + (item.snippet || item.description || "")
-        ].join("\n")).join("\n\n")
+        ].filter(Boolean).join("\n")).join("\n\n")
         : "No search results returned."
     ].join("\n");
   }
@@ -662,7 +679,12 @@ function buildToolSources(toolCall) {
         type: "web_search",
         title: item.title || "Untitled",
         url: item.url || "",
-        snippet: item.snippet || item.description || ""
+        snippet: item.snippet || item.description || "",
+        age: item.age || "",
+        page_age: item.page_age || "",
+        published: item.published || "",
+        source: item.source || "",
+        freshness: result.freshness || ""
       }))
       .filter(source => source.url)
       .slice(0, 8);
@@ -710,6 +732,25 @@ function getToolTargetSummary(toolCall = {}) {
   }
 
   return {};
+}
+
+function getToolResultDebug(result = {}) {
+  if (!result || !Array.isArray(result.results)) {
+    return {};
+  }
+
+  return {
+    query: truncateDebugValue(result.query || ""),
+    freshness: result.freshness || "none",
+    result_count: result.results.length,
+    results: result.results.map(item => ({
+      title: truncateDebugValue(item.title || ""),
+      age: item.age || "",
+      page_age: item.page_age || "",
+      published: item.published || "",
+      source: item.source || ""
+    }))
+  };
 }
 
 function withToolTrigger(toolCall, trigger) {
@@ -908,7 +949,8 @@ async function runRequestedTool(toolCall, env) {
       duration_ms: durationMs,
       status: "success",
       code: null,
-      target
+      target,
+      result: getToolResultDebug(result.result)
     };
 
     console.log("[tool]", debug);

@@ -14,6 +14,7 @@ export async function handleSearchWeb(request, env) {
     return jsonResponse({
       ok: true,
       query: toolCall.result.query,
+      freshness: toolCall.result.freshness || "",
       results: toolCall.result.results
     });
   } catch (err) {

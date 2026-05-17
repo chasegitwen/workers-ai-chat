@@ -8,7 +8,7 @@ import { handleSearchAndFetch } from "./api/searchAndFetch.js";
 import { handleSearchWeb } from "./api/searchWeb.js";
 import { htmlPage } from "./frontend/page.js";
 import { requireAuth } from "./lib/auth.js";
-import { getProviderModelOptions } from "./lib/providers/index.js";
+import { getGlmModelOptions, getKimiModelOptions } from "./lib/providers/index.js";
 import { getEnabledModels } from "./providers/config.js";
 import { corsHeaders, jsonResponse } from "./utils/response.js";
 
@@ -30,21 +30,27 @@ export default {
       }
     }
 
+    if (request.method === "GET" && url.pathname === "/api/models") {
+      return jsonResponse({
+        models: [
+          ...getEnabledModels()
+            .filter(model => model.providerType === "workers-ai" && model.capabilities?.text)
+            .map(model => ({
+              ...model,
+              provider: "workers-ai"
+            })),
+          ...getGlmModelOptions(),
+          ...getKimiModelOptions()
+        ]
+      });
+    }
+
     if (url.pathname.startsWith("/api/")) {
       const auth = await requireAuth(request, env);
 
       if (!auth.ok) {
         return auth.response;
       }
-    }
-
-    if (request.method === "GET" && url.pathname === "/api/models") {
-      return jsonResponse({
-        models: [
-          ...getProviderModelOptions(env),
-          ...getEnabledModels()
-        ]
-      });
     }
 
     if (request.method === "GET" && url.pathname === "/api/debug/ai") {

@@ -20,8 +20,8 @@ GLM_BASE_URL=
 GLM_MODEL=
 
 KIMI_API_KEY=
-KIMI_BASE_URL=
-KIMI_MODEL=
+KIMI_BASE_URL=https://api.moonshot.cn/v1
+KIMI_MODEL=kimi-k2.5
 ```
 
 Do not commit real API keys.

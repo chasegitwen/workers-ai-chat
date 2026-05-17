@@ -9,8 +9,13 @@ export const GLM_CODING_MODELS = [
   { id: "glm-4.7", label: "GLM-4.7" },
   { id: "glm-4.5-air", label: "GLM-4.5-Air" }
 ];
+export const KIMI_CODING_MODELS = [
+  { id: "kimi-k2.5", label: "Kimi K2.5" }
+];
 const DEFAULT_GLM_MODEL = "glm-5.1";
 const DEFAULT_GLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4";
+const DEFAULT_KIMI_MODEL = "kimi-k2.5";
+const DEFAULT_KIMI_BASE_URL = "https://api.moonshot.cn/v1";
 
 function createProviderConfigError(provider, code, message) {
   const error = new Error(message);
@@ -47,6 +52,10 @@ function isGlmCodingModel(model) {
   return GLM_CODING_MODELS.some(item => item.id === model);
 }
 
+function isKimiCodingModel(model) {
+  return KIMI_CODING_MODELS.some(item => item.id === model);
+}
+
 function resolveExternalConfig(provider, env, model) {
   if (provider === "glm") {
     const requestedModel = model && model !== "glm" ? model : (env.GLM_MODEL || DEFAULT_GLM_MODEL);
@@ -68,11 +77,21 @@ function resolveExternalConfig(provider, env, model) {
   }
 
   if (provider === "kimi") {
+    const requestedModel = model && model !== "kimi" ? model : (env.KIMI_MODEL || DEFAULT_KIMI_MODEL);
+
+    if (!env.KIMI_API_KEY) {
+      throw createProviderConfigError("kimi", "provider_auth_error", "KIMI_API_KEY is not configured");
+    }
+
+    if (!KIMI_CODING_MODELS.some(item => item.id === requestedModel)) {
+      throw createProviderConfigError("kimi", "provider_model_error", "Unsupported Kimi model: " + requestedModel);
+    }
+
     return {
       provider,
       apiKey: env.KIMI_API_KEY,
-      baseUrl: env.KIMI_BASE_URL,
-      model: model && model !== "kimi" ? model : env.KIMI_MODEL
+      baseUrl: env.KIMI_BASE_URL || DEFAULT_KIMI_BASE_URL,
+      model: requestedModel
     };
   }
 
@@ -99,13 +118,13 @@ export function getProviderModelOptions(env) {
         enabled: true,
         capabilities: { text: true }
       })),
-      {
-        id: "kimi",
-        label: "Kimi Coding",
+      ...KIMI_CODING_MODELS.map(model => ({
+        id: model.id,
+        label: model.label,
         provider: "kimi",
         enabled: true,
         capabilities: { text: true }
-      }
+      }))
     );
   }
 
@@ -122,6 +141,16 @@ export function getGlmModelOptions() {
   }));
 }
 
+export function getKimiModelOptions() {
+  return KIMI_CODING_MODELS.map(model => ({
+    id: model.id,
+    label: model.label,
+    provider: "kimi",
+    enabled: true,
+    capabilities: { text: true }
+  }));
+}
+
 export async function callProvider({
   provider,
   env,
@@ -131,7 +160,7 @@ export async function callProvider({
   signal,
   options = {}
 }) {
-  const inferredProvider = provider || (isGlmCodingModel(model) ? "glm" : "");
+  const inferredProvider = provider || (isGlmCodingModel(model) ? "glm" : (isKimiCodingModel(model) ? "kimi" : ""));
   const resolvedProvider = resolveProvider(inferredProvider, env);
 
   if (resolvedProvider === "workers-ai") {

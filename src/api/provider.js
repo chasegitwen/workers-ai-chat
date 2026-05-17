@@ -1,4 +1,4 @@
-import { GLM_CODING_MODELS, callProvider } from "../lib/providers/index.js";
+import { GLM_CODING_MODELS, KIMI_CODING_MODELS, callProvider } from "../lib/providers/index.js";
 import { jsonResponse } from "../utils/response.js";
 
 function extractProviderMessage(result) {
@@ -24,11 +24,11 @@ function providerConfigured(provider, env) {
   }
 
   if (provider === "glm") {
-    return Boolean(env.GLM_API_KEY && env.GLM_BASE_URL);
+    return Boolean(env.GLM_API_KEY);
   }
 
   if (provider === "kimi") {
-    return Boolean(env.KIMI_API_KEY && env.KIMI_BASE_URL && env.KIMI_MODEL);
+    return Boolean(env.KIMI_API_KEY);
   }
 
   return false;
@@ -40,7 +40,7 @@ function configuredModel(provider, env) {
   }
 
   if (provider === "kimi") {
-    return env.KIMI_MODEL || "";
+    return env.KIMI_MODEL || KIMI_CODING_MODELS[0].id;
   }
 
   return env.WORKERS_AI_MODEL || "@cf/meta/llama-3.1-8b-instruct-fast";
@@ -54,6 +54,8 @@ export async function handleProvider(request, env, url) {
   const { provider = "workers-ai", model } = await request.json().catch(() => ({}));
   const testModel = provider === "glm"
     ? (model || GLM_CODING_MODELS[0].id)
+    : provider === "kimi"
+      ? (model || KIMI_CODING_MODELS[0].id)
     : provider;
 
   if (!providerConfigured(provider, env)) {

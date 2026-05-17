@@ -1443,8 +1443,13 @@ async function loadModels(){
       .filter(model => model.provider === "glm")
       .filter(model => !model.deprecated && model.enabled !== false && model.capabilities?.text)
       .sort((a, b) => glmOrder.indexOf(a.id) - glmOrder.indexOf(b.id));
+    const kimiOrder = ["kimi-k2.5"];
+    const kimiModels = data.models
+      .filter(model => model.provider === "kimi")
+      .filter(model => !model.deprecated && model.enabled !== false && model.capabilities?.text)
+      .sort((a, b) => kimiOrder.indexOf(a.id) - kimiOrder.indexOf(b.id));
 
-    if(!workersModels.length && !glmModels.length){
+    if(!workersModels.length && !glmModels.length && !kimiModels.length){
       throw new Error("no text models available");
     }
 
@@ -1470,6 +1475,13 @@ async function loadModels(){
       glmGroup.label = "GLM Coding";
       glmModels.forEach(model => appendModelOption(glmGroup, model));
       modelSelect.appendChild(glmGroup);
+    }
+
+    if(kimiModels.length){
+      const kimiGroup = document.createElement("optgroup");
+      kimiGroup.label = "Kimi";
+      kimiModels.forEach(model => appendModelOption(kimiGroup, model));
+      modelSelect.appendChild(kimiGroup);
     }
 
     const options = [...modelSelect.querySelectorAll("option")];

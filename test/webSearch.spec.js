@@ -35,31 +35,54 @@ describe("webSearch freshness", () => {
     const fetchMock = mockBraveResults([]);
 
     const result = await webSearchTool.handler({
-      query: "Cloudflare Workers AI 是什么"
+      query: "Cloudflare Workers AI overview"
     }, env);
     const url = new URL(fetchMock.mock.calls[0][0]);
 
-    expect(isFreshnessQuery("Cloudflare Workers AI 是什么")).toBe(false);
+    expect(isFreshnessQuery("Cloudflare Workers AI overview")).toBe(false);
     expect(result.freshness).toBe("");
     expect(url.searchParams.get("freshness")).toBe(null);
   });
 
-  it("uses pd for today or breaking queries", async () => {
+  it.each([
+    "今天 AI 新闻",
+    "今日 AI 新闻",
+    "breaking AI updates",
+    "AI news now"
+  ])("uses pd for immediate freshness query: %s", async query => {
     const fetchMock = mockBraveResults([]);
 
     const result = await webSearchTool.handler({
-      query: "今天 AI 新闻"
+      query
     }, env);
     const url = new URL(fetchMock.mock.calls[0][0]);
     const init = fetchMock.mock.calls[0][1];
 
-    expect(getDefaultFreshness("今天 AI 新闻")).toBe("pd");
+    expect(getDefaultFreshness(query)).toBe("pd");
     expect(result.freshness).toBe("pd");
     expect(url.searchParams.get("freshness")).toBe("pd");
     expect(init.headers["Cache-Control"]).toBe("no-cache");
   });
 
-  it("uses pw for recent news queries and prioritizes dated results", async () => {
+  it.each([
+    "最新 Cloudflare Workers AI",
+    "recent Cloudflare Workers AI updates",
+    "latest Cloudflare Workers AI",
+    "Cloudflare Workers AI news"
+  ])("uses pw for recent freshness query: %s", async query => {
+    const fetchMock = mockBraveResults([]);
+
+    const result = await webSearchTool.handler({
+      query
+    }, env);
+    const url = new URL(fetchMock.mock.calls[0][0]);
+
+    expect(getDefaultFreshness(query)).toBe("pw");
+    expect(result.freshness).toBe("pw");
+    expect(url.searchParams.get("freshness")).toBe("pw");
+  });
+
+  it("preserves metadata and prioritizes dated results", async () => {
     const fetchMock = mockBraveResults([
       {
         title: "Undated overview",
@@ -72,6 +95,7 @@ describe("webSearch freshness", () => {
         description: "Fresh result",
         age: "2 days ago",
         page_age: "2026-05-15T00:00:00Z",
+        published: "2026-05-15",
         profile: {
           name: "Example News"
         }
@@ -89,6 +113,7 @@ describe("webSearch freshness", () => {
       title: "Recent report",
       age: "2 days ago",
       page_age: "2026-05-15T00:00:00Z",
+      published: "2026-05-15",
       source: "Example News"
     });
   });

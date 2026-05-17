@@ -1,7 +1,7 @@
 const MAX_RESULTS = 5;
 
 export function isFreshnessQuery(text) {
-  return /今天|今日|刚刚|最新|最近|近期|新闻|快讯|突发|实时|现在|目前|today|latest|recent|news|breaking|current|now/i.test(text || "");
+  return /今天|今日|刚刚|最新|最近|近期|新闻|快讯|突发|实时|现在|today|latest|recent|news|breaking|current|now/i.test(text || "");
 }
 
 export function getDefaultFreshness(text) {

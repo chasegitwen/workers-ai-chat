@@ -9,8 +9,11 @@ import {
   buildConversationContext,
   maybeUpdateConversationSummary
 } from "./summary.js";
-import { DEFAULT_TEXT_MODEL } from "../providers/models.js";
+import { DEFAULT_TEXT_MODEL, MODELS } from "../providers/models.js";
 import { callModel } from "../providers/router.js";
+import { callOpenAICompatible } from "../providers/openaiCompatible.js";
+import { getModelRuntimeConfig } from "../providers/config.js";
+import { callWorkersAI } from "../providers/workersai.js";
 import { runTool } from "../tools/registry.js";
 
 const defaultSystemMessage = {
@@ -21,6 +24,7 @@ const defaultSystemMessage = {
 const MAX_AUTO_URL_LENGTH = 2048;
 const MAX_AUTO_SEARCH_QUERY_LENGTH = 300;
 const MAX_TOOL_DEBUG_SUMMARY_LENGTH = 120;
+const MODEL_SETTINGS_KEY = "model_settings";
 const AUTO_SEARCH_PATTERN = /搜索|查一下|查询|联网查|最新|最近|今天|现在|当前|目前|官网|价格|新闻|发布|更新|\bsearch\b|\blook up\b|\blatest\b|\brecent\b|\btoday\b|\bcurrent\b|\bnow\b|\bnews\b|\bprice\b|\brelease\b|\bupdate\b|\bofficial\b/i;
 
 function getUserMessage(messages) {
@@ -188,6 +192,381 @@ function readStreamText(value) {
   } catch (err) {
     return "";
   }
+}
+
+function createModelSelectionError(message) {
+  const error = new Error(message);
+  error.name = "ModelSelectionError";
+  return error;
+}
+
+function isPlainObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function providerLabelFromModel(model) {
+  if ((model.provider || "") === "glm") {
+    return "GLM Coding";
+  }
+
+  if ((model.provider || "") === "kimi") {
+    return "Kimi";
+  }
+
+  if (model.providerType === "openai-compatible") {
+    return "Custom OpenAI-compatible";
+  }
+
+  return "Workers AI";
+}
+
+function providersFromModels(models) {
+  const providers = new Map();
+
+  (models || []).forEach(model => {
+    if (model.deprecated || model.enabled === false || !model.capabilities?.text) {
+      return;
+    }
+
+    const providerId = model.provider || model.providerType || "workers-ai";
+
+    if (!providers.has(providerId)) {
+      providers.set(providerId, {
+        id: providerId,
+        label: providerLabelFromModel(model),
+        providerType: model.providerType || "workers-ai",
+        apiBase: model.apiBase || "",
+        apiKeyEnv: model.apiKeyEnv || "",
+        builtin: true,
+        models: []
+      });
+    }
+
+    providers.get(providerId).models.push({
+      id: model.id,
+      label: model.label || model.id,
+      modelName: model.modelName || model.id,
+      providerType: model.providerType || "workers-ai",
+      apiBase: model.apiBase || "",
+      apiKeyEnv: model.apiKeyEnv || "",
+      capabilities: model.capabilities || { text: true, streaming: true },
+      enabled: model.enabled !== false,
+      recommended: Boolean(model.recommended)
+    });
+  });
+
+  return Array.from(providers.values());
+}
+
+function normalizeProvider(provider) {
+  if (!isPlainObject(provider)) {
+    return null;
+  }
+
+  const id = String(provider.id || provider.provider || "").trim();
+
+  if (!id) {
+    return null;
+  }
+
+  return {
+    id,
+    label: String(provider.label || id),
+    providerType: String(provider.providerType || provider.type || id || "workers-ai"),
+    apiBase: String(provider.apiBase || provider.baseUrl || ""),
+    apiKeyEnv: String(provider.apiKeyEnv || ""),
+    builtin: Boolean(provider.builtin),
+    models: Array.isArray(provider.models)
+      ? provider.models
+        .map(model => normalizeProviderModel(model, provider))
+        .filter(Boolean)
+      : []
+  };
+}
+
+function normalizeProviderModel(model, provider) {
+  if (!isPlainObject(model)) {
+    return null;
+  }
+
+  const id = String(model.id || model.model || model.modelName || "").trim();
+
+  if (!id) {
+    return null;
+  }
+
+  return {
+    id,
+    label: String(model.label || id),
+    modelName: String(model.modelName || model.model || id),
+    providerType: String(model.providerType || provider.providerType || "workers-ai"),
+    apiBase: String(model.apiBase || model.baseUrl || provider.apiBase || ""),
+    apiKeyEnv: String(model.apiKeyEnv || provider.apiKeyEnv || ""),
+    capabilities: model.capabilities || { text: true, streaming: true },
+    enabled: model.enabled !== false,
+    recommended: Boolean(model.recommended)
+  };
+}
+
+function mergeProviders(baseProviders, nextProviders) {
+  const merged = new Map();
+
+  (baseProviders || []).forEach(provider => {
+    const normalized = normalizeProvider(provider);
+
+    if (normalized) {
+      merged.set(normalized.id, normalized);
+    }
+  });
+
+  (nextProviders || []).forEach(provider => {
+    const normalized = normalizeProvider(provider);
+
+    if (!normalized) {
+      return;
+    }
+
+    const existing = merged.get(normalized.id);
+
+    if (!existing) {
+      merged.set(normalized.id, normalized);
+      return;
+    }
+
+    const models = new Map((existing.models || []).map(model => [model.id, model]));
+    (normalized.models || []).forEach(model => models.set(model.id, {
+      ...models.get(model.id),
+      ...model
+    }));
+
+    merged.set(normalized.id, {
+      ...existing,
+      ...normalized,
+      models: Array.from(models.values())
+    });
+  });
+
+  return Array.from(merged.values());
+}
+
+async function readSavedProviders(env) {
+  if (!env.DB) {
+    return [];
+  }
+
+  try {
+    const row = await env.DB.prepare(
+      "SELECT value FROM settings WHERE key = ?"
+    ).bind(MODEL_SETTINGS_KEY).first();
+
+    if (!row?.value) {
+      return [];
+    }
+
+    const settings = JSON.parse(row.value);
+    return Array.isArray(settings?.providers) ? settings.providers : [];
+  } catch (err) {
+    console.warn("[model-settings] failed to read settings.providers", err.message || String(err));
+    return [];
+  }
+}
+
+function customConfigToProvider(config) {
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    return null;
+  }
+
+  const provider = String(config.provider || "").trim();
+  const id = String(config.id || config.modelName || config.model || "").trim();
+
+  if (!provider || !id) {
+    return null;
+  }
+
+  return {
+    id: provider,
+    label: provider,
+    providerType: String(config.providerType || "openai-compatible"),
+    apiBase: String(config.apiBase || config.baseUrl || ""),
+    apiKeyEnv: String(config.apiKeyEnv || ""),
+    models: [{
+      id,
+      label: String(config.label || id),
+      modelName: String(config.modelName || config.model || id),
+      providerType: String(config.providerType || "openai-compatible"),
+      apiBase: String(config.apiBase || config.baseUrl || ""),
+      apiKeyEnv: String(config.apiKeyEnv || ""),
+      capabilities: { text: true, streaming: true },
+      enabled: true
+    }]
+  };
+}
+
+async function buildModelProviderCatalog(env, requestProviders, customModelConfig, fallbackCustomModelConfig) {
+  const defaultProviders = providersFromModels(MODELS);
+  const savedProviders = await readSavedProviders(env);
+  const customProviders = [
+    customConfigToProvider(customModelConfig),
+    customConfigToProvider(fallbackCustomModelConfig)
+  ].filter(Boolean);
+
+  return mergeProviders(
+    mergeProviders(defaultProviders, savedProviders),
+    mergeProviders(requestProviders || [], customProviders)
+  );
+}
+
+function findProviderModel(providerCatalog, providerId, modelId) {
+  const requestedProvider = String(providerId || "").trim();
+  const requestedModel = String(modelId || "").trim();
+  const provider = requestedProvider
+    ? (providerCatalog || []).find(item => item.id === requestedProvider)
+    : (providerCatalog || []).find(item => (item.models || []).some(model => model.id === requestedModel || model.modelName === requestedModel));
+  const model = provider
+    ? (provider.models || []).find(item => item.id === requestedModel || item.modelName === requestedModel)
+    : null;
+
+  console.log("[model-validation]", {
+    selectedProvider: requestedProvider || provider?.id || "",
+    selectedModel: requestedModel,
+    providerFound: Boolean(provider),
+    modelFound: Boolean(model),
+    providerModelsCount: provider?.models?.length || 0
+  });
+
+  return { provider, model };
+}
+
+function normalizeCustomModelConfig(config, { required = false } = {}) {
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    if (required) {
+      throw createModelSelectionError("Custom model config is required");
+    }
+    return null;
+  }
+
+  const providerType = String(config.providerType || config.provider || "").trim();
+  const apiBase = String(config.apiBase || config.baseUrl || "").trim();
+  const apiKeyEnv = String(config.apiKeyEnv || "").trim();
+  const modelName = String(config.modelName || config.model || config.id || "").trim();
+  const id = String(config.id || modelName).trim();
+  const provider = String(config.provider || "").trim();
+
+  if (!provider) {
+    throw createModelSelectionError("Unknown provider: " + (config.provider || ""));
+  }
+
+  if (providerType !== "openai-compatible") {
+    throw createModelSelectionError("Unknown provider: " + provider);
+  }
+
+  if (!apiBase) {
+    throw createModelSelectionError("OpenAI-compatible provider " + provider + " is missing baseUrl");
+  }
+
+  if (!apiKeyEnv) {
+    throw createModelSelectionError("OpenAI-compatible provider " + provider + " is missing apiKeyEnv");
+  }
+
+  if (!modelName || !id) {
+    throw createModelSelectionError("Unknown model for provider " + provider + ": " + (config.model || config.modelName || config.id || ""));
+  }
+
+  return {
+    id,
+    label: String(config.label || id),
+    provider,
+    providerType: "openai-compatible",
+    apiBase,
+    apiKeyEnv,
+    modelName,
+    capabilities: {
+      text: true,
+      streaming: true
+    },
+    enabled: true
+  };
+}
+
+async function callSelectedModel({ env, provider, model, messages, stream, providerCatalog }) {
+  const requestedModel = String(model || "").trim();
+  const requestedProvider = String(provider || "").trim();
+
+  if (!requestedModel) {
+    throw createModelSelectionError("Model is required");
+  }
+
+  const { provider: selectedProvider, model: selectedModel } = findProviderModel(providerCatalog, requestedProvider, requestedModel);
+
+  if (!selectedProvider) {
+    throw createModelSelectionError("Unknown provider: " + requestedProvider);
+  }
+
+  if (!selectedModel) {
+    throw createModelSelectionError("Unknown model for provider " + selectedProvider.id + ": " + requestedModel);
+  }
+
+  const providerType = selectedModel.providerType || selectedProvider.providerType;
+
+  if (providerType === "openai-compatible") {
+    const config = normalizeCustomModelConfig({
+      id: selectedModel.id,
+      label: selectedModel.label,
+      provider: selectedProvider.id,
+      providerType,
+      apiBase: selectedModel.apiBase || selectedProvider.apiBase,
+      apiKeyEnv: selectedModel.apiKeyEnv || selectedProvider.apiKeyEnv,
+      modelName: selectedModel.modelName || selectedModel.id
+    }, { required: true });
+
+    if (!env[config.apiKeyEnv]) {
+      throw new Error("API key env " + config.apiKeyEnv + " is not configured");
+    }
+
+    const response = await callOpenAICompatible({
+      env,
+      config,
+      messages,
+      stream
+    });
+
+    return {
+      provider: config.provider,
+      providerType: config.providerType,
+      model: config.id,
+      modelName: config.modelName,
+      stream: Boolean(stream),
+      response
+    };
+  }
+
+  if (providerType === "workers-ai") {
+    const runtimeConfig = getModelRuntimeConfig(selectedModel.id);
+    const response = runtimeConfig
+      ? (await callModel({
+        env,
+        model: selectedModel.id,
+        messages,
+        stream
+      })).response
+      : await callWorkersAI({
+        env,
+        model: selectedModel.modelName || selectedModel.id,
+        messages,
+        stream
+      });
+
+    return {
+      provider: selectedProvider.id,
+      providerType,
+      model: selectedModel.id,
+      modelName: selectedModel.modelName || selectedModel.id,
+      stream: Boolean(stream),
+      response
+    };
+  }
+
+  throw createModelSelectionError("Unknown provider: " + selectedProvider.id);
 }
 
 function buildFileSources(fileChunks) {
@@ -685,6 +1064,12 @@ function streamChatWithToolStatus({
   env,
   conversationId,
   model,
+  provider,
+  providerCatalog,
+  autoFallbackEnabled,
+  fallbackModel,
+  customModelConfig,
+  fallbackCustomModelConfig,
   modelMessages,
   historyMessages,
   userContent,
@@ -746,12 +1131,38 @@ function streamChatWithToolStatus({
           content: userContent
         });
 
-        const result = await callModel({
-          env,
-          model: model || DEFAULT_TEXT_MODEL,
-          messages: finalMessages,
-          stream: true
-        });
+        let result;
+
+        try {
+          result = await callSelectedModel({
+            env,
+            model: model || DEFAULT_TEXT_MODEL,
+            provider,
+            messages: finalMessages,
+            stream: true,
+            providerCatalog
+          });
+        } catch (err) {
+          if (!autoFallbackEnabled || !fallbackModel || fallbackModel === model) {
+            throw err;
+          }
+
+          enqueueText(encodeSseEvent("status", {
+            message: "Primary model failed, falling back to " + fallbackModel,
+            fallback: true,
+            from: model || DEFAULT_TEXT_MODEL,
+            to: fallbackModel
+          }));
+
+          result = await callSelectedModel({
+            env,
+            model: fallbackModel,
+            provider: "",
+            messages: finalMessages,
+            stream: true,
+            providerCatalog
+          });
+        }
 
         const reader = result.response.getReader();
 
@@ -890,6 +1301,12 @@ export async function handleChat(request, env) {
   const {
     messages = [],
     model,
+    provider = "",
+    providers = [],
+    autoFallbackEnabled = false,
+    fallbackModel = "",
+    customModelConfig = null,
+    fallbackCustomModelConfig = null,
     image,
     file,
     fileIds = [],
@@ -900,6 +1317,12 @@ export async function handleChat(request, env) {
 
   const userContent = getUserMessage(messages) ||
     (image ? "\u8bf7\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\u3002" : "\u8bf7\u7ee7\u7eed\u3002");
+  const providerCatalog = await buildModelProviderCatalog(
+    env,
+    Array.isArray(providers) ? providers : [],
+    customModelConfig,
+    fallbackCustomModelConfig
+  );
 
   const conversation = await prepareConversation(env, conversationId, userContent);
 
@@ -1061,6 +1484,12 @@ export async function handleChat(request, env) {
     env,
     conversationId: conversation.id,
     model,
+    provider,
+    providerCatalog,
+    autoFallbackEnabled: Boolean(autoFallbackEnabled),
+    fallbackModel,
+    customModelConfig,
+    fallbackCustomModelConfig,
     modelMessages,
     historyMessages,
     userContent,

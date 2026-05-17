@@ -362,6 +362,18 @@ body.authenticated .loginScreen{
   margin-bottom:8px;
 }
 
+.modelSettingsBtn{
+  width:100%;
+  margin-top:8px;
+  border:1px solid var(--border);
+  background:transparent;
+  color:var(--text);
+  border-radius:12px;
+  padding:8px 10px;
+  cursor:pointer;
+  font-size:13px;
+}
+
 .newChatBtn{
   width:100%;
   border:none;
@@ -467,7 +479,7 @@ body.authenticated .loginScreen{
 .libraryPanel{
   flex:0 0 auto;
   min-height:0;
-  max-height:260px;
+  max-height:none;
   overflow:hidden;
   display:flex;
   flex-direction:column;
@@ -478,7 +490,7 @@ body.authenticated .loginScreen{
 }
 
 .libraryPanel.collapsed{
-  max-height:none;
+  max-height:48px;
   padding:8px 0;
 }
 
@@ -519,8 +531,10 @@ body.authenticated .loginScreen{
 .libraryBody{
   display:none;
   min-height:0;
+  flex:1 1 auto;
   flex-direction:column;
   margin-top:8px;
+  overflow:hidden;
 }
 
 .libraryPanel.expanded .libraryBody{
@@ -601,9 +615,9 @@ body.authenticated .loginScreen{
   display:flex;
   flex-direction:column;
   gap:8px;
-  flex:1 1 auto;
-  min-height:0;
-  max-height:none;
+  flex:0 1 auto;
+  min-height:120px;
+  max-height:420px;
   overflow-y:auto;
 }
 
@@ -983,6 +997,230 @@ body.dark .toolErrorNotice{
   color:var(--text);
 }
 
+.settingsModal{
+  position:fixed;
+  inset:0;
+  z-index:50;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  padding:18px;
+  background:rgba(15,23,42,.36);
+}
+
+.settingsModal.open{
+  display:flex;
+}
+
+.settingsPanel{
+  width:min(760px,100%);
+  max-height:88vh;
+  overflow:auto;
+  background:var(--panel);
+  color:var(--text);
+  border:1px solid var(--border);
+  border-radius:18px;
+  padding:18px;
+  box-shadow:0 20px 60px rgba(15,23,42,.25);
+}
+
+.settingsHeader,
+.settingsFooter{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+
+.settingsFooterActions{
+  display:none;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+}
+
+.settingsHeaderActions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+.settingsHint{
+  grid-column:1 / -1;
+  margin:0;
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.5;
+}
+
+.settingsHeader h3{
+  margin:0;
+  font-size:18px;
+}
+
+.settingsGrid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
+  margin-top:14px;
+}
+
+.settingsField{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  color:var(--muted);
+  font-size:13px;
+}
+
+.settingsField.full{
+  grid-column:1 / -1;
+}
+
+.settingsField input,
+.settingsField select{
+  width:100%;
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:9px 10px;
+  background:transparent;
+  color:var(--text);
+}
+
+.settingsCheck{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-height:38px;
+}
+
+.providerList{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin-top:8px;
+}
+
+.providerRow{
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:9px;
+}
+
+.providerRowHeader,
+.modelRow{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+}
+
+.providerMain,
+.modelMain{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+}
+
+.providerMeta,
+.modelMeta{
+  color:var(--muted);
+  font-size:12px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.providerActions,
+.modelActions{
+  flex:0 0 auto;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  margin-left:auto;
+}
+
+.modelRow{
+  margin-top:6px;
+  color:var(--muted);
+  font-size:12px;
+}
+
+.settingsBtn{
+  border:1px solid var(--border);
+  background:transparent;
+  color:var(--text);
+  border-radius:999px;
+  padding:7px 11px;
+  cursor:pointer;
+}
+
+.settingsPrimaryBtn{
+  border:none;
+  background:var(--primary);
+  color:white;
+  border-radius:999px;
+  padding:8px 14px;
+  cursor:pointer;
+}
+
+.settingsIconBtn{
+  width:34px;
+  height:34px;
+  border:1px solid var(--border);
+  border-radius:999px;
+  background:transparent;
+  color:var(--text);
+  cursor:pointer;
+  font-size:18px;
+  line-height:1;
+}
+
+.editDialogOverlay{
+  position:fixed;
+  inset:0;
+  z-index:70;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  padding:18px;
+  background:rgba(15,23,42,.38);
+}
+
+.editDialogOverlay.open{
+  display:flex;
+}
+
+.editDialogPanel{
+  width:min(520px,100%);
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:18px;
+  padding:18px;
+  box-shadow:0 20px 60px rgba(15,23,42,.25);
+}
+
+.editDialogGrid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
+  margin-top:14px;
+}
+
+.editDialogFooter{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  margin-top:16px;
+}
+
+.editDialogFooter > div{
+  display:flex;
+  gap:8px;
+}
+
 #input{
   flex:1 1 260px;
   min-width:160px;
@@ -1076,6 +1314,89 @@ body.dark .toolErrorNotice{
   </form>
 </div>
 
+<div id="settingsModal" class="settingsModal" aria-hidden="true">
+  <div class="settingsPanel" role="dialog" aria-modal="true">
+    <div class="settingsHeader">
+      <h3>模型设置中心</h3>
+      <button id="closeSettingsBtn" class="settingsBtn" type="button">关闭</button>
+    </div>
+    <div class="settingsGrid">
+      <label class="settingsField">
+        默认模型
+        <select id="defaultModelSelect"></select>
+      </label>
+      <label class="settingsField">
+        fallback 模型
+        <select id="fallbackModelSelect"></select>
+      </label>
+      <label class="settingsCheck">
+        <input id="rememberLastModelCheck" type="checkbox" />
+        记住上次选择
+      </label>
+      <label class="settingsCheck">
+        <input id="fallbackEnabledCheck" type="checkbox" />
+        自动 fallback
+      </label>
+      <label class="settingsField">
+        新 provider 名称
+        <input id="providerLabelInput" placeholder="My Provider" />
+      </label>
+      <label class="settingsField">
+        provider id
+        <input id="providerIdInput" placeholder="my-provider" />
+      </label>
+      <label class="settingsField">
+        provider 类型
+        <select id="providerTypeSelect">
+          <option value="openai-compatible">OpenAI-compatible</option>
+          <option value="workers-ai">Workers AI</option>
+        </select>
+      </label>
+      <label class="settingsField">
+        baseUrl
+        <input id="providerBaseUrlInput" placeholder="https://api.example.com/v1" />
+      </label>
+      <label class="settingsField">
+        apiKeyEnv
+        <input id="providerApiKeyEnvInput" placeholder="MY_PROVIDER_API_KEY" />
+      </label>
+      <div class="settingsField full">
+        <button id="addProviderBtn" class="settingsBtn" type="button">新增 provider</button>
+        <button id="cancelProviderEditBtn" class="settingsBtn" type="button" style="display:none;">取消 provider 编辑</button>
+      </div>
+      <label class="settingsField">
+        选择 provider
+        <select id="modelProviderSelect"></select>
+      </label>
+      <label class="settingsField">
+        模型显示名
+        <input id="modelLabelInput" placeholder="My Model" />
+      </label>
+      <label class="settingsField">
+        模型 ID / Workers AI ID
+        <input id="modelIdInput" placeholder="@cf/... 或 provider-model" />
+      </label>
+      <label class="settingsField">
+        上游 model name
+        <input id="modelNameInput" placeholder="可留空，默认等于模型 ID" />
+      </label>
+      <div class="settingsField full">
+        <button id="addProviderModelBtn" class="settingsBtn" type="button">添加模型到 provider</button>
+        <button id="cancelModelEditBtn" class="settingsBtn" type="button" style="display:none;">取消模型编辑</button>
+        <div id="providersList" class="providerList"></div>
+      </div>
+    </div>
+    <div class="settingsFooter">
+      <span id="settingsSyncStatus" class="modelLabel"></span>
+      <div class="settingsFooterActions">
+        <button id="cancelSettingsBtn" class="settingsBtn" type="button">取消</button>
+        <button id="applySettingsBtn" class="settingsBtn" type="button">应用</button>
+        <button id="saveSettingsBtn" class="settingsPrimaryBtn" type="button">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="app">
 
   <div class="topbar">
@@ -1160,24 +1481,8 @@ body.dark .toolErrorNotice{
           font-size:14px;
         "
       >
-    
-        <option value="@cf/meta/llama-3.1-8b-instruct-fast">
-          Llama 3.1 8B Fast
-        </option>
-    
-        <option value="@cf/zai-org/glm-4.7-flash">
-          GLM 4.7 Flash
-        </option>
-    
-        <option value="@cf/google/gemma-4-26b-a4b-it">
-          Gemma 4 26B
-        </option>
-    
-        <option value="@cf/moonshotai/kimi-k2.6">
-          Kimi K2.6
-        </option>
-    
       </select>
+      <button id="modelSettingsBtn" class="modelSettingsBtn" type="button">模型设置</button>
 
       </div>
 
@@ -1459,6 +1764,231 @@ async function loadModels(){
     }
   }catch(err){
     console.log("load models failed, using fallback options", err);
+  }
+}
+
+function safeJsonParse(value, fallback){
+  try{
+    return JSON.parse(value || "");
+  }catch(err){
+    return fallback;
+  }
+}
+
+function providerLabelFromModel(model){
+  if((model.provider || "") === "glm") return "GLM Coding";
+  if((model.provider || "") === "kimi") return "Kimi";
+  if(model.providerType === "openai-compatible") return "Custom OpenAI-compatible";
+  return "Workers AI";
+}
+
+function providersFromModels(models){
+  const map = new Map();
+  (models || []).forEach(model => {
+    if(model.deprecated || model.enabled === false || !model.capabilities?.text) return;
+    const key = model.provider || model.providerType || "workers-ai";
+    if(!map.has(key)){
+      map.set(key, {
+        id:key,
+        label:providerLabelFromModel(model),
+        providerType:model.providerType || "workers-ai",
+        apiBase:model.apiBase || "",
+        apiKeyEnv:model.apiKeyEnv || "",
+        builtin:true,
+        models:[]
+      });
+    }
+    map.get(key).models.push({
+      id:model.id,
+      label:model.label || model.id,
+      modelName:model.modelName || model.id,
+      providerType:model.providerType || "workers-ai",
+      apiBase:model.apiBase || "",
+      apiKeyEnv:model.apiKeyEnv || "",
+      capabilities:model.capabilities || { text:true, streaming:true },
+      enabled:model.enabled !== false,
+      recommended:Boolean(model.recommended)
+    });
+  });
+  if(!map.has("openai-compatible")){
+    map.set("openai-compatible", {
+      id:"openai-compatible",
+      label:"Custom OpenAI-compatible",
+      providerType:"openai-compatible",
+      apiBase:"",
+      apiKeyEnv:"",
+      builtin:true,
+      models:[]
+    });
+  }
+  return Array.from(map.values());
+}
+
+function readLegacyModelSettings(){
+  return {
+    defaultModel:localStorage.getItem("defaultModel") || "",
+    rememberLastModel:localStorage.getItem("rememberLastModel") === "true",
+    lastModel:localStorage.getItem("selectedModel") || "",
+    fallbackEnabled:localStorage.getItem("autoFallbackEnabled") === "true",
+    fallbackModels:localStorage.getItem("fallbackModel") ? [localStorage.getItem("fallbackModel")] : [],
+    customModels:safeJsonParse(localStorage.getItem("customModels"), []),
+    customProviders:[],
+    providers:null
+  };
+}
+
+function normalizeModelSettings(settings, fallbackProviders){
+  const base = settings && typeof settings === "object" ? settings : readLegacyModelSettings();
+  return {
+    defaultModel:base.defaultModel || "",
+    rememberLastModel:Boolean(base.rememberLastModel),
+    lastModel:base.lastModel || base.selectedModel || "",
+    fallbackEnabled:Boolean(base.fallbackEnabled ?? base.autoFallbackEnabled),
+    fallbackModels:Array.isArray(base.fallbackModels) ? base.fallbackModels : (base.fallbackModel ? [base.fallbackModel] : []),
+    customModels:Array.isArray(base.customModels) ? base.customModels : [],
+    customProviders:Array.isArray(base.customProviders) ? base.customProviders : [],
+    providers:Array.isArray(base.providers) && base.providers.length ? base.providers : fallbackProviders
+  };
+}
+
+function writeSettingsCache(settings){
+  localStorage.setItem("model_settings", JSON.stringify(settings));
+  localStorage.setItem("defaultModel", settings.defaultModel || "");
+  localStorage.setItem("rememberLastModel", String(Boolean(settings.rememberLastModel)));
+  localStorage.setItem("autoFallbackEnabled", String(Boolean(settings.fallbackEnabled)));
+  localStorage.setItem("fallbackModel", settings.fallbackModels?.[0] || "");
+  if(settings.rememberLastModel && settings.lastModel){
+    localStorage.setItem("selectedModel", settings.lastModel);
+  }else{
+    localStorage.removeItem("selectedModel");
+  }
+}
+
+async function syncSettingsToServer(settings){
+  try{
+    const res = await fetch("/api/settings", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body:JSON.stringify({ settings })
+    });
+    if(!res.ok) throw new Error(await res.text());
+    settingsSyncStatus.textContent = "已同步";
+  }catch(err){
+    console.warn("settings sync failed", err);
+    settingsSyncStatus.textContent = "设置已本地保存，云端同步失败";
+  }
+}
+
+async function loadSettingsFromServer(fallbackProviders){
+  try{
+    const res = await fetch("/api/settings");
+    const data = await res.json();
+    if(res.ok && data.ok && data.settings){
+      const settings = normalizeModelSettings(data.settings, fallbackProviders);
+      writeSettingsCache(settings);
+      return settings;
+    }
+  }catch(err){
+    console.warn("load settings failed, using local cache", err);
+  }
+  return normalizeModelSettings(safeJsonParse(localStorage.getItem("model_settings"), null), fallbackProviders);
+}
+
+function flattenProviders(providers){
+  return (providers || []).flatMap(provider => (provider.models || []).map(model => ({
+    ...model,
+    provider:provider.id,
+    providerLabel:provider.label,
+    providerType:model.providerType || provider.providerType,
+    apiBase:model.apiBase || provider.apiBase || "",
+    apiKeyEnv:model.apiKeyEnv || provider.apiKeyEnv || ""
+  })));
+}
+
+function renderModelOptions(){
+  modelSelect.innerHTML = "";
+  modelOptions = flattenProviders(modelProviders).filter(model => model.enabled !== false);
+  const groups = new Map();
+  modelOptions.forEach(model => {
+    const groupLabel = model.providerLabel || "Models";
+    if(!groups.has(groupLabel)){
+      const group = document.createElement("optgroup");
+      group.label = groupLabel;
+      groups.set(groupLabel, group);
+      modelSelect.appendChild(group);
+    }
+    const option = document.createElement("option");
+    option.value = model.id;
+    option.textContent = (model.label || model.id) + (model.recommended ? " / 推荐" : "");
+    option.dataset.provider = model.provider || "";
+    option.dataset.providerType = model.providerType || "";
+    groups.get(groupLabel).appendChild(option);
+  });
+}
+
+function hasModel(modelId){
+  return Boolean(modelOptions.find(model => model.id === modelId));
+}
+
+function selectInitialModel(){
+  let nextModel = "";
+  if(modelSettingsState?.rememberLastModel && hasModel(modelSettingsState.lastModel)){
+    nextModel = modelSettingsState.lastModel;
+  }else if(hasModel(modelSettingsState?.defaultModel)){
+    nextModel = modelSettingsState.defaultModel;
+  }else{
+    nextModel = modelOptions[0]?.id || "";
+  }
+  modelSelect.value = nextModel;
+}
+
+function refreshSettingsControls(){
+  const fillSelect = (select, includeEmpty) => {
+    select.innerHTML = "";
+    if(includeEmpty){
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "不使用";
+      select.appendChild(empty);
+    }
+    modelOptions.forEach(model => {
+      const option = document.createElement("option");
+      option.value = model.id;
+      option.textContent = (model.providerLabel ? model.providerLabel + " / " : "") + (model.label || model.id);
+      select.appendChild(option);
+    });
+  };
+  fillSelect(defaultModelSelect, false);
+  fillSelect(fallbackModelSelect, true);
+  defaultModelSelect.value = hasModel(modelSettingsState?.defaultModel) ? modelSettingsState.defaultModel : (modelOptions[0]?.id || "");
+  fallbackModelSelect.value = hasModel(modelSettingsState?.fallbackModels?.[0]) ? modelSettingsState.fallbackModels[0] : "";
+  rememberLastModelCheck.checked = Boolean(modelSettingsState?.rememberLastModel);
+  fallbackEnabledCheck.checked = Boolean(modelSettingsState?.fallbackEnabled);
+  modelProviderSelect.innerHTML = "";
+  modelProviders.forEach(provider => {
+    const option = document.createElement("option");
+    option.value = provider.id;
+    option.textContent = provider.label;
+    modelProviderSelect.appendChild(option);
+  });
+  renderProvidersList();
+}
+
+async function loadModels(){
+  try{
+    const res = await fetch("/api/models");
+    const data = await res.json();
+    if(!res.ok || !Array.isArray(data.models) || !data.models.length) throw new Error("models unavailable");
+    const fallbackProviders = providersFromModels(data.models);
+    modelSettingsState = await loadSettingsFromServer(fallbackProviders);
+    modelProviders = modelSettingsState.providers;
+    renderModelOptions();
+    selectInitialModel();
+    refreshSettingsControls();
+    writeSettingsCache(modelSettingsState);
+    syncSettingsToServer(modelSettingsState);
+  }catch(err){
+    console.log("load models failed", err);
   }
 }
 
@@ -2440,6 +2970,38 @@ fileInput.addEventListener("change", async () => {
 
 
 const modelSelect = document.getElementById("modelSelect");
+const modelSettingsBtn = document.getElementById("modelSettingsBtn");
+const settingsModal = document.getElementById("settingsModal");
+const closeSettingsBtn = document.getElementById("closeSettingsBtn");
+const cancelSettingsBtn = document.getElementById("cancelSettingsBtn");
+const applySettingsBtn = document.getElementById("applySettingsBtn");
+const saveSettingsBtn = document.getElementById("saveSettingsBtn");
+const defaultModelSelect = document.getElementById("defaultModelSelect");
+const fallbackModelSelect = document.getElementById("fallbackModelSelect");
+const rememberLastModelCheck = document.getElementById("rememberLastModelCheck");
+const fallbackEnabledCheck = document.getElementById("fallbackEnabledCheck");
+const providerLabelInput = document.getElementById("providerLabelInput");
+const providerIdInput = document.getElementById("providerIdInput");
+const providerTypeSelect = document.getElementById("providerTypeSelect");
+const providerBaseUrlInput = document.getElementById("providerBaseUrlInput");
+const providerApiKeyEnvInput = document.getElementById("providerApiKeyEnvInput");
+const addProviderBtn = document.getElementById("addProviderBtn");
+const cancelProviderEditBtn = document.getElementById("cancelProviderEditBtn");
+const modelProviderSelect = document.getElementById("modelProviderSelect");
+const modelLabelInput = document.getElementById("modelLabelInput");
+const modelIdInput = document.getElementById("modelIdInput");
+const modelNameInput = document.getElementById("modelNameInput");
+const addProviderModelBtn = document.getElementById("addProviderModelBtn");
+const cancelModelEditBtn = document.getElementById("cancelModelEditBtn");
+const providersList = document.getElementById("providersList");
+const settingsSyncStatus = document.getElementById("settingsSyncStatus");
+let modelSettingsState = null;
+let modelProviders = [];
+let modelOptions = [];
+let settingsSnapshot = null;
+let editingProviderId = null;
+let editingModelRef = null;
+let editDialog = null;
 
 const conversation = [
   {
@@ -2447,6 +3009,1127 @@ const conversation = [
     content:"你是一个网页 AI 助手，请简洁、准确、友好地回答。可以使用 Markdown。"
   }
 ];
+
+function getProvider(providerId){
+  return modelProviders.find(provider => provider.id === providerId);
+}
+
+function setupSettingsHeaderActions(){
+  const header = settingsModal.querySelector(".settingsHeader");
+  const oldFooterActions = settingsModal.querySelector(".settingsFooterActions");
+  let actions = settingsModal.querySelector(".settingsHeaderActions");
+
+  if(!actions){
+    actions = document.createElement("div");
+    actions.className = "settingsHeaderActions";
+    header.appendChild(actions);
+  }
+
+  actions.appendChild(applySettingsBtn);
+  actions.appendChild(saveSettingsBtn);
+  actions.appendChild(closeSettingsBtn);
+  closeSettingsBtn.textContent = "×";
+  closeSettingsBtn.className = "settingsIconBtn";
+  closeSettingsBtn.setAttribute("aria-label", "Close");
+
+  if(oldFooterActions){
+    oldFooterActions.style.display = "none";
+  }
+}
+
+function createEditDialog(){
+  if(editDialog){
+    return editDialog;
+  }
+
+  const overlay = document.createElement("div");
+  overlay.id = "editSettingsDialog";
+  overlay.className = "editDialogOverlay";
+  overlay.innerHTML = [
+    "<div class='editDialogPanel' role='dialog' aria-modal='true'>",
+    "<div class='settingsHeader'>",
+    "<h3 id='editDialogTitle'>编辑</h3>",
+    "<button id='editDialogCloseBtn' class='settingsIconBtn' type='button' aria-label='Close'>×</button>",
+    "</div>",
+    "<div id='editDialogBody' class='editDialogGrid'></div>",
+    "<div class='editDialogFooter'>",
+    "<button id='editDialogDeleteBtn' class='settingsBtn' type='button'>删除</button>",
+    "<div>",
+    "<button id='editDialogCancelBtn' class='settingsBtn' type='button'>取消</button>",
+    "<button id='editDialogSaveBtn' class='settingsPrimaryBtn' type='button'>保存</button>",
+    "</div>",
+    "</div>",
+    "</div>"
+  ].join("");
+  document.body.appendChild(overlay);
+
+  editDialog = {
+    overlay,
+    title:overlay.querySelector("#editDialogTitle"),
+    body:overlay.querySelector("#editDialogBody"),
+    closeBtn:overlay.querySelector("#editDialogCloseBtn"),
+    deleteBtn:overlay.querySelector("#editDialogDeleteBtn"),
+    cancelBtn:overlay.querySelector("#editDialogCancelBtn"),
+    saveBtn:overlay.querySelector("#editDialogSaveBtn"),
+    mode:"",
+    providerId:"",
+    modelId:""
+  };
+
+  editDialog.closeBtn.addEventListener("click", closeEditDialog);
+  editDialog.cancelBtn.addEventListener("click", closeEditDialog);
+  overlay.addEventListener("click", event => {
+    if(event.target === overlay){
+      closeEditDialog();
+    }
+  });
+
+  return editDialog;
+}
+
+function closeEditDialog(){
+  if(editDialog){
+    editDialog.overlay.classList.remove("open");
+    editDialog.body.innerHTML = "";
+    editDialog.saveBtn.onclick = null;
+    editDialog.deleteBtn.onclick = null;
+    editDialog.mode = "";
+    editDialog.providerId = "";
+    editDialog.modelId = "";
+  }
+}
+
+function deepClone(value){
+  return JSON.parse(JSON.stringify(value || null));
+}
+
+function providerEditable(provider){
+  return provider.editable !== false;
+}
+
+function modelEditable(model){
+  return model.editable !== false;
+}
+
+function currentSelectedSnapshot(){
+  return {
+    selectedModel:modelSelect.value || "",
+    selectedProvider:getSelectedProviderForRequest(modelSelect.value)
+  };
+}
+
+function clearProviderForm(){
+  editingProviderId = null;
+  providerLabelInput.value = "";
+  providerIdInput.value = "";
+  providerTypeSelect.value = "openai-compatible";
+  providerBaseUrlInput.value = "";
+  providerApiKeyEnvInput.value = "";
+  addProviderBtn.textContent = "新增 provider";
+  cancelProviderEditBtn.style.display = "none";
+}
+
+function clearModelForm(){
+  editingModelRef = null;
+  modelLabelInput.value = "";
+  modelIdInput.value = "";
+  modelNameInput.value = "";
+  addProviderModelBtn.textContent = "添加模型到 provider";
+  cancelModelEditBtn.style.display = "none";
+}
+
+function refreshDraftSettings(message){
+  modelSettingsState.providers = modelProviders;
+  renderModelOptions();
+  if(modelSelect.value && !hasModel(modelSelect.value)){
+    selectInitialModel();
+  }
+  refreshSettingsControls();
+  if(message){
+    settingsSyncStatus.textContent = message;
+  }
+}
+
+function persistSettings(message, closeAfter){
+  modelSettingsState.providers = modelProviders;
+  writeSettingsCache(modelSettingsState);
+  renderModelOptions();
+  if(modelSelect.value && !hasModel(modelSelect.value)){
+    selectInitialModel();
+  }
+  refreshSettingsControls();
+  if(message){
+    settingsSyncStatus.textContent = message;
+  }
+  syncSettingsToServer(modelSettingsState);
+  if(closeAfter){
+    closeSettings();
+  }
+}
+
+function saveCurrentSettings(message){
+  persistSettings(message, false);
+}
+
+function openSettings(){
+  setupSettingsHeaderActions();
+  clearProviderForm();
+  clearModelForm();
+  refreshSettingsControls();
+  settingsSyncStatus.textContent = "";
+  settingsModal.classList.add("open");
+  settingsModal.setAttribute("aria-hidden", "false");
+}
+
+function closeSettings(){
+  settingsModal.classList.remove("open");
+  settingsModal.setAttribute("aria-hidden", "true");
+}
+
+function cancelSettings(){
+  if(settingsSnapshot){
+    modelSettingsState = deepClone(settingsSnapshot.settings);
+    modelProviders = deepClone(settingsSnapshot.providers);
+    renderModelOptions();
+    modelSelect.value = hasModel(settingsSnapshot.selected?.selectedModel)
+      ? settingsSnapshot.selected.selectedModel
+      : (modelOptions[0]?.id || "");
+    refreshSettingsControls();
+  }
+  clearProviderForm();
+  clearModelForm();
+  closeSettings();
+}
+
+function saveSettingsFromUi(closeAfter){
+  const nextDefault = defaultModelSelect.value || "";
+  modelSettingsState.defaultModel = nextDefault;
+  modelSettingsState.rememberLastModel = rememberLastModelCheck.checked;
+  modelSettingsState.fallbackEnabled = fallbackEnabledCheck.checked;
+  modelSettingsState.fallbackModels = fallbackModelSelect.value ? [fallbackModelSelect.value] : [];
+
+  if(nextDefault && hasModel(nextDefault)){
+    modelSelect.value = nextDefault;
+  }
+
+  if(modelSettingsState.rememberLastModel && nextDefault){
+    modelSettingsState.lastModel = nextDefault;
+  }else{
+    modelSettingsState.lastModel = "";
+  }
+
+  persistSettings(closeAfter ? "已保存" : "已应用", Boolean(closeAfter));
+}
+
+function addProvider(){
+  const label = providerLabelInput.value.trim();
+  const providerType = providerTypeSelect.value;
+  const apiBase = providerBaseUrlInput.value.trim();
+  const apiKeyEnv = providerApiKeyEnvInput.value.trim();
+
+  if(!label){
+    settingsSyncStatus.textContent = "请填写 provider 名称";
+    return;
+  }
+
+  const id = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || ("provider-" + Date.now());
+
+  if(getProvider(id)){
+    settingsSyncStatus.textContent = "provider 已存在";
+    return;
+  }
+
+  modelProviders.push({
+    id,
+    label,
+    providerType,
+    apiBase:providerType === "openai-compatible" ? apiBase : "",
+    apiKeyEnv:providerType === "openai-compatible" ? apiKeyEnv : "",
+    builtin:false,
+    models:[]
+  });
+  providerLabelInput.value = "";
+  providerBaseUrlInput.value = "";
+  providerApiKeyEnvInput.value = "";
+  saveCurrentSettings("已添加 provider");
+}
+
+function addProviderModel(){
+  const provider = getProvider(modelProviderSelect.value);
+  const id = modelIdInput.value.trim();
+  const label = modelLabelInput.value.trim() || id;
+  const modelName = modelNameInput.value.trim() || id;
+
+  if(!provider || !id){
+    settingsSyncStatus.textContent = "请选择 provider 并填写模型 ID";
+    return;
+  }
+
+  provider.models = (provider.models || []).filter(model => model.id !== id);
+  provider.models.push({
+    id,
+    label,
+    modelName,
+    providerType:provider.providerType,
+    apiBase:provider.apiBase || "",
+    apiKeyEnv:provider.apiKeyEnv || "",
+    capabilities:{ text:true, streaming:true },
+    enabled:true
+  });
+  modelLabelInput.value = "";
+  modelIdInput.value = "";
+  modelNameInput.value = "";
+  saveCurrentSettings("已添加模型");
+}
+
+function removeProvider(providerId){
+  modelProviders = modelProviders.filter(provider => provider.id !== providerId);
+  saveCurrentSettings("已删除 provider");
+}
+
+function removeProviderModel(providerId, modelId){
+  const provider = getProvider(providerId);
+  if(!provider) return;
+  provider.models = (provider.models || []).filter(model => model.id !== modelId);
+  saveCurrentSettings("已删除模型");
+}
+
+function renderProvidersList(){
+  providersList.innerHTML = "";
+  modelProviders.forEach(provider => {
+    const row = document.createElement("div");
+    row.className = "providerRow";
+    const header = document.createElement("div");
+    header.className = "providerRowHeader";
+    const title = document.createElement("strong");
+    title.textContent = provider.label + " (" + provider.providerType + ")";
+    header.appendChild(title);
+    if(!provider.builtin){
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "settingsBtn";
+      removeBtn.textContent = "删除 provider";
+      removeBtn.addEventListener("click", () => removeProvider(provider.id));
+      header.appendChild(removeBtn);
+    }
+    row.appendChild(header);
+    (provider.models || []).forEach(model => {
+      const modelRow = document.createElement("div");
+      modelRow.className = "modelRow";
+      const name = document.createElement("span");
+      name.textContent = (model.label || model.id) + " / " + model.id;
+      const removeModelBtn = document.createElement("button");
+      removeModelBtn.type = "button";
+      removeModelBtn.className = "settingsBtn";
+      removeModelBtn.textContent = "删除";
+      removeModelBtn.addEventListener("click", () => removeProviderModel(provider.id, model.id));
+      modelRow.appendChild(name);
+      modelRow.appendChild(removeModelBtn);
+      row.appendChild(modelRow);
+    });
+    providersList.appendChild(row);
+  });
+}
+
+function updateModelReferences(oldModelId, newModelId){
+  if(!oldModelId || !newModelId || oldModelId === newModelId){
+    return;
+  }
+  if(modelSettingsState.defaultModel === oldModelId){
+    modelSettingsState.defaultModel = newModelId;
+  }
+  if(modelSettingsState.lastModel === oldModelId){
+    modelSettingsState.lastModel = newModelId;
+  }
+  modelSettingsState.fallbackModels = (modelSettingsState.fallbackModels || []).map(modelId => (
+    modelId === oldModelId ? newModelId : modelId
+  ));
+  if(modelSelect.value === oldModelId){
+    modelSelect.value = newModelId;
+  }
+}
+
+function pruneInvalidModelReferences(){
+  renderModelOptions();
+  if(!hasModel(modelSettingsState.defaultModel)){
+    modelSettingsState.defaultModel = "";
+  }
+  if(!hasModel(modelSettingsState.lastModel)){
+    modelSettingsState.lastModel = "";
+  }
+  modelSettingsState.fallbackModels = (modelSettingsState.fallbackModels || []).filter(hasModel);
+  if(modelSelect.value && !hasModel(modelSelect.value)){
+    modelSelect.value = modelSettingsState.defaultModel || modelOptions[0]?.id || "";
+  }
+}
+
+function editProvider(providerId){
+  const provider = getProvider(providerId);
+  if(!provider || !providerEditable(provider)){
+    settingsSyncStatus.textContent = "当前 provider 不可编辑";
+    return;
+  }
+  editingProviderId = provider.id;
+  providerLabelInput.value = provider.label || provider.id;
+  providerIdInput.value = provider.id;
+  providerTypeSelect.value = provider.providerType || "openai-compatible";
+  providerBaseUrlInput.value = provider.apiBase || "";
+  providerApiKeyEnvInput.value = provider.apiKeyEnv || "";
+  addProviderBtn.textContent = "保存 provider 修改";
+  cancelProviderEditBtn.style.display = "inline-block";
+}
+
+function editProviderModel(providerId, modelId){
+  const provider = getProvider(providerId);
+  const model = provider?.models?.find(item => item.id === modelId);
+  if(!provider || !model || !modelEditable(model)){
+    settingsSyncStatus.textContent = "当前模型不可编辑";
+    return;
+  }
+  editingModelRef = { providerId, modelId };
+  modelProviderSelect.value = providerId;
+  modelLabelInput.value = model.label || model.id;
+  modelIdInput.value = model.id;
+  modelNameInput.value = model.modelName || model.id;
+  addProviderModelBtn.textContent = "保存模型修改";
+  cancelModelEditBtn.style.display = "inline-block";
+}
+
+function saveSettingsFromUi(closeAfter){
+  const nextDefault = defaultModelSelect.value || "";
+  modelSettingsState.defaultModel = nextDefault;
+  modelSettingsState.rememberLastModel = rememberLastModelCheck.checked;
+  modelSettingsState.fallbackEnabled = fallbackEnabledCheck.checked;
+  modelSettingsState.fallbackModels = fallbackModelSelect.value ? [fallbackModelSelect.value] : [];
+
+  if(nextDefault && hasModel(nextDefault)){
+    modelSelect.value = nextDefault;
+  }
+  modelSettingsState.lastModel = modelSettingsState.rememberLastModel && nextDefault ? nextDefault : "";
+  persistSettings(closeAfter ? "已保存" : "已应用", Boolean(closeAfter));
+}
+
+function addProvider(){
+  const label = providerLabelInput.value.trim();
+  const id = providerIdInput.value.trim() ||
+    label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") ||
+    ("provider-" + Date.now());
+  const providerType = providerTypeSelect.value;
+  const apiBase = providerBaseUrlInput.value.trim();
+  const apiKeyEnv = providerApiKeyEnvInput.value.trim();
+
+  if(!label || !id){
+    settingsSyncStatus.textContent = "provider id 和名称不能为空";
+    return;
+  }
+  if(modelProviders.some(provider => provider.id === id && provider.id !== editingProviderId)){
+    settingsSyncStatus.textContent = "provider id 已存在";
+    return;
+  }
+
+  if(editingProviderId){
+    const provider = getProvider(editingProviderId);
+    if(!provider || !providerEditable(provider)){
+      settingsSyncStatus.textContent = "当前 provider 不可编辑";
+      return;
+    }
+    provider.id = id;
+    provider.label = label;
+    provider.providerType = providerType;
+    provider.apiBase = providerType === "openai-compatible" ? apiBase : "";
+    provider.apiKeyEnv = providerType === "openai-compatible" ? apiKeyEnv : "";
+    provider.models = (provider.models || []).map(model => ({
+      ...model,
+      providerType,
+      apiBase:provider.apiBase,
+      apiKeyEnv:provider.apiKeyEnv
+    }));
+    clearProviderForm();
+    refreshDraftSettings("已更新 provider");
+    return;
+  }
+
+  modelProviders.push({
+    id,
+    label,
+    providerType,
+    apiBase:providerType === "openai-compatible" ? apiBase : "",
+    apiKeyEnv:providerType === "openai-compatible" ? apiKeyEnv : "",
+    builtin:false,
+    editable:true,
+    models:[]
+  });
+  clearProviderForm();
+  refreshDraftSettings("已添加 provider");
+}
+
+function addProviderModel(){
+  const provider = getProvider(modelProviderSelect.value);
+  const id = modelIdInput.value.trim();
+  const label = modelLabelInput.value.trim() || id;
+  const modelName = modelNameInput.value.trim() || id;
+
+  if(!provider || !id || !label){
+    settingsSyncStatus.textContent = "请选择 provider 并填写模型 id/name";
+    return;
+  }
+  if((provider.models || []).some(model => model.id === id && !(editingModelRef && editingModelRef.providerId === provider.id && editingModelRef.modelId === model.id))){
+    settingsSyncStatus.textContent = "同一 provider 下 model id 不能重复";
+    return;
+  }
+
+  if(editingModelRef){
+    const originalProvider = getProvider(editingModelRef.providerId);
+    const originalModel = originalProvider?.models?.find(model => model.id === editingModelRef.modelId);
+    if(!originalProvider || !originalModel || !modelEditable(originalModel)){
+      settingsSyncStatus.textContent = "当前模型不可编辑";
+      return;
+    }
+    originalProvider.models = (originalProvider.models || []).filter(model => model.id !== editingModelRef.modelId);
+    updateModelReferences(editingModelRef.modelId, id);
+  }
+
+  provider.models = (provider.models || []).filter(model => model.id !== id);
+  provider.models.push({
+    id,
+    label,
+    modelName,
+    providerType:provider.providerType,
+    apiBase:provider.apiBase || "",
+    apiKeyEnv:provider.apiKeyEnv || "",
+    capabilities:{ text:true, streaming:true },
+    enabled:true,
+    editable:true
+  });
+  clearModelForm();
+  refreshDraftSettings(editingModelRef ? "已更新模型" : "已添加模型");
+}
+
+function removeProvider(providerId){
+  const provider = getProvider(providerId);
+  if(!provider || !providerEditable(provider)){
+    settingsSyncStatus.textContent = "当前 provider 不可删除";
+    return;
+  }
+  if(!confirm("确定删除 provider " + provider.label + " 吗？")){
+    return;
+  }
+  if(editingProviderId === providerId){
+    clearProviderForm();
+  }
+  if(editingModelRef?.providerId === providerId){
+    clearModelForm();
+  }
+  modelProviders = modelProviders.filter(provider => provider.id !== providerId);
+  pruneInvalidModelReferences();
+  refreshDraftSettings("已删除 provider");
+}
+
+function removeProviderModel(providerId, modelId){
+  const provider = getProvider(providerId);
+  const targetModel = provider?.models?.find(model => model.id === modelId);
+  if(!provider || !targetModel || !modelEditable(targetModel)){
+    settingsSyncStatus.textContent = "当前模型不可删除";
+    return;
+  }
+  if(!confirm("确定删除模型 " + (targetModel.label || targetModel.id) + " 吗？")){
+    return;
+  }
+  if(editingModelRef?.providerId === providerId && editingModelRef?.modelId === modelId){
+    clearModelForm();
+  }
+  provider.models = (provider.models || []).filter(model => model.id !== modelId);
+  pruneInvalidModelReferences();
+  refreshDraftSettings("已删除模型");
+}
+
+function renderProvidersList(){
+  providersList.innerHTML = "";
+  modelProviders.forEach(provider => {
+    const row = document.createElement("div");
+    row.className = "providerRow";
+    const header = document.createElement("div");
+    header.className = "providerRowHeader";
+    const title = document.createElement("strong");
+    title.textContent = provider.label + " (" + provider.id + " / " + provider.providerType + ")";
+    header.appendChild(title);
+    if(providerEditable(provider)){
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "settingsBtn";
+      editBtn.textContent = "编辑";
+      editBtn.addEventListener("click", () => editProvider(provider.id));
+      header.appendChild(editBtn);
+    }
+    if(!provider.builtin){
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "settingsBtn";
+      removeBtn.textContent = "删除 provider";
+      removeBtn.addEventListener("click", () => removeProvider(provider.id));
+      header.appendChild(removeBtn);
+    }
+    row.appendChild(header);
+    (provider.models || []).forEach(model => {
+      const modelRow = document.createElement("div");
+      modelRow.className = "modelRow";
+      const name = document.createElement("span");
+      name.textContent = (model.label || model.id) + " / " + model.id;
+      if(modelEditable(model)){
+        const editModelBtn = document.createElement("button");
+        editModelBtn.type = "button";
+        editModelBtn.className = "settingsBtn";
+        editModelBtn.textContent = "编辑";
+        editModelBtn.addEventListener("click", () => editProviderModel(provider.id, model.id));
+        modelRow.appendChild(editModelBtn);
+      }
+      const removeModelBtn = document.createElement("button");
+      removeModelBtn.type = "button";
+      removeModelBtn.className = "settingsBtn";
+      removeModelBtn.textContent = "删除";
+      removeModelBtn.addEventListener("click", () => removeProviderModel(provider.id, model.id));
+      modelRow.prepend(name);
+      modelRow.appendChild(removeModelBtn);
+      row.appendChild(modelRow);
+    });
+    providersList.appendChild(row);
+  });
+}
+
+async function syncSettingsToServer(settings){
+  try{
+    const res = await fetch("/api/settings", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body:JSON.stringify({ settings })
+    });
+    if(!res.ok){
+      throw new Error(await res.text());
+    }
+    settingsSyncStatus.textContent = "已同步";
+    return true;
+  }catch(err){
+    console.warn("settings sync failed", err);
+    settingsSyncStatus.textContent = "已本地保存，云端同步失败";
+    return false;
+  }
+}
+
+async function persistSettings(message, closeAfter){
+  modelSettingsState.providers = modelProviders;
+  writeSettingsCache(modelSettingsState);
+  renderModelOptions();
+  if(modelSelect.value && !hasModel(modelSelect.value)){
+    selectInitialModel();
+  }
+  refreshSettingsControls();
+  if(message){
+    settingsSyncStatus.textContent = message;
+  }
+  const synced = await syncSettingsToServer(modelSettingsState);
+  if(closeAfter && synced){
+    closeSettings();
+  }
+}
+
+function saveCurrentSettings(message){
+  persistSettings(message, false);
+}
+
+function saveSettingsFromUi(closeAfter){
+  const nextDefault = defaultModelSelect.value || "";
+  modelSettingsState.defaultModel = nextDefault;
+  modelSettingsState.rememberLastModel = rememberLastModelCheck.checked;
+  modelSettingsState.fallbackEnabled = fallbackEnabledCheck.checked;
+  modelSettingsState.fallbackModels = fallbackModelSelect.value ? [fallbackModelSelect.value] : [];
+  if(nextDefault && hasModel(nextDefault)){
+    modelSelect.value = nextDefault;
+  }
+  modelSettingsState.lastModel = modelSettingsState.rememberLastModel && nextDefault ? nextDefault : "";
+  persistSettings(closeAfter ? "已保存" : "已应用", Boolean(closeAfter));
+}
+
+function addProvider(){
+  const label = providerLabelInput.value.trim();
+  const id = providerIdInput.value.trim() ||
+    label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") ||
+    ("provider-" + Date.now());
+  const providerType = providerTypeSelect.value;
+  const apiBase = providerBaseUrlInput.value.trim();
+  const apiKeyEnv = providerApiKeyEnvInput.value.trim();
+  if(!label || !id){
+    settingsSyncStatus.textContent = "provider id 和名称不能为空";
+    return;
+  }
+  if(modelProviders.some(provider => provider.id === id && provider.id !== editingProviderId)){
+    settingsSyncStatus.textContent = "provider id 已存在";
+    return;
+  }
+  if(editingProviderId){
+    const provider = getProvider(editingProviderId);
+    if(!provider || !providerEditable(provider)){
+      settingsSyncStatus.textContent = "当前 provider 不可编辑";
+      return;
+    }
+    provider.id = id;
+    provider.label = label;
+    provider.providerType = providerType;
+    provider.apiBase = providerType === "openai-compatible" ? apiBase : "";
+    provider.apiKeyEnv = providerType === "openai-compatible" ? apiKeyEnv : "";
+    provider.models = (provider.models || []).map(model => ({
+      ...model,
+      providerType,
+      apiBase:provider.apiBase,
+      apiKeyEnv:provider.apiKeyEnv
+    }));
+    clearProviderForm();
+    refreshDraftSettings("已更新 provider");
+    return;
+  }
+  modelProviders.push({
+    id,
+    label,
+    providerType,
+    apiBase:providerType === "openai-compatible" ? apiBase : "",
+    apiKeyEnv:providerType === "openai-compatible" ? apiKeyEnv : "",
+    builtin:false,
+    editable:true,
+    models:[]
+  });
+  clearProviderForm();
+  refreshDraftSettings("已添加 provider");
+}
+
+function addProviderModel(){
+  const provider = getProvider(modelProviderSelect.value);
+  const id = modelIdInput.value.trim();
+  const label = modelLabelInput.value.trim() || id;
+  const modelName = modelNameInput.value.trim() || id;
+  const wasEditing = Boolean(editingModelRef);
+  if(!provider || !id || !label){
+    settingsSyncStatus.textContent = "请选择 provider 并填写模型 id/name";
+    return;
+  }
+  if((provider.models || []).some(model => model.id === id && !(editingModelRef && editingModelRef.providerId === provider.id && editingModelRef.modelId === model.id))){
+    settingsSyncStatus.textContent = "同一 provider 下 model id 不能重复";
+    return;
+  }
+  if(editingModelRef){
+    const originalProvider = getProvider(editingModelRef.providerId);
+    const originalModel = originalProvider?.models?.find(model => model.id === editingModelRef.modelId);
+    if(!originalProvider || !originalModel || !modelEditable(originalModel)){
+      settingsSyncStatus.textContent = "当前模型不可编辑";
+      return;
+    }
+    originalProvider.models = (originalProvider.models || []).filter(model => model.id !== editingModelRef.modelId);
+    updateModelReferences(editingModelRef.modelId, id);
+  }
+  provider.models = (provider.models || []).filter(model => model.id !== id);
+  provider.models.push({
+    id,
+    label,
+    modelName,
+    providerType:provider.providerType,
+    apiBase:provider.apiBase || "",
+    apiKeyEnv:provider.apiKeyEnv || "",
+    capabilities:{ text:true, streaming:true },
+    enabled:true,
+    editable:true
+  });
+  clearModelForm();
+  refreshDraftSettings(wasEditing ? "已更新模型" : "已添加模型");
+}
+
+function removeProvider(providerId){
+  const provider = getProvider(providerId);
+  if(!provider || !providerEditable(provider)){
+    settingsSyncStatus.textContent = "当前 provider 不可删除";
+    return;
+  }
+  if(!confirm("确定删除 provider " + provider.label + " 吗？")){
+    return;
+  }
+  if(editingProviderId === providerId){
+    clearProviderForm();
+  }
+  if(editingModelRef?.providerId === providerId){
+    clearModelForm();
+  }
+  modelProviders = modelProviders.filter(provider => provider.id !== providerId);
+  pruneInvalidModelReferences();
+  refreshDraftSettings("已删除 provider");
+}
+
+function removeProviderModel(providerId, modelId){
+  const provider = getProvider(providerId);
+  const targetModel = provider?.models?.find(model => model.id === modelId);
+  if(!provider || !targetModel || !modelEditable(targetModel)){
+    settingsSyncStatus.textContent = "当前模型不可删除";
+    return;
+  }
+  if(!confirm("确定删除模型 " + (targetModel.label || targetModel.id) + " 吗？")){
+    return;
+  }
+  if(editingModelRef?.providerId === providerId && editingModelRef?.modelId === modelId){
+    clearModelForm();
+  }
+  provider.models = (provider.models || []).filter(model => model.id !== modelId);
+  pruneInvalidModelReferences();
+  refreshDraftSettings("已删除模型");
+}
+
+function renderProvidersList(){
+  providersList.innerHTML = "";
+  modelProviders.forEach(provider => {
+    const row = document.createElement("div");
+    row.className = "providerRow";
+    const header = document.createElement("div");
+    header.className = "providerRowHeader";
+    const title = document.createElement("strong");
+    title.textContent = provider.label + " (" + provider.id + " / " + provider.providerType + ")";
+    header.appendChild(title);
+    if(providerEditable(provider)){
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "settingsBtn";
+      editBtn.textContent = "编辑";
+      editBtn.addEventListener("click", () => editProvider(provider.id));
+      header.appendChild(editBtn);
+    }
+    if(!provider.builtin){
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "settingsBtn";
+      removeBtn.textContent = "删除 provider";
+      removeBtn.addEventListener("click", () => removeProvider(provider.id));
+      header.appendChild(removeBtn);
+    }
+    row.appendChild(header);
+    (provider.models || []).forEach(model => {
+      const modelRow = document.createElement("div");
+      modelRow.className = "modelRow";
+      const name = document.createElement("span");
+      name.textContent = (model.label || model.id) + " / " + model.id;
+      modelRow.appendChild(name);
+      if(modelEditable(model)){
+        const editModelBtn = document.createElement("button");
+        editModelBtn.type = "button";
+        editModelBtn.className = "settingsBtn";
+        editModelBtn.textContent = "编辑";
+        editModelBtn.addEventListener("click", () => editProviderModel(provider.id, model.id));
+        modelRow.appendChild(editModelBtn);
+      }
+      const removeModelBtn = document.createElement("button");
+      removeModelBtn.type = "button";
+      removeModelBtn.className = "settingsBtn";
+      removeModelBtn.textContent = "删除";
+      removeModelBtn.addEventListener("click", () => removeProviderModel(provider.id, model.id));
+      modelRow.appendChild(removeModelBtn);
+      row.appendChild(modelRow);
+    });
+    providersList.appendChild(row);
+  });
+}
+
+function addProvider(){
+  const label = providerLabelInput.value.trim();
+  const id = providerIdInput.value.trim() ||
+    label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") ||
+    ("provider-" + Date.now());
+  const providerType = providerTypeSelect.value;
+  const apiBase = providerBaseUrlInput.value.trim();
+  const apiKeyEnv = providerApiKeyEnvInput.value.trim();
+
+  if(!label || !id){
+    settingsSyncStatus.textContent = "provider id 和名称不能为空";
+    return;
+  }
+
+  if(modelProviders.some(provider => provider.id === id)){
+    settingsSyncStatus.textContent = "provider id 已存在";
+    return;
+  }
+
+  modelProviders.push({
+    id,
+    label,
+    providerType,
+    apiBase:providerType === "openai-compatible" ? apiBase : "",
+    apiKeyEnv:providerType === "openai-compatible" ? apiKeyEnv : "",
+    builtin:false,
+    editable:true,
+    models:[]
+  });
+  clearProviderForm();
+  persistSettings("已添加 provider", false);
+}
+
+function addProviderModel(){
+  const provider = getProvider(modelProviderSelect.value);
+  const id = modelIdInput.value.trim();
+  const label = modelLabelInput.value.trim() || id;
+  const modelName = modelNameInput.value.trim() || id;
+
+  if(!provider || !id || !label){
+    settingsSyncStatus.textContent = "请选择 provider 并填写模型 id/name";
+    return;
+  }
+
+  if((provider.models || []).some(model => model.id === id)){
+    settingsSyncStatus.textContent = "同一 provider 下 model id 不能重复";
+    return;
+  }
+
+  provider.models = provider.models || [];
+  provider.models.push({
+    id,
+    label,
+    modelName,
+    providerType:provider.providerType,
+    apiBase:provider.apiBase || "",
+    apiKeyEnv:provider.apiKeyEnv || "",
+    capabilities:{ text:true, streaming:true },
+    enabled:true,
+    editable:true
+  });
+  clearModelForm();
+  persistSettings("已添加模型", false);
+}
+
+function editProvider(providerId){
+  const provider = getProvider(providerId);
+
+  if(!provider || !providerEditable(provider)){
+    settingsSyncStatus.textContent = "当前 provider 不可编辑";
+    return;
+  }
+
+  const dialog = createEditDialog();
+  dialog.mode = "provider";
+  dialog.providerId = providerId;
+  dialog.title.textContent = "编辑 provider";
+  dialog.body.innerHTML = [
+    "<label class='settingsField'>Name<input id='editProviderLabel' /></label>",
+    "<label class='settingsField'>Provider ID<input id='editProviderId' /></label>",
+    "<label class='settingsField'>Type<select id='editProviderType'><option value='openai-compatible'>OpenAI-compatible</option><option value='workers-ai'>Workers AI</option></select></label>",
+    "<label class='settingsField'>baseUrl<input id='editProviderBaseUrl' /></label>",
+    "<label class='settingsField'>apiKeyEnv<input id='editProviderApiKeyEnv' /></label>"
+  ].join("");
+  dialog.body.querySelector("#editProviderLabel").value = provider.label || provider.id;
+  dialog.body.querySelector("#editProviderId").value = provider.id;
+  dialog.body.querySelector("#editProviderType").value = provider.providerType || "openai-compatible";
+  dialog.body.querySelector("#editProviderBaseUrl").value = provider.apiBase || "";
+  dialog.body.querySelector("#editProviderApiKeyEnv").value = provider.apiKeyEnv || "";
+  dialog.deleteBtn.style.display = provider.builtin ? "none" : "inline-block";
+  dialog.saveBtn.onclick = () => saveProviderDialog(providerId);
+  dialog.deleteBtn.onclick = () => {
+    if(confirm("确定删除 provider " + (provider.label || provider.id) + " 吗？")){
+      removeProvider(providerId);
+      closeEditDialog();
+    }
+  };
+  dialog.overlay.classList.add("open");
+}
+
+function saveProviderDialog(originalId){
+  const dialog = createEditDialog();
+  const provider = getProvider(originalId);
+  const label = dialog.body.querySelector("#editProviderLabel").value.trim();
+  const id = dialog.body.querySelector("#editProviderId").value.trim();
+  const providerType = dialog.body.querySelector("#editProviderType").value;
+  const apiBase = dialog.body.querySelector("#editProviderBaseUrl").value.trim();
+  const apiKeyEnv = dialog.body.querySelector("#editProviderApiKeyEnv").value.trim();
+
+  if(!provider || !label || !id){
+    settingsSyncStatus.textContent = "provider id 和 name 不能为空";
+    return;
+  }
+
+  if(modelProviders.some(item => item.id === id && item.id !== originalId)){
+    settingsSyncStatus.textContent = "provider id 已存在";
+    return;
+  }
+
+  provider.id = id;
+  provider.label = label;
+  provider.providerType = providerType;
+  provider.apiBase = providerType === "openai-compatible" ? apiBase : "";
+  provider.apiKeyEnv = providerType === "openai-compatible" ? apiKeyEnv : "";
+  provider.models = (provider.models || []).map(model => ({
+    ...model,
+    providerType,
+    apiBase:provider.apiBase || "",
+    apiKeyEnv:provider.apiKeyEnv || ""
+  }));
+  closeEditDialog();
+  persistSettings("已更新 provider", false);
+}
+
+function editProviderModel(providerId, modelId){
+  const provider = getProvider(providerId);
+  const model = provider?.models?.find(item => item.id === modelId);
+
+  if(!provider || !model || !modelEditable(model)){
+    settingsSyncStatus.textContent = "当前模型不可编辑";
+    return;
+  }
+
+  const dialog = createEditDialog();
+  dialog.mode = "model";
+  dialog.providerId = providerId;
+  dialog.modelId = modelId;
+  dialog.title.textContent = "编辑 model";
+  dialog.body.innerHTML = [
+    "<label class='settingsField'>Name<input id='editModelLabel' /></label>",
+    "<label class='settingsField'>Model ID<input id='editModelId' /></label>",
+    "<label class='settingsField'>Upstream model name<input id='editModelName' /></label>"
+  ].join("");
+  dialog.body.querySelector("#editModelLabel").value = model.label || model.id;
+  dialog.body.querySelector("#editModelId").value = model.id;
+  dialog.body.querySelector("#editModelName").value = model.modelName || model.id;
+  dialog.deleteBtn.style.display = "inline-block";
+  dialog.saveBtn.onclick = () => saveModelDialog(providerId, modelId);
+  dialog.deleteBtn.onclick = () => {
+    if(confirm("确定删除模型 " + (model.label || model.id) + " 吗？")){
+      removeProviderModel(providerId, modelId);
+      closeEditDialog();
+    }
+  };
+  dialog.overlay.classList.add("open");
+}
+
+function saveModelDialog(providerId, originalModelId){
+  const dialog = createEditDialog();
+  const provider = getProvider(providerId);
+  const label = dialog.body.querySelector("#editModelLabel").value.trim();
+  const id = dialog.body.querySelector("#editModelId").value.trim();
+  const modelName = dialog.body.querySelector("#editModelName").value.trim() || id;
+  const model = provider?.models?.find(item => item.id === originalModelId);
+
+  if(!provider || !model || !label || !id){
+    settingsSyncStatus.textContent = "model id 和 name 不能为空";
+    return;
+  }
+
+  if((provider.models || []).some(item => item.id === id && item.id !== originalModelId)){
+    settingsSyncStatus.textContent = "同一 provider 下 model id 不能重复";
+    return;
+  }
+
+  model.id = id;
+  model.label = label;
+  model.modelName = modelName;
+  updateModelReferences(originalModelId, id);
+  closeEditDialog();
+  persistSettings("已更新模型", false);
+}
+
+function removeProvider(providerId){
+  const provider = getProvider(providerId);
+
+  if(!provider || !providerEditable(provider)){
+    settingsSyncStatus.textContent = "当前 provider 不可删除";
+    return;
+  }
+
+  modelProviders = modelProviders.filter(item => item.id !== providerId);
+  pruneInvalidModelReferences();
+  persistSettings("已删除 provider", false);
+}
+
+function removeProviderModel(providerId, modelId){
+  const provider = getProvider(providerId);
+
+  if(!provider){
+    return;
+  }
+
+  provider.models = (provider.models || []).filter(model => model.id !== modelId);
+  pruneInvalidModelReferences();
+  persistSettings("已删除模型", false);
+}
+
+function renderProvidersList(){
+  providersList.innerHTML = "";
+  modelProviders.forEach(provider => {
+    const row = document.createElement("div");
+    row.className = "providerRow";
+    const header = document.createElement("div");
+    header.className = "providerRowHeader";
+    const main = document.createElement("div");
+    main.className = "providerMain";
+    const title = document.createElement("strong");
+    title.textContent = provider.label || provider.id;
+    const meta = document.createElement("div");
+    meta.className = "providerMeta";
+    meta.textContent = provider.id + " / " + provider.providerType;
+    main.appendChild(title);
+    main.appendChild(meta);
+    const actions = document.createElement("div");
+    actions.className = "providerActions";
+    if(providerEditable(provider)){
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "settingsBtn";
+      editBtn.textContent = "编辑";
+      editBtn.addEventListener("click", () => editProvider(provider.id));
+      actions.appendChild(editBtn);
+    }
+    header.appendChild(main);
+    header.appendChild(actions);
+    row.appendChild(header);
+
+    (provider.models || []).forEach(model => {
+      const modelRow = document.createElement("div");
+      modelRow.className = "modelRow";
+      const modelMain = document.createElement("div");
+      modelMain.className = "modelMain";
+      const modelName = document.createElement("span");
+      modelName.textContent = model.label || model.id;
+      const modelMeta = document.createElement("span");
+      modelMeta.className = "modelMeta";
+      modelMeta.textContent = model.id;
+      modelMain.appendChild(modelName);
+      modelMain.appendChild(modelMeta);
+      const modelActions = document.createElement("div");
+      modelActions.className = "modelActions";
+      if(modelEditable(model)){
+        const editModelBtn = document.createElement("button");
+        editModelBtn.type = "button";
+        editModelBtn.className = "settingsBtn";
+        editModelBtn.textContent = "编辑";
+        editModelBtn.addEventListener("click", () => editProviderModel(provider.id, model.id));
+        modelActions.appendChild(editModelBtn);
+      }
+      modelRow.appendChild(modelMain);
+      modelRow.appendChild(modelActions);
+      row.appendChild(modelRow);
+    });
+
+    providersList.appendChild(row);
+  });
+}
+
+function getModelConfigForRequest(modelId){
+  const model = modelOptions.find(item => item.id === modelId);
+  if(!model || model.providerType !== "openai-compatible"){
+    return null;
+  }
+  return {
+    id:model.id,
+    label:model.label,
+    provider:model.provider || "openai-compatible",
+    providerType:"openai-compatible",
+    apiBase:model.apiBase,
+    apiKeyEnv:model.apiKeyEnv,
+    modelName:model.modelName || model.id
+  };
+}
+
+function getSelectedProviderForRequest(modelId){
+  const model = modelOptions.find(item => item.id === modelId);
+  return model?.provider || "";
+}
 
 function resetLocalConversation(){
   conversation.length = 1;
@@ -2685,6 +4368,27 @@ input.addEventListener("keydown", e => {
 sendBtn.addEventListener("click", sendMessage);
 newChatBtn.addEventListener("click", createNewConversation);
 viewSummaryBtn.addEventListener("click", viewCurrentSummary);
+modelSelect.addEventListener("change", () => {
+  if(modelSettingsState?.rememberLastModel && modelSelect.value){
+    modelSettingsState.lastModel = modelSelect.value;
+    writeSettingsCache(modelSettingsState);
+    syncSettingsToServer(modelSettingsState);
+  }
+});
+modelSettingsBtn.addEventListener("click", openSettings);
+closeSettingsBtn.addEventListener("click", closeSettings);
+cancelSettingsBtn.addEventListener("click", cancelSettings);
+applySettingsBtn.addEventListener("click", () => saveSettingsFromUi(false));
+saveSettingsBtn.addEventListener("click", () => saveSettingsFromUi(true));
+addProviderBtn.addEventListener("click", addProvider);
+cancelProviderEditBtn.addEventListener("click", clearProviderForm);
+addProviderModelBtn.addEventListener("click", addProviderModel);
+cancelModelEditBtn.addEventListener("click", clearModelForm);
+settingsModal.addEventListener("click", event => {
+  if(event.target === settingsModal){
+    closeSettings();
+  }
+});
 libraryToggle.addEventListener("click", toggleFileLibrary);
 libraryToggle.addEventListener("keydown", e => {
   if(e.key === "Enter" || e.key === " "){
@@ -2723,6 +4427,7 @@ document.addEventListener("keydown", event => {
 loginForm.addEventListener("submit", login);
 logoutBtn.addEventListener("click", logout);
 setFileLibraryExpanded(false);
+setupSettingsHeaderActions();
 checkAuth();
 
 function toggleTheme(){
@@ -3099,6 +4804,19 @@ function handleStreamEvent(eventText, state, element){
     return false;
   }
 
+  if(event.type === "status"){
+    try{
+      const data = JSON.parse(event.data || "{}");
+      if(data.message){
+        setContextStatus(data.message);
+      }
+    }catch(err){
+      console.log("parse status failed", err);
+    }
+
+    return false;
+  }
+
   if(event.type === "done"){
     return true;
   }
@@ -3263,6 +4981,9 @@ async function sendMessage(){
   }
 
   try{
+    const fallbackModel = modelSettingsState?.fallbackModels?.[0] || "";
+    const selectedModelConfig = getModelConfigForRequest(modelSelect.value);
+    const fallbackModelConfig = getModelConfigForRequest(fallbackModel);
 
     const res = await fetch("/", {
 
@@ -3281,6 +5002,12 @@ async function sendMessage(){
           }
         ],
         model:modelSelect.value,
+        provider:getSelectedProviderForRequest(modelSelect.value),
+        providers:modelProviders,
+        autoFallbackEnabled:Boolean(modelSettingsState?.fallbackEnabled),
+        fallbackModel,
+        customModelConfig:selectedModelConfig,
+        fallbackCustomModelConfig:fallbackModelConfig,
         toolCall:toolCallForRequest,
         debugTools:localStorage.getItem("wa_tool_debug") === "1",
         image:imageToSend,

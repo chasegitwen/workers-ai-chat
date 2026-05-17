@@ -27,6 +27,34 @@ function errorCodeForStatus(status) {
   return "provider_http_error";
 }
 
+function maskApiKey(apiKey) {
+  const value = String(apiKey || "");
+
+  if (!value) {
+    return "";
+  }
+
+  if (value.length <= 10) {
+    return value.slice(0, 2) + "***";
+  }
+
+  return value.slice(0, 6) + "***" + value.slice(-4);
+}
+
+function getBodySchema(body) {
+  return {
+    keys: Object.keys(body),
+    model: body.model,
+    stream: body.stream,
+    messages_count: Array.isArray(body.messages) ? body.messages.length : 0,
+    message_roles: Array.isArray(body.messages)
+      ? body.messages.map(message => message?.role || "")
+      : [],
+    has_temperature: Object.prototype.hasOwnProperty.call(body, "temperature"),
+    has_max_tokens: Object.prototype.hasOwnProperty.call(body, "max_tokens")
+  };
+}
+
 export async function callOpenAICompatibleProvider({
   provider,
   env,
@@ -71,9 +99,23 @@ export async function callOpenAICompatibleProvider({
   const timeoutId = controller
     ? setTimeout(() => controller.abort("timeout"), timeoutMs)
     : null;
+  const finalUrl = normalizedBaseUrl + "/chat/completions";
+  const requestHeadersDebug = {
+    Authorization: apiKey ? "Bearer " + maskApiKey(apiKey) : "",
+    "Content-Type": "application/json"
+  };
+
+  console.log("[openai-compatible] request", {
+    provider,
+    final_url: finalUrl,
+    model,
+    headers: requestHeadersDebug,
+    body_schema: getBodySchema(body),
+    fixed_path: "/chat/completions"
+  });
 
   try {
-    const response = await fetch(normalizedBaseUrl + "/chat/completions", {
+    const response = await fetch(finalUrl, {
       method: "POST",
       headers: {
         "Authorization": "Bearer " + apiKey,
@@ -83,7 +125,24 @@ export async function callOpenAICompatibleProvider({
       signal: signal || controller?.signal
     });
 
+    console.log("[openai-compatible] response", {
+      provider,
+      final_url: finalUrl,
+      model,
+      status: response.status
+    });
+
     if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+
+      console.warn("[openai-compatible] error_response", {
+        provider,
+        final_url: finalUrl,
+        model,
+        status: response.status,
+        body_preview: errorText.slice(0, 1000)
+      });
+
       throw createProviderError(
         provider,
         response.status,

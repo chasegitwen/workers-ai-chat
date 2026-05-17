@@ -467,7 +467,7 @@ body.authenticated .loginScreen{
 .libraryPanel{
   flex:0 0 auto;
   min-height:0;
-  max-height:260px;
+  max-height:520px;
   overflow:hidden;
   display:flex;
   flex-direction:column;
@@ -519,6 +519,7 @@ body.authenticated .loginScreen{
 .libraryBody{
   display:none;
   min-height:0;
+  flex:1 1 auto;
   flex-direction:column;
   margin-top:8px;
 }
@@ -602,7 +603,7 @@ body.authenticated .loginScreen{
   flex-direction:column;
   gap:8px;
   flex:1 1 auto;
-  min-height:0;
+  min-height:180px;
   max-height:none;
   overflow-y:auto;
 }
@@ -679,7 +680,7 @@ body.authenticated .loginScreen{
 .filePreview,
 .chunkPreview{
   margin-top:6px;
-  max-height:72px;
+  max-height:260px;
   overflow:auto;
   white-space:pre-wrap;
   word-break:break-word;
@@ -1160,23 +1161,6 @@ body.dark .toolErrorNotice{
           font-size:14px;
         "
       >
-    
-        <option value="@cf/meta/llama-3.1-8b-instruct-fast">
-          Llama 3.1 8B Fast
-        </option>
-    
-        <option value="@cf/zai-org/glm-4.7-flash">
-          GLM 4.7 Flash
-        </option>
-    
-        <option value="@cf/google/gemma-4-26b-a4b-it">
-          Gemma 4 26B
-        </option>
-    
-        <option value="@cf/moonshotai/kimi-k2.6">
-          Kimi K2.6
-        </option>
-    
       </select>
 
       </div>
@@ -1436,38 +1420,84 @@ async function loadModels(){
   try{
     const currentValue = modelSelect.value;
     const currentProvider = modelSelect.selectedOptions[0]?.dataset.provider || "";
+    modelSelect.disabled = true;
+    modelSelect.innerHTML = "";
+
+    const loadingOption = document.createElement("option");
+    loadingOption.value = "";
+    loadingOption.textContent = "\u6b63\u5728\u52a0\u8f7d\u6a21\u578b...";
+    modelSelect.appendChild(loadingOption);
+
     const res = await fetch("/api/models");
     const data = await res.json();
 
     if(!res.ok || !Array.isArray(data.models) || !data.models.length){
-      throw new Error("models unavailable");
+      throw new Error(data.error || "models unavailable");
+    }
+
+    const workersModels = data.models
+      .filter(model => (model.provider || "workers-ai") === "workers-ai")
+      .filter(model => !model.deprecated && model.enabled !== false && model.capabilities?.text);
+    const glmOrder = ["glm-5.1", "glm-5-turbo", "glm-4.7", "glm-4.5-air"];
+    const glmModels = data.models
+      .filter(model => model.provider === "glm")
+      .filter(model => !model.deprecated && model.enabled !== false && model.capabilities?.text)
+      .sort((a, b) => glmOrder.indexOf(a.id) - glmOrder.indexOf(b.id));
+
+    if(!workersModels.length && !glmModels.length){
+      throw new Error("no text models available");
     }
 
     modelSelect.innerHTML = "";
 
-    data.models
-      .filter(model => !model.deprecated && model.enabled !== false && model.capabilities?.text)
-      .forEach(model => {
-        const option = document.createElement("option");
-        option.value = model.id;
-        option.textContent = (model.label || model.id) + (model.recommended ? " · 推荐" : "");
-        option.dataset.provider = model.provider || "workers-ai";
-        modelSelect.appendChild(option);
-      });
+    function appendModelOption(group, model){
+      const option = document.createElement("option");
+      option.value = model.id;
+      option.textContent = (model.label || model.id) + (model.recommended ? " / \u63a8\u8350" : "");
+      option.dataset.provider = model.provider || "workers-ai";
+      group.appendChild(option);
+    }
 
-    if([...modelSelect.options].some(option => option.value === currentValue)){
+    if(workersModels.length){
+      const workersGroup = document.createElement("optgroup");
+      workersGroup.label = "Workers AI";
+      workersModels.forEach(model => appendModelOption(workersGroup, model));
+      modelSelect.appendChild(workersGroup);
+    }
+
+    if(glmModels.length){
+      const glmGroup = document.createElement("optgroup");
+      glmGroup.label = "GLM Coding";
+      glmModels.forEach(model => appendModelOption(glmGroup, model));
+      modelSelect.appendChild(glmGroup);
+    }
+
+    const options = [...modelSelect.querySelectorAll("option")];
+
+    if(options.some(option => option.value === "glm-5.1")){
+      modelSelect.value = "glm-5.1";
+    }else if(options.some(option => option.value === currentValue)){
       modelSelect.value = currentValue;
     }else if(currentProvider){
-      const providerOption = [...modelSelect.options].find(option => option.dataset.provider === currentProvider);
+      const providerOption = options.find(option => option.dataset.provider === currentProvider);
       if(providerOption){
         modelSelect.value = providerOption.value;
       }
     }
+
+    modelSelect.disabled = false;
   }catch(err){
-    console.log("load models failed, using fallback options", err);
+    console.log("load models failed", err);
+    modelSelect.innerHTML = "";
+
+    const errorOption = document.createElement("option");
+    errorOption.value = "";
+    errorOption.textContent = "\u6a21\u578b\u5217\u8868\u52a0\u8f7d\u5931\u8d25";
+    modelSelect.appendChild(errorOption);
+    modelSelect.disabled = true;
+    setContextStatus("\u6a21\u578b\u5217\u8868\u52a0\u8f7d\u5931\u8d25\uff1a" + err.message);
   }
 }
-
 function setContextStatus(text){
   contextStatus.textContent = text || "";
 }
@@ -3119,6 +3149,9 @@ async function streamAIResponse(response, element){
 }
 
 async function sendMessage(){
+  if(sendBtn.disabled){
+    return;
+  }
 
   const message = input.value.trim();
   const imageToSend = selectedImage;

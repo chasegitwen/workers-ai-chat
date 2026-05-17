@@ -1,4 +1,4 @@
-import { callProvider } from "../lib/providers/index.js";
+import { GLM_CODING_MODELS, callProvider } from "../lib/providers/index.js";
 import { jsonResponse } from "../utils/response.js";
 
 function extractProviderMessage(result) {
@@ -24,7 +24,7 @@ function providerConfigured(provider, env) {
   }
 
   if (provider === "glm") {
-    return Boolean(env.GLM_API_KEY && env.GLM_BASE_URL && env.GLM_MODEL);
+    return Boolean(env.GLM_API_KEY && env.GLM_BASE_URL);
   }
 
   if (provider === "kimi") {
@@ -51,7 +51,10 @@ export async function handleProvider(request, env, url) {
     return null;
   }
 
-  const { provider = "workers-ai" } = await request.json().catch(() => ({}));
+  const { provider = "workers-ai", model } = await request.json().catch(() => ({}));
+  const testModel = provider === "glm"
+    ? (model || GLM_CODING_MODELS[0].id)
+    : provider;
 
   if (!providerConfigured(provider, env)) {
     return jsonResponse({
@@ -65,7 +68,7 @@ export async function handleProvider(request, env, url) {
     const result = await callProvider({
       env,
       provider,
-      model: provider,
+      model: testModel,
       messages: [
         {
           role: "user",

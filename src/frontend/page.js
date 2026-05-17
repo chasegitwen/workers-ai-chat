@@ -356,10 +356,28 @@ body.authenticated .loginScreen{
   border-top:1px solid var(--border);
 }
 
+.modelAreaActions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-top:8px;
+}
+
 .modelLabel{
   color:var(--muted);
   font-size:12px;
   margin-bottom:8px;
+}
+
+.modelSettingsBtn{
+  width:100%;
+  border:1px solid var(--border);
+  background:transparent;
+  color:var(--text);
+  border-radius:12px;
+  padding:8px 10px;
+  cursor:pointer;
+  font-size:13px;
 }
 
 .newChatBtn{
@@ -983,6 +1001,126 @@ body.dark .toolErrorNotice{
   color:var(--text);
 }
 
+.modalOverlay{
+  position:fixed;
+  inset:0;
+  z-index:50;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  padding:18px;
+  background:rgba(15,23,42,.38);
+}
+
+.modalOverlay.open{
+  display:flex;
+}
+
+.modelSettingsPanel{
+  width:min(720px, 100%);
+  max-height:88vh;
+  overflow:auto;
+  background:var(--panel);
+  color:var(--text);
+  border:1px solid var(--border);
+  border-radius:18px;
+  box-shadow:0 20px 70px rgba(15,23,42,.28);
+  padding:18px;
+}
+
+.modelSettingsHeader,
+.modelSettingsFooter{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+
+.modelSettingsHeader h3{
+  margin:0;
+  font-size:18px;
+}
+
+.modelSettingsGrid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:14px;
+  margin-top:16px;
+}
+
+.modelSettingsField{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  font-size:13px;
+  color:var(--muted);
+}
+
+.modelSettingsField.full{
+  grid-column:1 / -1;
+}
+
+.modelSettingsField input,
+.modelSettingsField select{
+  width:100%;
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:10px 11px;
+  background:transparent;
+  color:var(--text);
+  font-size:14px;
+}
+
+.modelSettingsCheck{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-height:40px;
+  color:var(--text);
+}
+
+.customModelsList{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  margin-top:8px;
+}
+
+.customModelRow{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:8px 10px;
+  font-size:13px;
+}
+
+.modalActionBtn{
+  border:1px solid var(--border);
+  background:transparent;
+  color:var(--text);
+  border-radius:999px;
+  padding:8px 13px;
+  cursor:pointer;
+}
+
+.modalPrimaryBtn{
+  border:none;
+  background:var(--primary);
+  color:white;
+  border-radius:999px;
+  padding:9px 15px;
+  cursor:pointer;
+}
+
+@media(max-width:800px){
+  .modelSettingsGrid{
+    grid-template-columns:1fr;
+  }
+}
+
 #input{
   flex:1 1 260px;
   min-width:160px;
@@ -1076,6 +1214,57 @@ body.dark .toolErrorNotice{
   </form>
 </div>
 
+<div id="modelSettingsModal" class="modalOverlay" aria-hidden="true">
+  <div class="modelSettingsPanel" role="dialog" aria-modal="true" aria-labelledby="modelSettingsTitle">
+    <div class="modelSettingsHeader">
+      <h3 id="modelSettingsTitle">&#x6A21;&#x578B;&#x8BBE;&#x7F6E;</h3>
+      <button id="closeModelSettingsBtn" class="modalActionBtn" type="button">&#x5173;&#x95ED;</button>
+    </div>
+    <div class="modelSettingsGrid">
+      <label class="modelSettingsField">
+        &#x9ED8;&#x8BA4;&#x6A21;&#x578B;
+        <select id="defaultModelSelect"></select>
+      </label>
+      <label class="modelSettingsField">
+        fallback &#x6A21;&#x578B;
+        <select id="fallbackModelSelect"></select>
+      </label>
+      <label class="modelSettingsCheck">
+        <input id="rememberLastModelCheck" type="checkbox" />
+        &#x8BB0;&#x4F4F;&#x4E0A;&#x6B21;&#x9009;&#x62E9;&#x7684;&#x6A21;&#x578B;
+      </label>
+      <label class="modelSettingsCheck">
+        <input id="autoFallbackCheck" type="checkbox" />
+        &#x4E3B;&#x6A21;&#x578B;&#x5931;&#x8D25;&#x65F6;&#x81EA;&#x52A8; fallback
+      </label>
+      <label class="modelSettingsField">
+        &#x81EA;&#x5B9A;&#x4E49;&#x663E;&#x793A;&#x540D;
+        <input id="customModelLabelInput" placeholder="My Model" />
+      </label>
+      <label class="modelSettingsField">
+        model
+        <input id="customModelNameInput" placeholder="gpt-4.1-mini" />
+      </label>
+      <label class="modelSettingsField">
+        baseUrl
+        <input id="customModelBaseUrlInput" placeholder="https://api.example.com/v1" />
+      </label>
+      <label class="modelSettingsField">
+        apiKeyEnv
+        <input id="customModelApiKeyEnvInput" placeholder="MY_PROVIDER_API_KEY" />
+      </label>
+      <div class="modelSettingsField full">
+        <button id="addCustomModelBtn" class="modalActionBtn" type="button">&#x6DFB;&#x52A0; OpenAI-compatible &#x6A21;&#x578B;</button>
+        <div id="customModelsList" class="customModelsList"></div>
+      </div>
+    </div>
+    <div class="modelSettingsFooter">
+      <span id="modelSettingsStatus" class="modelLabel"></span>
+      <button id="saveModelSettingsBtn" class="modalPrimaryBtn" type="button">&#x4FDD;&#x5B58;&#x8BBE;&#x7F6E;</button>
+    </div>
+  </div>
+</div>
+
 <div class="app">
 
   <div class="topbar">
@@ -1160,24 +1349,10 @@ body.dark .toolErrorNotice{
           font-size:14px;
         "
       >
-    
-        <option value="@cf/meta/llama-3.1-8b-instruct-fast">
-          Llama 3.1 8B Fast
-        </option>
-    
-        <option value="@cf/zai-org/glm-4.7-flash">
-          GLM 4.7 Flash
-        </option>
-    
-        <option value="@cf/google/gemma-4-26b-a4b-it">
-          Gemma 4 26B
-        </option>
-    
-        <option value="@cf/moonshotai/kimi-k2.6">
-          Kimi K2.6
-        </option>
-    
       </select>
+      <div class="modelAreaActions">
+        <button id="modelSettingsBtn" class="modelSettingsBtn" type="button">&#x6A21;&#x578B;&#x8BBE;&#x7F6E;</button>
+      </div>
 
       </div>
 
@@ -1353,6 +1528,7 @@ let expandedFileId = null;
 let fileDetailsCache = {};
 let fileChunksCache = {};
 let sourcePreviewCache = {};
+let allModelOptions = [];
 
 function showLogin(){
   document.body.classList.remove("authenticated");
@@ -1459,6 +1635,142 @@ async function loadModels(){
     }
   }catch(err){
     console.log("load models failed, using fallback options", err);
+  }
+}
+
+function readModelSettings(){
+  return {
+    defaultModel: localStorage.getItem("defaultModel") || "",
+    rememberLastModel: localStorage.getItem("rememberLastModel") === "true",
+    selectedModel: localStorage.getItem("selectedModel") || "",
+    autoFallbackEnabled: localStorage.getItem("autoFallbackEnabled") === "true",
+    fallbackModel: localStorage.getItem("fallbackModel") || ""
+  };
+}
+
+function writeModelSetting(key, value){
+  localStorage.setItem(key, String(value));
+}
+
+function getStoredCustomModels(){
+  try{
+    const items = JSON.parse(localStorage.getItem("customModels") || "[]");
+    if(!Array.isArray(items)){
+      return [];
+    }
+
+    return items
+      .map(item => ({
+        id:String(item.id || item.model || "").trim(),
+        label:String(item.label || item.model || "").trim(),
+        provider:"openai-compatible",
+        providerType:"openai-compatible",
+        baseUrl:String(item.baseUrl || "").trim(),
+        model:String(item.model || "").trim(),
+        apiKeyEnv:String(item.apiKeyEnv || "").trim(),
+        capabilities:{ text:true, streaming:true },
+        enabled:true,
+        custom:true
+      }))
+      .filter(item => item.id && item.baseUrl && item.model && item.apiKeyEnv);
+  }catch(err){
+    return [];
+  }
+}
+
+function saveCustomModels(models){
+  localStorage.setItem("customModels", JSON.stringify(models || []));
+}
+
+function hasModelOption(value){
+  return Boolean(value && allModelOptions.some(model => model.id === value));
+}
+
+function modelGroupLabel(model){
+  if(model.custom){
+    return "Custom OpenAI-compatible";
+  }
+
+  if((model.provider || model.providerType) === "glm"){
+    return "GLM Coding";
+  }
+
+  if((model.provider || model.providerType) === "kimi"){
+    return "Kimi";
+  }
+
+  if(model.providerType === "openai-compatible"){
+    return "OpenAI-compatible";
+  }
+
+  return "Workers AI";
+}
+
+function appendModelOption(group, model){
+  const option = document.createElement("option");
+  option.value = model.id;
+  option.textContent = (model.label || model.id) + (model.recommended ? " / 推荐" : "");
+  option.dataset.provider = model.provider || model.providerType || "workers-ai";
+  option.dataset.custom = model.custom ? "1" : "";
+  group.appendChild(option);
+}
+
+function renderModelSelect(select, models){
+  const groups = new Map();
+  select.innerHTML = "";
+
+  (models || []).forEach(model => {
+    const label = modelGroupLabel(model);
+
+    if(!groups.has(label)){
+      const group = document.createElement("optgroup");
+      group.label = label;
+      groups.set(label, group);
+      select.appendChild(group);
+    }
+
+    appendModelOption(groups.get(label), model);
+  });
+}
+
+async function loadModels(){
+  try{
+    const res = await fetch("/api/models");
+    const data = await res.json();
+
+    if(!res.ok || !Array.isArray(data.models) || !data.models.length){
+      throw new Error("models unavailable");
+    }
+
+    const backendModels = data.models
+      .filter(model => !model.deprecated && model.enabled !== false && model.capabilities?.text);
+    allModelOptions = backendModels.concat(getStoredCustomModels());
+
+    renderModelSelect(modelSelect, allModelOptions);
+
+    const settings = readModelSettings();
+    let preferredModel = "";
+
+    if(settings.rememberLastModel && hasModelOption(settings.selectedModel)){
+      preferredModel = settings.selectedModel;
+    }else if(hasModelOption(settings.defaultModel)){
+      preferredModel = settings.defaultModel;
+    }
+
+    const firstModel = allModelOptions[0]?.id || "";
+
+    modelSelect.value = preferredModel || firstModel;
+    modelSelect.disabled = false;
+    syncModelSettingsControls();
+  }catch(err){
+    console.log("load models failed", err);
+    modelSelect.innerHTML = "";
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "模型列表加载失败";
+    modelSelect.appendChild(option);
+    modelSelect.disabled = true;
+    setContextStatus("模型列表加载失败：" + err.message);
   }
 }
 
@@ -2411,6 +2723,160 @@ fileInput.addEventListener("change", async () => {
 
 
 const modelSelect = document.getElementById("modelSelect");
+const modelSettingsBtn = document.getElementById("modelSettingsBtn");
+const modelSettingsModal = document.getElementById("modelSettingsModal");
+const closeModelSettingsBtn = document.getElementById("closeModelSettingsBtn");
+const saveModelSettingsBtn = document.getElementById("saveModelSettingsBtn");
+const defaultModelSelect = document.getElementById("defaultModelSelect");
+const fallbackModelSelect = document.getElementById("fallbackModelSelect");
+const rememberLastModelCheck = document.getElementById("rememberLastModelCheck");
+const autoFallbackCheck = document.getElementById("autoFallbackCheck");
+const customModelLabelInput = document.getElementById("customModelLabelInput");
+const customModelNameInput = document.getElementById("customModelNameInput");
+const customModelBaseUrlInput = document.getElementById("customModelBaseUrlInput");
+const customModelApiKeyEnvInput = document.getElementById("customModelApiKeyEnvInput");
+const addCustomModelBtn = document.getElementById("addCustomModelBtn");
+const customModelsList = document.getElementById("customModelsList");
+const modelSettingsStatus = document.getElementById("modelSettingsStatus");
+
+function cloneModelSelectOptions(target, includeEmpty){
+  target.innerHTML = "";
+
+  if(includeEmpty){
+    const emptyOption = document.createElement("option");
+    emptyOption.value = "";
+    emptyOption.textContent = "不使用";
+    target.appendChild(emptyOption);
+  }
+
+  const sourceGroups = [...modelSelect.children];
+  sourceGroups.forEach(child => {
+    if(child.tagName === "OPTGROUP"){
+      const group = document.createElement("optgroup");
+      group.label = child.label;
+      [...child.children].forEach(option => group.appendChild(option.cloneNode(true)));
+      target.appendChild(group);
+    }else if(child.tagName === "OPTION"){
+      target.appendChild(child.cloneNode(true));
+    }
+  });
+}
+
+function syncModelSettingsControls(){
+  if(!defaultModelSelect || !fallbackModelSelect){
+    return;
+  }
+
+  const settings = readModelSettings();
+  cloneModelSelectOptions(defaultModelSelect, false);
+  cloneModelSelectOptions(fallbackModelSelect, true);
+  defaultModelSelect.value = hasModelOption(settings.defaultModel)
+    ? settings.defaultModel
+    : (allModelOptions[0]?.id || "");
+  fallbackModelSelect.value = hasModelOption(settings.fallbackModel)
+    ? settings.fallbackModel
+    : "";
+  rememberLastModelCheck.checked = settings.rememberLastModel;
+  autoFallbackCheck.checked = settings.autoFallbackEnabled;
+  renderCustomModelsList();
+}
+
+function openModelSettings(){
+  syncModelSettingsControls();
+  modelSettingsStatus.textContent = "";
+  modelSettingsModal.classList.add("open");
+  modelSettingsModal.setAttribute("aria-hidden", "false");
+}
+
+function closeModelSettings(){
+  modelSettingsModal.classList.remove("open");
+  modelSettingsModal.setAttribute("aria-hidden", "true");
+}
+
+function saveModelSettings(){
+  const nextDefaultModel = defaultModelSelect.value || "";
+
+  writeModelSetting("defaultModel", nextDefaultModel);
+  writeModelSetting("rememberLastModel", rememberLastModelCheck.checked);
+  writeModelSetting("autoFallbackEnabled", autoFallbackCheck.checked);
+  writeModelSetting("fallbackModel", fallbackModelSelect.value || "");
+
+  if(nextDefaultModel && hasModelOption(nextDefaultModel)){
+    modelSelect.value = nextDefaultModel;
+  }
+
+  if(rememberLastModelCheck.checked && nextDefaultModel){
+    writeModelSetting("selectedModel", nextDefaultModel);
+  }else{
+    localStorage.removeItem("selectedModel");
+  }
+
+  modelSettingsStatus.textContent = "已保存";
+}
+
+function addCustomModel(){
+  const label = customModelLabelInput.value.trim();
+  const model = customModelNameInput.value.trim();
+  const baseUrl = customModelBaseUrlInput.value.trim();
+  const apiKeyEnv = customModelApiKeyEnvInput.value.trim();
+
+  if(!label || !model || !baseUrl || !apiKeyEnv){
+    modelSettingsStatus.textContent = "请填写完整的自定义模型信息";
+    return;
+  }
+
+  const customModels = getStoredCustomModels();
+  const id = "custom:" + model;
+  const nextModels = customModels.filter(item => item.id !== id).concat([{
+    id,
+    label,
+    provider:"openai-compatible",
+    providerType:"openai-compatible",
+    baseUrl,
+    model,
+    apiKeyEnv,
+    capabilities:{ text:true, streaming:true },
+    enabled:true,
+    custom:true
+  }]);
+
+  saveCustomModels(nextModels);
+  customModelLabelInput.value = "";
+  customModelNameInput.value = "";
+  customModelBaseUrlInput.value = "";
+  customModelApiKeyEnvInput.value = "";
+  loadModels();
+  modelSettingsStatus.textContent = "已添加";
+}
+
+function removeCustomModel(id){
+  const nextModels = getStoredCustomModels().filter(item => item.id !== id);
+  saveCustomModels(nextModels);
+  loadModels();
+}
+
+function renderCustomModelsList(){
+  customModelsList.innerHTML = "";
+
+  getStoredCustomModels().forEach(model => {
+    const row = document.createElement("div");
+    row.className = "customModelRow";
+    const label = document.createElement("span");
+    label.textContent = (model.label || model.model) + " / " + model.model;
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "modalActionBtn";
+    removeBtn.textContent = "删除";
+    removeBtn.addEventListener("click", () => removeCustomModel(model.id));
+    row.appendChild(label);
+    row.appendChild(removeBtn);
+    customModelsList.appendChild(row);
+  });
+}
+
+function getCustomModelConfig(modelId){
+  return getStoredCustomModels().find(model => model.id === modelId) || null;
+}
 
 const conversation = [
   {
@@ -2656,6 +3122,21 @@ input.addEventListener("keydown", e => {
 sendBtn.addEventListener("click", sendMessage);
 newChatBtn.addEventListener("click", createNewConversation);
 viewSummaryBtn.addEventListener("click", viewCurrentSummary);
+modelSelect.addEventListener("change", () => {
+  const settings = readModelSettings();
+  if(settings.rememberLastModel && modelSelect.value){
+    writeModelSetting("selectedModel", modelSelect.value);
+  }
+});
+modelSettingsBtn.addEventListener("click", openModelSettings);
+closeModelSettingsBtn.addEventListener("click", closeModelSettings);
+saveModelSettingsBtn.addEventListener("click", saveModelSettings);
+addCustomModelBtn.addEventListener("click", addCustomModel);
+modelSettingsModal.addEventListener("click", event => {
+  if(event.target === modelSettingsModal){
+    closeModelSettings();
+  }
+});
 libraryToggle.addEventListener("click", toggleFileLibrary);
 libraryToggle.addEventListener("keydown", e => {
   if(e.key === "Enter" || e.key === " "){
@@ -3051,6 +3532,19 @@ function handleStreamEvent(eventText, state, element){
     return false;
   }
 
+  if(event.type === "status"){
+    try{
+      const data = JSON.parse(event.data || "{}");
+      if(data.message){
+        setContextStatus(data.message);
+      }
+    }catch(err){
+      console.log("parse status failed", err);
+    }
+
+    return false;
+  }
+
   if(event.type === "done"){
     return true;
   }
@@ -3215,6 +3709,9 @@ async function sendMessage(){
   }
 
   try{
+    const modelSettings = readModelSettings();
+    const selectedModelConfig = getCustomModelConfig(modelSelect.value);
+    const fallbackModelConfig = getCustomModelConfig(modelSettings.fallbackModel);
 
     const res = await fetch("/", {
 
@@ -3233,6 +3730,10 @@ async function sendMessage(){
           }
         ],
         model:modelSelect.value,
+        autoFallbackEnabled:modelSettings.autoFallbackEnabled,
+        fallbackModel:modelSettings.fallbackModel,
+        customModelConfig:selectedModelConfig,
+        fallbackCustomModelConfig:fallbackModelConfig,
         toolCall:toolCallForRequest,
         debugTools:localStorage.getItem("wa_tool_debug") === "1",
         image:imageToSend,

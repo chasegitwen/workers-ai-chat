@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
+    "check": "node --check src/index.js && node --check src/api/chat.js && node --check src/frontend/page.js && node --check src/providers/models.js && node --check src/providers/openaiCompatible.js && node --check src/providers/router.js",
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "start": "wrangler dev",

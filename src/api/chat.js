@@ -11,6 +11,7 @@ import {
 } from "./summary.js";
 import { DEFAULT_TEXT_MODEL } from "../providers/models.js";
 import { callModel } from "../providers/router.js";
+import { callOpenAICompatible } from "../providers/openaiCompatible.js";
 import { runTool } from "../tools/registry.js";
 
 const defaultSystemMessage = {
@@ -188,6 +189,92 @@ function readStreamText(value) {
   } catch (err) {
     return "";
   }
+}
+
+function encodeStatus(message, extra = {}) {
+  return encodeSseEvent("status", {
+    message,
+    ...extra
+  });
+}
+
+function normalizeCustomModelConfig(config) {
+  if (!config || typeof config !== "object") {
+    return null;
+  }
+
+  const providerType = String(config.provider || config.providerType || "").trim();
+  const baseUrl = String(config.baseUrl || config.apiBase || "").trim();
+  const modelName = String(config.model || config.modelName || "").trim();
+  const apiKeyEnv = String(config.apiKeyEnv || "").trim();
+  const label = String(config.label || modelName || "Custom model").trim();
+  const id = String(config.id || modelName || label).trim();
+
+  if (providerType !== "openai-compatible" || !baseUrl || !modelName || !apiKeyEnv) {
+    return null;
+  }
+
+  return {
+    id,
+    label,
+    provider: "openai-compatible",
+    providerType: "openai-compatible",
+    apiBase: baseUrl,
+    apiKeyEnv,
+    modelName,
+    capabilities: {
+      text: true,
+      streaming: true
+    },
+    enabled: true
+  };
+}
+
+function isSameCustomModel(model, config) {
+  if (!config) {
+    return false;
+  }
+
+  return model === config.id || model === config.modelName;
+}
+
+async function callConfiguredModel({
+  env,
+  model,
+  messages,
+  stream,
+  customModelConfig
+}) {
+  const customConfig = normalizeCustomModelConfig(customModelConfig);
+
+  if (customConfig && isSameCustomModel(model, customConfig)) {
+    if (!env[customConfig.apiKeyEnv]) {
+      throw new Error("API key env " + customConfig.apiKeyEnv + " is not configured");
+    }
+
+    const response = await callOpenAICompatible({
+      env,
+      config: customConfig,
+      messages,
+      stream
+    });
+
+    return {
+      provider: customConfig.provider,
+      providerType: customConfig.providerType,
+      model: customConfig.id,
+      modelName: customConfig.modelName,
+      stream: Boolean(stream),
+      response
+    };
+  }
+
+  return callModel({
+    env,
+    model: model || DEFAULT_TEXT_MODEL,
+    messages,
+    stream
+  });
 }
 
 function buildFileSources(fileChunks) {
@@ -638,6 +725,10 @@ function streamChatWithToolStatus({
   env,
   conversationId,
   model,
+  autoFallbackEnabled,
+  fallbackModel,
+  customModelConfig,
+  fallbackCustomModelConfig,
   modelMessages,
   historyMessages,
   userContent,
@@ -699,12 +790,35 @@ function streamChatWithToolStatus({
           content: userContent
         });
 
-        const result = await callModel({
-          env,
-          model: model || DEFAULT_TEXT_MODEL,
-          messages: finalMessages,
-          stream: true
-        });
+        let result;
+
+        try {
+          result = await callConfiguredModel({
+            env,
+            model: model || DEFAULT_TEXT_MODEL,
+            messages: finalMessages,
+            stream: true,
+            customModelConfig
+          });
+        } catch (err) {
+          if (!autoFallbackEnabled || !fallbackModel || fallbackModel === model) {
+            throw err;
+          }
+
+          enqueueText(encodeStatus("Primary model failed, falling back to " + fallbackModel, {
+            fallback: true,
+            from: model || DEFAULT_TEXT_MODEL,
+            to: fallbackModel
+          }));
+
+          result = await callConfiguredModel({
+            env,
+            model: fallbackModel,
+            messages: finalMessages,
+            stream: true,
+            customModelConfig: fallbackCustomModelConfig
+          });
+        }
 
         const reader = result.response.getReader();
 
@@ -843,6 +957,10 @@ export async function handleChat(request, env) {
   const {
     messages = [],
     model,
+    autoFallbackEnabled = false,
+    fallbackModel = "",
+    customModelConfig = null,
+    fallbackCustomModelConfig = null,
     image,
     file,
     fileIds = [],
@@ -1014,6 +1132,10 @@ export async function handleChat(request, env) {
     env,
     conversationId: conversation.id,
     model,
+    autoFallbackEnabled: Boolean(autoFallbackEnabled),
+    fallbackModel,
+    customModelConfig,
+    fallbackCustomModelConfig,
     modelMessages,
     historyMessages,
     userContent,

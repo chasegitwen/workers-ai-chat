@@ -170,6 +170,91 @@ export const MODELS = [
     enabled: false
   },
   {
+    id: "glm-5.1",
+    label: "GLM-5.1",
+    providerType: "openai-compatible",
+    provider: "glm",
+    apiBase: "https://open.bigmodel.cn/api/paas/v4",
+    apiKeyEnv: "GLM_API_KEY",
+    modelName: "glm-5.1",
+    capabilities: {
+      ...textCapabilities
+    },
+    contextWindow: 131072,
+    maxOutput: 8192,
+    recommended: false,
+    deprecated: false,
+    enabled: true
+  },
+  {
+    id: "glm-5-turbo",
+    label: "GLM-5-Turbo",
+    providerType: "openai-compatible",
+    provider: "glm",
+    apiBase: "https://open.bigmodel.cn/api/paas/v4",
+    apiKeyEnv: "GLM_API_KEY",
+    modelName: "glm-5-turbo",
+    capabilities: {
+      ...textCapabilities
+    },
+    contextWindow: 131072,
+    maxOutput: 8192,
+    recommended: false,
+    deprecated: false,
+    enabled: true
+  },
+  {
+    id: "glm-4.7",
+    label: "GLM-4.7",
+    providerType: "openai-compatible",
+    provider: "glm",
+    apiBase: "https://open.bigmodel.cn/api/paas/v4",
+    apiKeyEnv: "GLM_API_KEY",
+    modelName: "glm-4.7",
+    capabilities: {
+      ...textCapabilities
+    },
+    contextWindow: 131072,
+    maxOutput: 8192,
+    recommended: false,
+    deprecated: false,
+    enabled: true
+  },
+  {
+    id: "glm-4.5-air",
+    label: "GLM-4.5-Air",
+    providerType: "openai-compatible",
+    provider: "glm",
+    apiBase: "https://open.bigmodel.cn/api/paas/v4",
+    apiKeyEnv: "GLM_API_KEY",
+    modelName: "glm-4.5-air",
+    capabilities: {
+      ...textCapabilities
+    },
+    contextWindow: 131072,
+    maxOutput: 8192,
+    recommended: false,
+    deprecated: false,
+    enabled: true
+  },
+  {
+    id: "kimi-k2.5",
+    label: "Kimi K2.5",
+    providerType: "openai-compatible",
+    provider: "kimi",
+    apiBase: "https://api.moonshot.cn/v1",
+    apiKeyEnv: "KIMI_API_KEY",
+    modelName: "kimi-k2.5",
+    capabilities: {
+      ...textCapabilities
+    },
+    contextWindow: 131072,
+    maxOutput: 8192,
+    recommended: false,
+    deprecated: false,
+    enabled: true
+  },
+  {
     id: "qwen-plus",
     label: "Qwen Plus",
     providerType: "openai-compatible",

@@ -8,7 +8,6 @@ import {
 } from "./config.js";
 import {
   DEFAULT_VISION_MODEL,
-  FALLBACK_TEXT_MODEL
 } from "./models.js";
 import { callAnthropic } from "./anthropicRuntime.js";
 import { callOpenAICompatible } from "./openaiCompatible.js";
@@ -21,23 +20,10 @@ function resolveTextConfig(model) {
     return selected;
   }
 
-  console.warn(
-    "[provider-router] model not found, falling back:",
-    model || "(empty)",
-    "->",
-    FALLBACK_TEXT_MODEL
-  );
-
-  const fallback = getModelRuntimeConfig(FALLBACK_TEXT_MODEL);
-
-  if (!fallback) {
-    throw new ModelNotFoundError("Fallback model is not configured", {
-      provider: "workers-ai",
-      model: FALLBACK_TEXT_MODEL
-    });
-  }
-
-  return fallback;
+  throw new ModelNotFoundError("Model not found: " + (model || "(empty)"), {
+    provider: "",
+    model: model || ""
+  });
 }
 
 function resolveVisionConfig(model) {

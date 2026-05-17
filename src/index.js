@@ -5,6 +5,7 @@ import { handleFetchUrl } from "./api/fetchUrl.js";
 import { handleHistory } from "./api/history.js";
 import { handleSearchAndFetch } from "./api/searchAndFetch.js";
 import { handleSearchWeb } from "./api/searchWeb.js";
+import { handleSettings } from "./api/settings.js";
 import { htmlPage } from "./frontend/page.js";
 import { requireAuth } from "./lib/auth.js";
 import { getEnabledModels } from "./providers/config.js";
@@ -82,6 +83,14 @@ export default {
 
       if (filesResponse) {
         return filesResponse;
+      }
+    }
+
+    if (url.pathname === "/api/settings") {
+      const settingsResponse = await handleSettings(request, env, url);
+
+      if (settingsResponse) {
+        return settingsResponse;
       }
     }
 

@@ -622,10 +622,15 @@ function formatToolContext(toolCall) {
       ? [
         "Freshness: " + freshness,
         "",
-        "本次问题需要最新信息。请只依据下面搜索结果回答。",
-        "优先使用带有发布日期、age 或 page_age 的最新结果。",
-        "不要使用模型旧知识补充未经搜索结果支持的新闻细节。",
-        "如果搜索结果不足，请明确说明“当前搜索结果不足以确认”。",
+        "本次问题需要最新信息。",
+        "请优先依据下面搜索结果回答。",
+        "优先使用带有发布日期、age 或 page_age 的结果。",
+        "不要使用未经搜索结果支持的旧知识补充新闻细节。",
+        "",
+        "This query requires up-to-date information.",
+        "Prioritize the search results below.",
+        "Prefer results with publish dates, age, or page_age metadata.",
+        "Do not add unsupported news details from model prior knowledge.",
         ""
       ]
       : [];

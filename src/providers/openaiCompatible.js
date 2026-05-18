@@ -1,4 +1,5 @@
-import { ProviderError } from "./errors.js";
+import { createProviderHttpError, ProviderError } from "./errors.js";
+import { filterEmptySystemMessages } from "./messages.js";
 
 function normalizeApiBase(apiBase) {
   return String(apiBase || "").replace(/\/+$/g, "");
@@ -32,7 +33,7 @@ export async function callOpenAICompatible({
 
   const body = {
     model: config.modelName || config.id,
-    messages,
+    messages: filterEmptySystemMessages(messages),
     stream
   };
 
@@ -55,13 +56,12 @@ export async function callOpenAICompatible({
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
-    throw new ProviderError(
-      "OpenAI-compatible request failed: HTTP " + response.status + (errorText ? " " + errorText : ""),
-      {
-        provider: config.provider,
-        model: config.id
-      }
-    );
+    throw createProviderHttpError({
+      provider: config.provider,
+      model: config.id,
+      status: response.status,
+      raw: errorText
+    });
   }
 
   return stream ? response.body : response.json();

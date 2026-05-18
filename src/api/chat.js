@@ -14,6 +14,8 @@ import { callModel } from "../providers/router.js";
 import { callOpenAICompatible } from "../providers/openaiCompatible.js";
 import { getModelRuntimeConfig } from "../providers/config.js";
 import { callWorkersAI } from "../providers/workersai.js";
+import { normalizeProviderError, ProviderError } from "../providers/errors.js";
+import { filterEmptySystemMessages } from "../providers/messages.js";
 import { runTool } from "../tools/registry.js";
 
 const defaultSystemMessage = {
@@ -559,6 +561,7 @@ function normalizeCustomModelConfig(config, { required = false } = {}) {
 async function callSelectedModel({ env, provider, model, messages, stream, providerCatalog }) {
   const requestedModel = String(model || "").trim();
   const requestedProvider = String(provider || "").trim();
+  const providerMessages = filterEmptySystemMessages(messages);
 
   if (!requestedModel) {
     throw createModelSelectionError("Model is required");
@@ -588,13 +591,17 @@ async function callSelectedModel({ env, provider, model, messages, stream, provi
     }, { required: true });
 
     if (!env[config.apiKeyEnv]) {
-      throw new Error("API key env " + config.apiKeyEnv + " is not configured");
+      throw new ProviderError("API key env " + config.apiKeyEnv + " is not configured", {
+        provider: config.provider,
+        model: config.id,
+        code: "missing_api_key"
+      });
     }
 
     const response = await callOpenAICompatible({
       env,
       config,
-      messages,
+      messages: providerMessages,
       stream
     });
 
@@ -614,13 +621,13 @@ async function callSelectedModel({ env, provider, model, messages, stream, provi
       ? (await callModel({
         env,
         model: selectedModel.id,
-        messages,
+        messages: providerMessages,
         stream
       })).response
       : await callWorkersAI({
         env,
         model: selectedModel.modelName || selectedModel.id,
-        messages,
+        messages: providerMessages,
         stream
       });
 
@@ -1182,6 +1189,9 @@ function streamChatWithToolStatus({
       try {
         const finalMessages = [...modelMessages];
         let executedToolCall = null;
+        let fallbackCount = 0;
+        let activeCallStartedAt = 0;
+        let activeResult = null;
 
         if (requestedToolCall?.name) {
           enqueueToolStatus(requestedToolCall.name, "running");
@@ -1202,6 +1212,7 @@ function streamChatWithToolStatus({
         let result;
 
         try {
+          activeCallStartedAt = Date.now();
           result = await callSelectedModel({
             env,
             model: model || DEFAULT_TEXT_MODEL,
@@ -1210,18 +1221,26 @@ function streamChatWithToolStatus({
             stream: true,
             providerCatalog
           });
+          activeResult = result;
         } catch (err) {
           if (!autoFallbackEnabled || !fallbackModel || fallbackModel === model) {
             throw err;
           }
 
-          enqueueText(encodeSseEvent("status", {
-            message: "Primary model failed, falling back to " + fallbackModel,
-            fallback: true,
+          fallbackCount += 1;
+          const normalizedError = normalizeProviderError(err, {
+            provider,
+            model: model || DEFAULT_TEXT_MODEL
+          });
+
+          enqueueText(encodeSseEvent("fallback", {
             from: model || DEFAULT_TEXT_MODEL,
-            to: fallbackModel
+            to: fallbackModel,
+            reason: normalizedError.code || String(normalizedError.status || "provider_error"),
+            message: normalizedError.message
           }));
 
+          activeCallStartedAt = Date.now();
           result = await callSelectedModel({
             env,
             model: fallbackModel,
@@ -1230,6 +1249,7 @@ function streamChatWithToolStatus({
             stream: true,
             providerCatalog
           });
+          activeResult = result;
         }
 
         const reader = result.response.getReader();
@@ -1250,6 +1270,8 @@ function streamChatWithToolStatus({
           appendReplyFromSseBuffer({ value: bufferState.value + "\n\n" }, replyState);
         }
 
+        const latencyMs = activeCallStartedAt ? Date.now() - activeCallStartedAt : 0;
+
         if (env.DB && replyState.value) {
           await saveMessage(env.DB, conversationId, "assistant", replyState.value);
           await maybeUpdateConversationSummary(env, conversationId);
@@ -1264,20 +1286,37 @@ function streamChatWithToolStatus({
         }
 
         enqueueText("data: " + JSON.stringify({ conversationId }) + "\n\n");
-        enqueueText("event: done\ndata: {}\n\n");
+        enqueueText(encodeSseEvent("done", {
+          provider: activeResult?.provider || "",
+          model: activeResult?.model || activeResult?.modelName || "",
+          latencyMs,
+          fallbackCount
+        }));
         enqueueText("data: [DONE]\n\n");
       } catch (err) {
         console.log("AI request failed", err);
+        const providerError = normalizeProviderError(err, {
+          provider,
+          model: model || DEFAULT_TEXT_MODEL
+        });
 
+        enqueueText(encodeSseEvent("provider_error", providerError));
         enqueueText("data: " + JSON.stringify({
           response:
             "AI \u8bf7\u6c42\u5931\u8d25\uff1a\n\n" +
-            "name: " + err.name + "\n" +
-            "message: " + err.message + "\n" +
-            "stack: " + err.stack
+            "provider: " + providerError.provider + "\n" +
+            "model: " + providerError.model + "\n" +
+            "status: " + (providerError.status || "") + "\n" +
+            "code: " + providerError.code + "\n" +
+            "message: " + providerError.message
         }) + "\n\n");
         enqueueText("data: " + JSON.stringify({ conversationId }) + "\n\n");
-        enqueueText("event: done\ndata: {}\n\n");
+        enqueueText(encodeSseEvent("done", {
+          provider: providerError.provider,
+          model: providerError.model,
+          latencyMs: 0,
+          fallbackCount: 0
+        }));
         enqueueText("data: [DONE]\n\n");
       } finally {
         controller.close();

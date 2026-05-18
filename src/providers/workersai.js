@@ -1,3 +1,5 @@
+import { filterEmptySystemMessages } from "./messages.js";
+
 function extractClaudeText(result) {
   if (Array.isArray(result?.content)) {
     return result.content
@@ -31,10 +33,11 @@ export async function callWorkersAI({
   temperature
 }) {
   const isClaudeProxied = String(model || "").startsWith("anthropic/claude");
+  const filteredMessages = filterEmptySystemMessages(messages);
   const input = {
     messages: isClaudeProxied
-      ? (messages || []).filter(message => message.role !== "system")
-      : messages,
+      ? filteredMessages.filter(message => message.role !== "system")
+      : filteredMessages,
     stream: isClaudeProxied ? false : stream
   };
 

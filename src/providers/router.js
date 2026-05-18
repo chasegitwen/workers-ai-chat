@@ -12,6 +12,7 @@ import {
 import { callAnthropic } from "./anthropicRuntime.js";
 import { callOpenAICompatible } from "./openaiCompatible.js";
 import { callWorkersAI, callWorkersAIVision } from "./workersai.js";
+import { filterEmptySystemMessages } from "./messages.js";
 
 function resolveTextConfig(model) {
   const selected = getModelRuntimeConfig(model);
@@ -123,7 +124,7 @@ export async function callModel({
   const response = await callByProviderType({
     env,
     config,
-    messages,
+    messages: filterEmptySystemMessages(messages),
     stream,
     max_tokens,
     temperature,

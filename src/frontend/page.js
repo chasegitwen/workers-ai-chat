@@ -910,6 +910,18 @@ body.dark .toolErrorNotice{
   white-space:pre-wrap;
 }
 
+.modelDiagnosticInfo{
+  margin-top:8px;
+  padding:7px 9px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  color:var(--muted);
+  background:rgba(20,184,166,.07);
+  font-size:11px;
+  line-height:1.45;
+  white-space:pre-wrap;
+}
+
 .inputBar{
   flex:0 0 auto;
   display:flex;
@@ -6034,10 +6046,52 @@ function renderToolDebug(element, toolDebug){
   element.appendChild(info);
 }
 
-function renderAssistantMessage(element, text, sources, toolSources, toolError, toolDebug){
+function renderModelDiagnostics(element, diagnostics){
+  const lines = [];
+
+  (diagnostics?.fallbacks || []).forEach(item => {
+    lines.push(
+      "fallback: " + (item.from || "") + " -> " + (item.to || ""),
+      "reason: " + (item.reason || ""),
+      item.message ? "message: " + item.message : ""
+    );
+  });
+
+  if(diagnostics?.done){
+    const done = diagnostics.done;
+    lines.push(
+      "model: " + [done.provider, done.model].filter(Boolean).join(" / "),
+      "latency: " + Number(done.latencyMs || 0) + "ms",
+      "fallback count: " + Number(done.fallbackCount || 0)
+    );
+  }
+
+  if(diagnostics?.providerError){
+    const error = diagnostics.providerError;
+    lines.push(
+      "provider error: " + [error.provider, error.model].filter(Boolean).join(" / "),
+      "status: " + (error.status || ""),
+      "code: " + (error.code || ""),
+      "message: " + (error.message || "")
+    );
+  }
+
+  const text = lines.filter(Boolean).join(String.fromCharCode(10));
+  if(!text){
+    return;
+  }
+
+  const info = document.createElement("div");
+  info.className = "modelDiagnosticInfo";
+  info.textContent = text;
+  element.appendChild(info);
+}
+
+function renderAssistantMessage(element, text, sources, toolSources, toolError, toolDebug, diagnostics){
   element.innerHTML = marked.parse(text || "");
   renderToolError(element, toolError);
   renderToolDebug(element, toolDebug);
+  renderModelDiagnostics(element, diagnostics);
   renderSources(element, sources);
   renderToolSources(element, toolSources);
   scrollBottom();
@@ -6134,7 +6188,7 @@ function handleStreamEvent(eventText, state, element){
     try{
       const data = JSON.parse(event.data || "{}");
       state.sources = Array.isArray(data.sources) ? data.sources : [];
-      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug);
+      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug, state.diagnostics);
     }catch(err){
       console.log("parse sources failed", err);
     }
@@ -6146,7 +6200,7 @@ function handleStreamEvent(eventText, state, element){
     try{
       const data = JSON.parse(event.data || "{}");
       state.toolSources = Array.isArray(data.sources) ? data.sources : [];
-      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug);
+      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug, state.diagnostics);
     }catch(err){
       console.log("parse tool sources failed", err);
     }
@@ -6168,7 +6222,7 @@ function handleStreamEvent(eventText, state, element){
     try{
       state.toolError = JSON.parse(event.data || "{}");
       handleToolError(state.toolError);
-      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug);
+      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug, state.diagnostics);
     }catch(err){
       console.log("parse tool error failed", err);
     }
@@ -6179,7 +6233,7 @@ function handleStreamEvent(eventText, state, element){
   if(event.type === "tool_debug"){
     try{
       state.toolDebug = JSON.parse(event.data || "{}");
-      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug);
+      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug, state.diagnostics);
     }catch(err){
       console.log("parse tool debug failed", err);
     }
@@ -6200,7 +6254,41 @@ function handleStreamEvent(eventText, state, element){
     return false;
   }
 
+  if(event.type === "fallback"){
+    try{
+      const data = JSON.parse(event.data || "{}");
+      state.diagnostics.fallbacks.push(data);
+      if(data.message){
+        setContextStatus("Fallback: " + data.message);
+      }
+      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug, state.diagnostics);
+    }catch(err){
+      console.log("parse fallback failed", err);
+    }
+
+    return false;
+  }
+
+  if(event.type === "provider_error"){
+    try{
+      state.diagnostics.providerError = JSON.parse(event.data || "{}");
+      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug, state.diagnostics);
+    }catch(err){
+      console.log("parse provider error failed", err);
+    }
+
+    return false;
+  }
+
   if(event.type === "done"){
+    try{
+      const data = JSON.parse(event.data || "{}");
+      state.diagnostics.done = data;
+      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug, state.diagnostics);
+    }catch(err){
+      console.log("parse done failed", err);
+    }
+
     return true;
   }
 
@@ -6216,7 +6304,7 @@ function handleStreamEvent(eventText, state, element){
 
   if(chunk.text){
     state.reply += chunk.text;
-    renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug);
+    renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug, state.diagnostics);
   }
 
   return false;
@@ -6232,7 +6320,12 @@ async function streamAIResponse(response, element){
     sources:[],
     toolSources:[],
     toolError:null,
-    toolDebug:null
+    toolDebug:null,
+    diagnostics:{
+      fallbacks:[],
+      done:null,
+      providerError:null
+    }
   };
 
   while(true){

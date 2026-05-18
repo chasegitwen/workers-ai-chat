@@ -1095,11 +1095,105 @@ body.dark .toolErrorNotice{
   min-height:38px;
 }
 
+.settingsGrid > label:has(#providerLabelInput),
+.settingsGrid > label:has(#providerIdInput),
+.settingsGrid > label:has(#providerTypeSelect),
+.settingsGrid > label:has(#providerBaseUrlInput),
+.settingsGrid > label:has(#providerApiKeyEnvInput),
+.settingsGrid > label:has(#modelProviderSelect),
+.settingsGrid > label:has(#modelLabelInput),
+.settingsGrid > label:has(#modelIdInput),
+.settingsGrid > label:has(#modelNameInput),
+#addProviderBtn,
+#cancelProviderEditBtn,
+#addProviderModelBtn,
+#cancelModelEditBtn{
+  display:none !important;
+}
+
 .providerList{
   display:flex;
   flex-direction:column;
   gap:8px;
   margin-top:8px;
+}
+
+.modelCategory{
+  border:1px solid var(--border);
+  border-radius:12px;
+  overflow:visible;
+}
+
+.modelCategoryHeader{
+  width:100%;
+  border:0;
+  background:rgba(148,163,184,.08);
+  color:var(--text);
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:10px 12px;
+  font:inherit;
+  text-align:left;
+}
+
+.modelCategoryTop{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  background:rgba(148,163,184,.08);
+}
+
+.modelCategoryTop .modelCategoryHeader{
+  flex:1;
+  background:transparent;
+}
+
+.categoryAddBtn{
+  flex:0 0 auto;
+  width:30px;
+  height:30px;
+  margin-right:8px;
+  border:1px solid transparent;
+  border-radius:999px;
+  background:transparent;
+  color:var(--muted);
+  cursor:pointer;
+  font-size:20px;
+  line-height:1;
+  transition:background .15s ease,border-color .15s ease,color .15s ease;
+}
+
+.modelCategoryTop:hover .categoryAddBtn,
+.categoryAddBtn:focus{
+  color:var(--text);
+  background:rgba(148,163,184,.12);
+  border-color:var(--border);
+}
+
+.modelCategoryTitle{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  min-width:0;
+}
+
+.modelCategoryMeta{
+  color:var(--muted);
+  font-size:12px;
+}
+
+.modelCategoryBody{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  padding:8px;
+}
+
+.modelCategory.collapsed .modelCategoryBody{
+  display:none;
 }
 
 .providerRow{
@@ -1140,6 +1234,69 @@ body.dark .toolErrorNotice{
   align-items:center;
   gap:6px;
   margin-left:auto;
+  position:relative;
+}
+
+.actionMenuButton{
+  width:30px;
+  height:30px;
+  border:1px solid transparent;
+  border-radius:999px;
+  background:transparent;
+  color:var(--muted);
+  cursor:pointer;
+  line-height:1;
+  font-size:18px;
+  opacity:.55;
+  transition:background .15s ease,border-color .15s ease,color .15s ease,opacity .15s ease;
+}
+
+.providerRowHeader:hover .actionMenuButton,
+.modelRow:hover .actionMenuButton,
+.actionMenuButton:focus,
+.actionMenuButton[aria-expanded="true"]{
+  opacity:1;
+  color:var(--text);
+  background:rgba(148,163,184,.12);
+  border-color:var(--border);
+}
+
+.actionMenu{
+  position:absolute;
+  top:calc(100% + 6px);
+  right:0;
+  z-index:20;
+  min-width:132px;
+  display:none;
+  flex-direction:column;
+  gap:2px;
+  padding:5px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--panel);
+  box-shadow:0 12px 30px rgba(15,23,42,.16);
+}
+
+.actionMenu.open{
+  display:flex;
+}
+
+.actionMenu button{
+  width:100%;
+  border:0;
+  border-radius:8px;
+  background:transparent;
+  color:var(--text);
+  cursor:pointer;
+  padding:8px 10px;
+  font-size:13px;
+  text-align:left;
+  white-space:nowrap;
+}
+
+.actionMenu button:hover{
+  background:rgba(37,99,235,.08);
+  color:var(--primary);
 }
 
 .modelRow{
@@ -1348,8 +1505,8 @@ body.dark .toolErrorNotice{
       <label class="settingsField">
         provider 类型
         <select id="providerTypeSelect">
-          <option value="openai-compatible">OpenAI-compatible</option>
-          <option value="workers-ai">Workers AI</option>
+          <option value="openai-compatible">OpenAI 兼容</option>
+          <option value="claude-compatible">Claude 兼容</option>
         </select>
       </label>
       <label class="settingsField">
@@ -1776,6 +1933,7 @@ function safeJsonParse(value, fallback){
 }
 
 function providerLabelFromModel(model){
+  if((model.provider || "") === "cloudflare-proxied") return "Cloudflare proxied Claude";
   if((model.provider || "") === "glm") return "GLM Coding";
   if((model.provider || "") === "kimi") return "Kimi";
   if(model.providerType === "openai-compatible") return "Custom OpenAI-compatible";
@@ -2997,6 +3155,7 @@ const providersList = document.getElementById("providersList");
 const settingsSyncStatus = document.getElementById("settingsSyncStatus");
 let modelSettingsState = null;
 let modelProviders = [];
+let modelCategories = [];
 let modelOptions = [];
 let settingsSnapshot = null;
 let editingProviderId = null;
@@ -4110,6 +4269,1227 @@ function renderProvidersList(){
   });
 }
 
+const MODEL_CATEGORY_DEFS = [
+  { type:"workers-hosted", label:"Workers 托管", hint:"直接托管在 Cloudflare Workers AI 的模型" },
+  { type:"claude-compatible", label:"Claude 兼容", hint:"默认走 Cloudflare proxied Claude，可配置 provider" },
+  { type:"openai-compatible", label:"OpenAI 兼容", hint:"OpenAI-compatible baseUrl + apiKeyEnv provider" }
+];
+const WORKERS_PROVIDER_ID = "workers-ai";
+const WORKERS_MODEL_PROVIDER_SELECT = "__workers-hosted__";
+const MODEL_CATEGORY_COLLAPSED_KEY = "modelCategoryCollapsed";
+let collapsedModelCategories = safeJsonParse(localStorage.getItem(MODEL_CATEGORY_COLLAPSED_KEY), {});
+
+function categoryLabel(type){
+  return MODEL_CATEGORY_DEFS.find(category => category.type === type)?.label || type;
+}
+
+function categoryHint(type){
+  return MODEL_CATEGORY_DEFS.find(category => category.type === type)?.hint || "";
+}
+
+function legacyProviderTypeToCategory(provider){
+  const providerType = String(provider?.providerType || provider?.type || "").trim();
+  const providerId = String(provider?.id || provider?.providerId || provider?.provider || "").trim();
+  if(providerType === "claude-compatible" || providerId === "cloudflare-proxied"){
+    return "claude-compatible";
+  }
+  if(providerType === "openai-compatible"){
+    return "openai-compatible";
+  }
+  return "workers-hosted";
+}
+
+function modelCategoryFromLegacy(model){
+  const providerType = String(model?.providerType || "").trim();
+  const providerId = String(model?.provider || "").trim();
+  const id = String(model?.id || model?.modelId || model?.modelName || "").trim();
+  if(providerType === "claude-compatible" || providerId === "cloudflare-proxied" || id.startsWith("anthropic/claude")){
+    return "claude-compatible";
+  }
+  if(providerType === "openai-compatible"){
+    return "openai-compatible";
+  }
+  return "workers-hosted";
+}
+
+function normalizeManagedModel(model, providerDefaults = {}, categoryType = "workers-hosted"){
+  if(!model || typeof model !== "object" || Array.isArray(model)){
+    return null;
+  }
+  const modelId = String(model.modelId || model.id || model.model || model.modelName || "").trim();
+  if(!modelId){
+    return null;
+  }
+  const upstreamModelName = String(model.upstreamModelName || model.modelName || model.model || modelId).trim();
+  return {
+    displayName:String(model.displayName || model.label || modelId),
+    modelId,
+    enabled:model.enabled !== false,
+    notes:String(model.notes || ""),
+    upstreamModelName,
+    id:modelId,
+    label:String(model.label || model.displayName || modelId),
+    modelName:upstreamModelName || modelId,
+    providerType:categoryType,
+    apiBase:String(model.apiBase || model.baseUrl || providerDefaults.apiBase || providerDefaults.baseUrl || ""),
+    apiKeyEnv:String(model.apiKeyEnv || providerDefaults.apiKeyEnv || ""),
+    capabilities:model.capabilities || { text:true, streaming:true },
+    recommended:Boolean(model.recommended),
+    builtin:Boolean(model.builtin),
+    editable:model.editable !== false
+  };
+}
+
+function normalizeManagedProvider(provider, categoryType){
+  if(!provider || typeof provider !== "object" || Array.isArray(provider)){
+    return null;
+  }
+  const providerId = String(provider.providerId || provider.id || provider.provider || "").trim();
+  if(!providerId){
+    return null;
+  }
+  const baseUrl = String(provider.baseUrl || provider.apiBase || "").trim();
+  const normalized = {
+    providerName:String(provider.providerName || provider.label || providerId),
+    providerId,
+    baseUrl,
+    apiKeyEnv:String(provider.apiKeyEnv || ""),
+    enabled:provider.enabled !== false,
+    builtin:Boolean(provider.builtin),
+    editable:provider.editable !== false,
+    models:[]
+  };
+  normalized.models = (provider.models || [])
+    .map(model => normalizeManagedModel(model, normalized, categoryType))
+    .filter(Boolean);
+  return normalized;
+}
+
+function emptyModelCategories(){
+  return MODEL_CATEGORY_DEFS.map(category => (
+    category.type === "workers-hosted"
+      ? { type:category.type, models:[] }
+      : { type:category.type, providers:[] }
+  ));
+}
+
+function categoriesFromProviders(providers){
+  const categories = emptyModelCategories();
+  const workersCategory = categories.find(category => category.type === "workers-hosted");
+  (providers || []).forEach(provider => {
+    const categoryType = legacyProviderTypeToCategory(provider);
+    if(categoryType === "workers-hosted"){
+      (provider.models || []).forEach(model => {
+        const normalized = normalizeManagedModel(model, provider, "workers-hosted");
+        if(normalized && !workersCategory.models.some(item => item.modelId === normalized.modelId)){
+          workersCategory.models.push(normalized);
+        }
+      });
+      return;
+    }
+    const category = categories.find(item => item.type === categoryType);
+    const normalizedProvider = normalizeManagedProvider({
+      ...provider,
+      providerId:provider.id,
+      providerName:provider.label,
+      baseUrl:provider.apiBase,
+      enabled:provider.enabled !== false
+    }, categoryType);
+    if(normalizedProvider){
+      category.providers.push(normalizedProvider);
+    }
+  });
+  return categories;
+}
+
+function normalizeModelCategories(rawCategories, fallbackProviders){
+  const categories = emptyModelCategories();
+  const source = Array.isArray(rawCategories) && rawCategories.length
+    ? rawCategories
+    : categoriesFromProviders(fallbackProviders);
+
+  source.forEach(rawCategory => {
+    const type = String(rawCategory?.type || rawCategory?.category || "").trim();
+    const target = categories.find(category => category.type === type);
+    if(!target){
+      return;
+    }
+    if(type === "workers-hosted"){
+      target.models = (rawCategory.models || [])
+        .map(model => normalizeManagedModel(model, {}, "workers-hosted"))
+        .filter(Boolean);
+      return;
+    }
+    target.providers = (rawCategory.providers || [])
+      .map(provider => normalizeManagedProvider(provider, type))
+      .filter(Boolean);
+  });
+
+  return categories;
+}
+
+function categoriesToProviders(categories){
+  const providers = [];
+  const workers = categories.find(category => category.type === "workers-hosted");
+  providers.push({
+    id:WORKERS_PROVIDER_ID,
+    label:"Workers 托管",
+    providerType:"workers-ai",
+    apiBase:"",
+    apiKeyEnv:"",
+    builtin:true,
+    editable:false,
+    enabled:true,
+    models:(workers?.models || []).map(model => ({
+      id:model.modelId,
+      label:model.displayName || model.modelId,
+      displayName:model.displayName || model.modelId,
+      modelId:model.modelId,
+      modelName:model.upstreamModelName || model.modelId,
+      upstreamModelName:model.upstreamModelName || model.modelId,
+      providerType:"workers-ai",
+      apiBase:"",
+      apiKeyEnv:"",
+      capabilities:model.capabilities || { text:true, streaming:true },
+      enabled:model.enabled !== false,
+      recommended:Boolean(model.recommended),
+      notes:model.notes || "",
+      editable:model.editable !== false
+    }))
+  });
+
+  ["claude-compatible", "openai-compatible"].forEach(type => {
+    const category = categories.find(item => item.type === type);
+    (category?.providers || []).forEach(provider => {
+      providers.push({
+        id:provider.providerId,
+        label:provider.providerName || provider.providerId,
+        providerName:provider.providerName || provider.providerId,
+        providerId:provider.providerId,
+        providerType:type,
+        apiBase:provider.baseUrl || "",
+        baseUrl:provider.baseUrl || "",
+        apiKeyEnv:provider.apiKeyEnv || "",
+        builtin:Boolean(provider.builtin),
+        editable:provider.editable !== false,
+        enabled:provider.enabled !== false,
+        models:(provider.models || []).map(model => ({
+          id:model.modelId,
+          label:model.displayName || model.modelId,
+          displayName:model.displayName || model.modelId,
+          modelId:model.modelId,
+          modelName:model.upstreamModelName || model.modelId,
+          upstreamModelName:model.upstreamModelName || model.modelId,
+          providerType:type,
+          apiBase:provider.baseUrl || "",
+          baseUrl:provider.baseUrl || "",
+          apiKeyEnv:provider.apiKeyEnv || "",
+          capabilities:model.capabilities || { text:true, streaming:true },
+          enabled:model.enabled !== false,
+          recommended:Boolean(model.recommended),
+          editable:model.editable !== false
+        }))
+      });
+    });
+  });
+
+  return providers;
+}
+
+function providersFromModels(models){
+  const providers = new Map();
+  (models || []).forEach(model => {
+    if(model.deprecated || model.enabled === false || !model.capabilities?.text){
+      return;
+    }
+    const categoryType = modelCategoryFromLegacy(model);
+    const providerId = categoryType === "workers-hosted" ? WORKERS_PROVIDER_ID : (model.provider || categoryType);
+    if(!providers.has(providerId)){
+      providers.set(providerId, {
+        id:providerId,
+        label:providerLabelFromModel(model),
+        providerType:categoryType === "workers-hosted" ? "workers-ai" : categoryType,
+        apiBase:model.apiBase || "",
+        apiKeyEnv:model.apiKeyEnv || "",
+        builtin:true,
+        editable:providerId !== WORKERS_PROVIDER_ID,
+        enabled:true,
+        models:[]
+      });
+    }
+    providers.get(providerId).models.push({
+      id:model.id,
+      label:model.label || model.id,
+      displayName:model.label || model.id,
+      modelId:model.id,
+      modelName:model.modelName || model.id,
+      upstreamModelName:model.modelName || model.id,
+      providerType:categoryType === "workers-hosted" ? "workers-ai" : categoryType,
+      apiBase:model.apiBase || "",
+      apiKeyEnv:model.apiKeyEnv || "",
+      capabilities:model.capabilities || { text:true, streaming:true },
+      enabled:model.enabled !== false,
+      recommended:Boolean(model.recommended),
+      editable:true
+    });
+  });
+  return Array.from(providers.values());
+}
+
+function normalizeModelSettings(settings, fallbackProviders){
+  const base = settings && typeof settings === "object" ? settings : readLegacyModelSettings();
+  const fallback = Array.isArray(fallbackProviders) ? fallbackProviders : [];
+  const categorySource = Array.isArray(base.categories) && base.categories.length
+    ? base.categories
+    : (Array.isArray(base.modelCategories) && base.modelCategories.length ? base.modelCategories : null);
+  const categories = normalizeModelCategories(categorySource, Array.isArray(base.providers) && base.providers.length ? base.providers : fallback);
+  const providers = categoriesToProviders(categories);
+  return {
+    defaultModel:base.defaultModel || "",
+    rememberLastModel:Boolean(base.rememberLastModel),
+    lastModel:base.lastModel || base.selectedModel || "",
+    fallbackEnabled:Boolean(base.fallbackEnabled ?? base.autoFallbackEnabled),
+    fallbackModels:Array.isArray(base.fallbackModels) ? base.fallbackModels : (base.fallbackModel ? [base.fallbackModel] : []),
+    customModels:Array.isArray(base.customModels) ? base.customModels : [],
+    customProviders:Array.isArray(base.customProviders) ? base.customProviders : [],
+    categories,
+    modelCategories:categories,
+    providers
+  };
+}
+
+function syncCatalogFromCategories(){
+  modelProviders = categoriesToProviders(modelCategories);
+  modelSettingsState.categories = modelCategories;
+  modelSettingsState.modelCategories = modelCategories;
+  modelSettingsState.providers = modelProviders;
+}
+
+function flattenProviders(providers){
+  return (providers || [])
+    .filter(provider => provider.enabled !== false)
+    .flatMap(provider => (provider.models || []).map(model => ({
+    ...model,
+    provider:provider.id,
+    providerLabel:provider.label || provider.providerName || provider.id,
+    providerType:model.providerType || provider.providerType,
+    apiBase:model.apiBase || provider.apiBase || provider.baseUrl || "",
+    baseUrl:model.baseUrl || provider.baseUrl || provider.apiBase || "",
+    apiKeyEnv:model.apiKeyEnv || provider.apiKeyEnv || "",
+    label:model.label || model.displayName || model.id,
+    id:model.id || model.modelId,
+    modelName:model.modelName || model.upstreamModelName || model.id || model.modelId
+  }))).filter(model => model.enabled !== false);
+}
+
+function renderModelOptions(){
+  modelSelect.innerHTML = "";
+  modelOptions = flattenProviders(modelProviders);
+  const groups = new Map();
+  modelOptions.forEach(model => {
+    const groupLabel = categoryLabel(modelCategoryFromLegacy(model));
+    if(!groups.has(groupLabel)){
+      const group = document.createElement("optgroup");
+      group.label = groupLabel;
+      groups.set(groupLabel, group);
+      modelSelect.appendChild(group);
+    }
+    const option = document.createElement("option");
+    option.value = model.id;
+    option.textContent = (model.label || model.id) + (model.recommended ? " / 推荐" : "");
+    option.dataset.provider = model.provider || "";
+    option.dataset.providerType = model.providerType || "";
+    groups.get(groupLabel).appendChild(option);
+  });
+}
+
+function refreshSettingsControls(){
+  const fillSelect = (select, includeEmpty) => {
+    select.innerHTML = "";
+    if(includeEmpty){
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "不使用";
+      select.appendChild(empty);
+    }
+    modelOptions.forEach(model => {
+      const option = document.createElement("option");
+      option.value = model.id;
+      option.textContent = categoryLabel(modelCategoryFromLegacy(model)) + " / " + (model.label || model.id);
+      select.appendChild(option);
+    });
+  };
+  fillSelect(defaultModelSelect, false);
+  fillSelect(fallbackModelSelect, true);
+  defaultModelSelect.value = hasModel(modelSettingsState?.defaultModel) ? modelSettingsState.defaultModel : (modelOptions[0]?.id || "");
+  fallbackModelSelect.value = hasModel(modelSettingsState?.fallbackModels?.[0]) ? modelSettingsState.fallbackModels[0] : "";
+  rememberLastModelCheck.checked = Boolean(modelSettingsState?.rememberLastModel);
+  fallbackEnabledCheck.checked = Boolean(modelSettingsState?.fallbackEnabled);
+  modelProviderSelect.innerHTML = "";
+  const workersOption = document.createElement("option");
+  workersOption.value = WORKERS_MODEL_PROVIDER_SELECT;
+  workersOption.textContent = "Workers 托管";
+  modelProviderSelect.appendChild(workersOption);
+  modelProviders
+    .filter(provider => provider.providerType === "claude-compatible" || provider.providerType === "openai-compatible")
+    .forEach(provider => {
+      const option = document.createElement("option");
+      option.value = provider.id;
+      option.textContent = categoryLabel(provider.providerType) + " / " + (provider.label || provider.id);
+      modelProviderSelect.appendChild(option);
+    });
+  renderProvidersList();
+}
+
+async function loadModels(){
+  try{
+    const res = await fetch("/api/models");
+    const data = await res.json();
+    if(!res.ok || !Array.isArray(data.models) || !data.models.length) throw new Error("models unavailable");
+    const fallbackProviders = providersFromModels(data.models);
+    modelSettingsState = await loadSettingsFromServer(fallbackProviders);
+    modelCategories = normalizeModelCategories(modelSettingsState.categories || modelSettingsState.modelCategories, modelSettingsState.providers || fallbackProviders);
+    syncCatalogFromCategories();
+    renderModelOptions();
+    selectInitialModel();
+    refreshSettingsControls();
+    writeSettingsCache(modelSettingsState);
+    syncSettingsToServer(modelSettingsState);
+  }catch(err){
+    console.log("load models failed", err);
+  }
+}
+
+function openSettings(){
+  setupSettingsHeaderActions();
+  clearProviderForm();
+  clearModelForm();
+  modelCategories = normalizeModelCategories(modelSettingsState?.categories || modelSettingsState?.modelCategories, modelProviders);
+  syncCatalogFromCategories();
+  settingsSnapshot = {
+    settings:deepClone(modelSettingsState),
+    providers:deepClone(modelProviders),
+    categories:deepClone(modelCategories),
+    selected:currentSelectedSnapshot()
+  };
+  refreshSettingsControls();
+  settingsSyncStatus.textContent = "";
+  settingsModal.classList.add("open");
+  settingsModal.setAttribute("aria-hidden", "false");
+}
+
+function cancelSettings(){
+  if(settingsSnapshot){
+    modelSettingsState = deepClone(settingsSnapshot.settings);
+    modelCategories = deepClone(settingsSnapshot.categories || []);
+    modelProviders = deepClone(settingsSnapshot.providers || categoriesToProviders(modelCategories));
+    renderModelOptions();
+    modelSelect.value = hasModel(settingsSnapshot.selected?.selectedModel)
+      ? settingsSnapshot.selected.selectedModel
+      : (modelOptions[0]?.id || "");
+    refreshSettingsControls();
+  }
+  clearProviderForm();
+  clearModelForm();
+  closeSettings();
+}
+
+function persistSettings(message, closeAfter){
+  syncCatalogFromCategories();
+  writeSettingsCache(modelSettingsState);
+  renderModelOptions();
+  if(modelSelect.value && !hasModel(modelSelect.value)){
+    selectInitialModel();
+  }
+  refreshSettingsControls();
+  if(message){
+    settingsSyncStatus.textContent = message;
+  }
+  syncSettingsToServer(modelSettingsState);
+  if(closeAfter){
+    closeSettings();
+  }
+}
+
+function pruneInvalidModelReferences(){
+  syncCatalogFromCategories();
+  renderModelOptions();
+  if(!hasModel(modelSettingsState.defaultModel)){
+    modelSettingsState.defaultModel = "";
+  }
+  if(!hasModel(modelSettingsState.lastModel)){
+    modelSettingsState.lastModel = "";
+  }
+  modelSettingsState.fallbackModels = (modelSettingsState.fallbackModels || []).filter(hasModel);
+  if(modelSelect.value && !hasModel(modelSelect.value)){
+    modelSelect.value = modelSettingsState.defaultModel || modelOptions[0]?.id || "";
+  }
+}
+
+function getCategory(type){
+  let category = modelCategories.find(item => item.type === type);
+  if(!category){
+    category = type === "workers-hosted" ? { type, models:[] } : { type, providers:[] };
+    modelCategories.push(category);
+  }
+  return category;
+}
+
+function getManagedProvider(providerId){
+  for(const category of modelCategories){
+    const provider = (category.providers || []).find(item => item.providerId === providerId);
+    if(provider){
+      return { category, provider };
+    }
+  }
+  return null;
+}
+
+function getProvider(providerId){
+  return modelProviders.find(provider => provider.id === providerId);
+}
+
+function addProvider(){
+  const providerName = providerLabelInput.value.trim();
+  const providerId = providerIdInput.value.trim() ||
+    providerName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") ||
+    ("provider-" + Date.now());
+  const providerType = providerTypeSelect.value;
+  const baseUrl = providerBaseUrlInput.value.trim();
+  const apiKeyEnv = providerApiKeyEnvInput.value.trim();
+  if(!providerName || !providerId){
+    settingsSyncStatus.textContent = "provider id 和名称不能为空";
+    return;
+  }
+  if(providerType !== "claude-compatible" && providerType !== "openai-compatible"){
+    settingsSyncStatus.textContent = "请选择 Claude 兼容或 OpenAI 兼容 provider";
+    return;
+  }
+  if(modelProviders.some(provider => provider.id === providerId)){
+    settingsSyncStatus.textContent = "provider id 已存在";
+    return;
+  }
+  getCategory(providerType).providers.push({
+    providerName,
+    providerId,
+    baseUrl,
+    apiKeyEnv,
+    enabled:true,
+    builtin:false,
+    editable:true,
+    models:[]
+  });
+  clearProviderForm();
+  persistSettings("已添加 provider", false);
+}
+
+function addProviderModel(){
+  const selectedProvider = modelProviderSelect.value;
+  const modelId = modelIdInput.value.trim();
+  const displayName = modelLabelInput.value.trim() || modelId;
+  const upstreamModelName = modelNameInput.value.trim() || modelId;
+  if(!modelId || !displayName){
+    settingsSyncStatus.textContent = "请填写模型 id/name";
+    return;
+  }
+  const model = {
+    displayName,
+    modelId,
+    upstreamModelName,
+    enabled:true,
+    editable:true,
+    capabilities:{ text:true, streaming:true }
+  };
+  if(selectedProvider === WORKERS_MODEL_PROVIDER_SELECT){
+    const category = getCategory("workers-hosted");
+    if((category.models || []).some(item => item.modelId === modelId)){
+      settingsSyncStatus.textContent = "Workers 托管模型 ID 不能重复";
+      return;
+    }
+    category.models = category.models || [];
+    category.models.push({ ...model, notes:"" });
+  }else{
+    const found = getManagedProvider(selectedProvider);
+    if(!found){
+      settingsSyncStatus.textContent = "请选择 provider";
+      return;
+    }
+    if((found.provider.models || []).some(item => item.modelId === modelId)){
+      settingsSyncStatus.textContent = "同一 provider 下 model id 不能重复";
+      return;
+    }
+    found.provider.models = found.provider.models || [];
+    found.provider.models.push(model);
+  }
+  clearModelForm();
+  persistSettings("已添加模型", false);
+}
+
+function editProvider(providerId){
+  const found = getManagedProvider(providerId);
+  const provider = found?.provider;
+  if(!provider || !providerEditable({ editable:provider.editable })){
+    settingsSyncStatus.textContent = "当前 provider 不可编辑";
+    return;
+  }
+  const dialog = createEditDialog();
+  dialog.title.textContent = "编辑 provider";
+  dialog.body.innerHTML = [
+    "<label class='settingsField'>providerName<input id='editProviderLabel' /></label>",
+    "<label class='settingsField'>providerId<input id='editProviderId' /></label>",
+    "<label class='settingsField'>type<select id='editProviderType'><option value='claude-compatible'>Claude 兼容</option><option value='openai-compatible'>OpenAI 兼容</option></select></label>",
+    "<label class='settingsField'>baseUrl<input id='editProviderBaseUrl' /></label>",
+    "<label class='settingsField'>apiKeyEnv<input id='editProviderApiKeyEnv' /></label>",
+    "<label class='settingsCheck'><input id='editProviderEnabled' type='checkbox' /> enabled</label>"
+  ].join("");
+  dialog.body.querySelector("#editProviderLabel").value = provider.providerName || provider.providerId;
+  dialog.body.querySelector("#editProviderId").value = provider.providerId;
+  dialog.body.querySelector("#editProviderType").value = found.category.type;
+  dialog.body.querySelector("#editProviderBaseUrl").value = provider.baseUrl || "";
+  dialog.body.querySelector("#editProviderApiKeyEnv").value = provider.apiKeyEnv || "";
+  dialog.body.querySelector("#editProviderEnabled").checked = provider.enabled !== false;
+  dialog.deleteBtn.style.display = "inline-block";
+  dialog.saveBtn.onclick = () => saveProviderDialog(providerId);
+  dialog.deleteBtn.onclick = () => removeProvider(providerId, true);
+  dialog.overlay.classList.add("open");
+}
+
+function saveProviderDialog(originalId){
+  const dialog = createEditDialog();
+  const found = getManagedProvider(originalId);
+  if(!found){
+    return;
+  }
+  const providerName = dialog.body.querySelector("#editProviderLabel").value.trim();
+  const providerId = dialog.body.querySelector("#editProviderId").value.trim();
+  const providerType = dialog.body.querySelector("#editProviderType").value;
+  const baseUrl = dialog.body.querySelector("#editProviderBaseUrl").value.trim();
+  const apiKeyEnv = dialog.body.querySelector("#editProviderApiKeyEnv").value.trim();
+  const enabled = dialog.body.querySelector("#editProviderEnabled").checked;
+  if(!providerName || !providerId){
+    settingsSyncStatus.textContent = "provider id 和 name 不能为空";
+    return;
+  }
+  if(modelProviders.some(provider => provider.id === providerId && provider.id !== originalId)){
+    settingsSyncStatus.textContent = "provider id 已存在";
+    return;
+  }
+  found.category.providers = (found.category.providers || []).filter(provider => provider.providerId !== originalId);
+  const nextProvider = {
+    ...found.provider,
+    providerName,
+    providerId,
+    baseUrl,
+    apiKeyEnv,
+    enabled
+  };
+  getCategory(providerType).providers.push(nextProvider);
+  closeEditDialog();
+  persistSettings("已更新 provider", false);
+}
+
+function editProviderModel(providerId, modelId){
+  const found = providerId === WORKERS_PROVIDER_ID
+    ? { category:getCategory("workers-hosted"), provider:null }
+    : getManagedProvider(providerId);
+  const model = providerId === WORKERS_PROVIDER_ID
+    ? found.category.models?.find(item => item.modelId === modelId)
+    : found?.provider?.models?.find(item => item.modelId === modelId);
+  if(!model || !modelEditable(model)){
+    settingsSyncStatus.textContent = "当前模型不可编辑";
+    return;
+  }
+  const dialog = createEditDialog();
+  dialog.title.textContent = "编辑模型";
+  dialog.body.innerHTML = [
+    "<label class='settingsField'>displayName<input id='editModelLabel' /></label>",
+    "<label class='settingsField'>modelId<input id='editModelId' /></label>",
+    "<label class='settingsField'>upstreamModelName<input id='editModelName' /></label>",
+    providerId === WORKERS_PROVIDER_ID ? "<label class='settingsField full'>notes<input id='editModelNotes' /></label>" : "",
+    "<label class='settingsCheck'><input id='editModelEnabled' type='checkbox' /> enabled</label>"
+  ].join("");
+  dialog.body.querySelector("#editModelLabel").value = model.displayName || model.label || model.modelId;
+  dialog.body.querySelector("#editModelId").value = model.modelId || model.id;
+  dialog.body.querySelector("#editModelName").value = model.upstreamModelName || model.modelName || model.modelId;
+  const notesInput = dialog.body.querySelector("#editModelNotes");
+  if(notesInput){
+    notesInput.value = model.notes || "";
+  }
+  dialog.body.querySelector("#editModelEnabled").checked = model.enabled !== false;
+  dialog.deleteBtn.style.display = "inline-block";
+  dialog.saveBtn.onclick = () => saveModelDialog(providerId, modelId);
+  dialog.deleteBtn.onclick = () => removeProviderModel(providerId, modelId, true);
+  dialog.overlay.classList.add("open");
+}
+
+function saveModelDialog(providerId, originalModelId){
+  const dialog = createEditDialog();
+  const displayName = dialog.body.querySelector("#editModelLabel").value.trim();
+  const modelId = dialog.body.querySelector("#editModelId").value.trim();
+  const upstreamModelName = dialog.body.querySelector("#editModelName").value.trim() || modelId;
+  const enabled = dialog.body.querySelector("#editModelEnabled").checked;
+  const notes = dialog.body.querySelector("#editModelNotes")?.value.trim() || "";
+  const modelList = providerId === WORKERS_PROVIDER_ID
+    ? getCategory("workers-hosted").models
+    : getManagedProvider(providerId)?.provider?.models;
+  const model = modelList?.find(item => item.modelId === originalModelId);
+  if(!model || !displayName || !modelId){
+    settingsSyncStatus.textContent = "model id 和 name 不能为空";
+    return;
+  }
+  if((modelList || []).some(item => item.modelId === modelId && item.modelId !== originalModelId)){
+    settingsSyncStatus.textContent = "同一分组下 model id 不能重复";
+    return;
+  }
+  model.displayName = displayName;
+  model.modelId = modelId;
+  model.upstreamModelName = upstreamModelName;
+  model.enabled = enabled;
+  model.notes = notes;
+  updateModelReferences(originalModelId, modelId);
+  closeEditDialog();
+  persistSettings("已更新模型", false);
+}
+
+function removeProvider(providerId, skipDialogClose){
+  const found = getManagedProvider(providerId);
+  if(!found){
+    return;
+  }
+  if(!confirm("确定删除 provider " + (found.provider.providerName || found.provider.providerId) + " 吗？其下模型会同时删除。")){
+    return;
+  }
+  found.category.providers = (found.category.providers || []).filter(provider => provider.providerId !== providerId);
+  pruneInvalidModelReferences();
+  if(skipDialogClose){
+    closeEditDialog();
+  }
+  persistSettings("已删除 provider", false);
+}
+
+function removeProviderModel(providerId, modelId, skipDialogClose){
+  const modelList = providerId === WORKERS_PROVIDER_ID
+    ? getCategory("workers-hosted").models
+    : getManagedProvider(providerId)?.provider?.models;
+  const target = modelList?.find(model => model.modelId === modelId);
+  if(!target){
+    return;
+  }
+  if(!confirm("确定删除模型 " + (target.displayName || target.modelId) + " 吗？")){
+    return;
+  }
+  if(providerId === WORKERS_PROVIDER_ID){
+    getCategory("workers-hosted").models = (modelList || []).filter(model => model.modelId !== modelId);
+  }else{
+    const found = getManagedProvider(providerId);
+    found.provider.models = (modelList || []).filter(model => model.modelId !== modelId);
+  }
+  pruneInvalidModelReferences();
+  if(skipDialogClose){
+    closeEditDialog();
+  }
+  persistSettings("已删除模型", false);
+}
+
+function toggleModelCategory(type){
+  collapsedModelCategories[type] = !collapsedModelCategories[type];
+  localStorage.setItem(MODEL_CATEGORY_COLLAPSED_KEY, JSON.stringify(collapsedModelCategories));
+  renderProvidersList();
+}
+
+function closeModelActionMenus(exceptMenu){
+  providersList.querySelectorAll(".actionMenu.open").forEach(menu => {
+    if(menu !== exceptMenu){
+      menu.classList.remove("open");
+      menu.previousElementSibling?.setAttribute("aria-expanded", "false");
+    }
+  });
+}
+
+function createActionMenu(items){
+  const actions = document.createElement("div");
+  actions.className = "modelActions";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "actionMenuButton";
+  button.textContent = "⋯";
+  button.setAttribute("aria-label", "更多操作");
+  button.setAttribute("aria-expanded", "false");
+  const menu = document.createElement("div");
+  menu.className = "actionMenu";
+
+  items.forEach(item => {
+    const menuItem = document.createElement("button");
+    menuItem.type = "button";
+    menuItem.textContent = item.label;
+    menuItem.addEventListener("click", event => {
+      event.stopPropagation();
+      closeModelActionMenus();
+      item.onClick();
+    });
+    menu.appendChild(menuItem);
+  });
+
+  button.addEventListener("click", event => {
+    event.stopPropagation();
+    const shouldOpen = !menu.classList.contains("open");
+    closeModelActionMenus(menu);
+    menu.classList.toggle("open", shouldOpen);
+    button.setAttribute("aria-expanded", String(shouldOpen));
+  });
+
+  actions.appendChild(button);
+  actions.appendChild(menu);
+  return actions;
+}
+
+function openAddProviderDialog(categoryType){
+  if(categoryType !== "claude-compatible" && categoryType !== "openai-compatible"){
+    return;
+  }
+  const dialog = createEditDialog();
+  dialog.title.textContent = "新增 provider";
+  dialog.body.innerHTML = [
+    "<label class='settingsField'>providerName<input id='newProviderLabel' placeholder='My Provider' /></label>",
+    "<label class='settingsField'>providerId<input id='newProviderId' placeholder='my-provider' /></label>",
+    "<label class='settingsField full'>baseUrl<input id='newProviderBaseUrl' placeholder='https://api.example.com/v1' /></label>",
+    "<label class='settingsField'>apiKeyEnv<input id='newProviderApiKeyEnv' placeholder='MY_PROVIDER_API_KEY' /></label>",
+    "<label class='settingsCheck'><input id='newProviderEnabled' type='checkbox' checked /> enabled</label>"
+  ].join("");
+  dialog.deleteBtn.style.display = "none";
+  dialog.saveBtn.onclick = () => saveNewProviderDialog(categoryType);
+  dialog.overlay.classList.add("open");
+  dialog.body.querySelector("#newProviderLabel")?.focus();
+}
+
+function saveNewProviderDialog(categoryType){
+  const dialog = createEditDialog();
+  const providerName = dialog.body.querySelector("#newProviderLabel").value.trim();
+  const providerId = dialog.body.querySelector("#newProviderId").value.trim() ||
+    providerName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") ||
+    ("provider-" + Date.now());
+  const baseUrl = dialog.body.querySelector("#newProviderBaseUrl").value.trim();
+  const apiKeyEnv = dialog.body.querySelector("#newProviderApiKeyEnv").value.trim();
+  const enabled = dialog.body.querySelector("#newProviderEnabled").checked;
+  if(!providerName || !providerId){
+    settingsSyncStatus.textContent = "provider id 和名称不能为空";
+    return;
+  }
+  if(modelProviders.some(provider => provider.id === providerId)){
+    settingsSyncStatus.textContent = "provider id 已存在";
+    return;
+  }
+  getCategory(categoryType).providers.push({
+    providerName,
+    providerId,
+    baseUrl,
+    apiKeyEnv,
+    enabled,
+    builtin:false,
+    editable:true,
+    models:[]
+  });
+  closeEditDialog();
+  persistSettings("已添加 provider", false);
+}
+
+function openAddModelDialog(providerId){
+  const isWorkers = providerId === WORKERS_PROVIDER_ID;
+  const found = isWorkers ? null : getManagedProvider(providerId);
+  if(!isWorkers && !found){
+    settingsSyncStatus.textContent = "请选择 provider";
+    return;
+  }
+  const dialog = createEditDialog();
+  dialog.title.textContent = isWorkers ? "新增 Workers 托管模型" : "新增模型";
+  dialog.body.innerHTML = [
+    "<label class='settingsField'>displayName<input id='newModelLabel' placeholder='My Model' /></label>",
+    "<label class='settingsField'>modelId<input id='newModelId' placeholder='@cf/... 或 provider-model' /></label>",
+    "<label class='settingsField'>upstreamModelName<input id='newModelName' placeholder='可留空，默认等于 modelId' /></label>",
+    isWorkers ? "<label class='settingsField full'>notes<input id='newModelNotes' placeholder='可选' /></label>" : "",
+    "<label class='settingsCheck'><input id='newModelEnabled' type='checkbox' checked /> enabled</label>"
+  ].join("");
+  dialog.deleteBtn.style.display = "none";
+  dialog.saveBtn.onclick = () => saveNewModelDialog(providerId);
+  dialog.overlay.classList.add("open");
+  dialog.body.querySelector("#newModelLabel")?.focus();
+}
+
+function saveNewModelDialog(providerId){
+  const dialog = createEditDialog();
+  const modelId = dialog.body.querySelector("#newModelId").value.trim();
+  const displayName = dialog.body.querySelector("#newModelLabel").value.trim() || modelId;
+  const upstreamModelName = dialog.body.querySelector("#newModelName").value.trim() || modelId;
+  const enabled = dialog.body.querySelector("#newModelEnabled").checked;
+  const notes = dialog.body.querySelector("#newModelNotes")?.value.trim() || "";
+  if(!modelId || !displayName){
+    settingsSyncStatus.textContent = "请填写模型 id/name";
+    return;
+  }
+  const model = {
+    displayName,
+    modelId,
+    upstreamModelName,
+    enabled,
+    notes,
+    editable:true,
+    capabilities:{ text:true, streaming:true }
+  };
+  if(providerId === WORKERS_PROVIDER_ID){
+    const category = getCategory("workers-hosted");
+    if((category.models || []).some(item => item.modelId === modelId)){
+      settingsSyncStatus.textContent = "Workers 托管模型 ID 不能重复";
+      return;
+    }
+    category.models = category.models || [];
+    category.models.push(model);
+  }else{
+    const found = getManagedProvider(providerId);
+    if(!found){
+      settingsSyncStatus.textContent = "请选择 provider";
+      return;
+    }
+    if((found.provider.models || []).some(item => item.modelId === modelId)){
+      settingsSyncStatus.textContent = "同一 provider 下 model id 不能重复";
+      return;
+    }
+    found.provider.models = found.provider.models || [];
+    found.provider.models.push(model);
+  }
+  closeEditDialog();
+  persistSettings("已添加模型", false);
+}
+
+function appendModelRow(container, providerId, model){
+  const modelRow = document.createElement("div");
+  modelRow.className = "modelRow";
+  const modelMain = document.createElement("div");
+  modelMain.className = "modelMain";
+  const modelName = document.createElement("span");
+  modelName.textContent = model.displayName || model.label || model.modelId || model.id;
+  const modelMeta = document.createElement("span");
+  modelMeta.className = "modelMeta";
+  modelMeta.textContent = (model.modelId || model.id) + (model.enabled === false ? " / disabled" : "");
+  modelMain.appendChild(modelName);
+  modelMain.appendChild(modelMeta);
+  const modelActions = document.createElement("div");
+  modelActions.className = "modelActions";
+  const editModelBtn = document.createElement("button");
+  editModelBtn.type = "button";
+  editModelBtn.className = "settingsBtn";
+  editModelBtn.textContent = "编辑";
+  editModelBtn.addEventListener("click", () => editProviderModel(providerId, model.modelId || model.id));
+  const removeModelBtn = document.createElement("button");
+  removeModelBtn.type = "button";
+  removeModelBtn.className = "settingsBtn";
+  removeModelBtn.textContent = "删除";
+  removeModelBtn.addEventListener("click", () => removeProviderModel(providerId, model.modelId || model.id));
+  modelActions.appendChild(editModelBtn);
+  modelActions.appendChild(removeModelBtn);
+  modelRow.appendChild(modelMain);
+  modelRow.appendChild(modelActions);
+  container.appendChild(modelRow);
+}
+
+function renderProvidersList(){
+  providersList.innerHTML = "";
+  MODEL_CATEGORY_DEFS.forEach(categoryDef => {
+    const category = getCategory(categoryDef.type);
+    const section = document.createElement("section");
+    section.className = "modelCategory" + (collapsedModelCategories[categoryDef.type] ? " collapsed" : "");
+    const header = document.createElement("button");
+    header.type = "button";
+    header.className = "modelCategoryHeader";
+    const titleWrap = document.createElement("span");
+    titleWrap.className = "modelCategoryTitle";
+    const title = document.createElement("strong");
+    title.textContent = categoryDef.label;
+    const meta = document.createElement("span");
+    meta.className = "modelCategoryMeta";
+    const count = categoryDef.type === "workers-hosted"
+      ? (category.models || []).length
+      : (category.providers || []).reduce((sum, provider) => sum + (provider.models || []).length, 0);
+    meta.textContent = categoryHint(categoryDef.type) + " / " + count + " models";
+    titleWrap.appendChild(title);
+    titleWrap.appendChild(meta);
+    const chevron = document.createElement("span");
+    chevron.textContent = collapsedModelCategories[categoryDef.type] ? "+" : "-";
+    header.appendChild(titleWrap);
+    header.appendChild(chevron);
+    header.addEventListener("click", () => toggleModelCategory(categoryDef.type));
+    section.appendChild(header);
+    const body = document.createElement("div");
+    body.className = "modelCategoryBody";
+
+    if(categoryDef.type === "workers-hosted"){
+      (category.models || []).forEach(model => appendModelRow(body, WORKERS_PROVIDER_ID, model));
+      if(!(category.models || []).length){
+        const empty = document.createElement("div");
+        empty.className = "providerMeta";
+        empty.textContent = "暂无模型";
+        body.appendChild(empty);
+      }
+    }else{
+      (category.providers || []).forEach(provider => {
+        const row = document.createElement("div");
+        row.className = "providerRow";
+        const rowHeader = document.createElement("div");
+        rowHeader.className = "providerRowHeader";
+        const main = document.createElement("div");
+        main.className = "providerMain";
+        const providerTitle = document.createElement("strong");
+        providerTitle.textContent = provider.providerName || provider.providerId;
+        const providerMeta = document.createElement("div");
+        providerMeta.className = "providerMeta";
+        providerMeta.textContent = provider.providerId + " / " + (provider.baseUrl || "Cloudflare proxied Claude") + (provider.enabled === false ? " / disabled" : "");
+        main.appendChild(providerTitle);
+        main.appendChild(providerMeta);
+        const actions = document.createElement("div");
+        actions.className = "providerActions";
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.className = "settingsBtn";
+        editBtn.textContent = "编辑";
+        editBtn.addEventListener("click", () => editProvider(provider.providerId));
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "settingsBtn";
+        removeBtn.textContent = "删除";
+        removeBtn.addEventListener("click", () => removeProvider(provider.providerId));
+        const addBtn = document.createElement("button");
+        addBtn.type = "button";
+        addBtn.className = "settingsBtn";
+        addBtn.textContent = "添加模型";
+        addBtn.addEventListener("click", () => {
+          modelProviderSelect.value = provider.providerId;
+          modelLabelInput.focus();
+        });
+        actions.appendChild(editBtn);
+        actions.appendChild(removeBtn);
+        actions.appendChild(addBtn);
+        rowHeader.appendChild(main);
+        rowHeader.appendChild(actions);
+        row.appendChild(rowHeader);
+        (provider.models || []).forEach(model => appendModelRow(row, provider.providerId, model));
+        body.appendChild(row);
+      });
+      if(!(category.providers || []).length){
+        const empty = document.createElement("div");
+        empty.className = "providerMeta";
+        empty.textContent = "暂无 provider";
+        body.appendChild(empty);
+      }
+    }
+
+    section.appendChild(body);
+    providersList.appendChild(section);
+  });
+}
+
+function appendModelRow(container, providerId, model){
+  const modelRow = document.createElement("div");
+  modelRow.className = "modelRow";
+  const modelMain = document.createElement("div");
+  modelMain.className = "modelMain";
+  const modelName = document.createElement("span");
+  modelName.textContent = model.displayName || model.label || model.modelId || model.id;
+  const modelMeta = document.createElement("span");
+  modelMeta.className = "modelMeta";
+  modelMeta.textContent = (model.modelId || model.id) + (model.enabled === false ? " / disabled" : "");
+  modelMain.appendChild(modelName);
+  modelMain.appendChild(modelMeta);
+  modelRow.appendChild(modelMain);
+  modelRow.appendChild(createActionMenu([
+    { label:"编辑模型", onClick:() => editProviderModel(providerId, model.modelId || model.id) },
+    { label:"删除模型", onClick:() => removeProviderModel(providerId, model.modelId || model.id) }
+  ]));
+  container.appendChild(modelRow);
+}
+
+function renderProvidersList(){
+  providersList.innerHTML = "";
+  MODEL_CATEGORY_DEFS.forEach(categoryDef => {
+    const category = getCategory(categoryDef.type);
+    const section = document.createElement("section");
+    section.className = "modelCategory" + (collapsedModelCategories[categoryDef.type] ? " collapsed" : "");
+    const header = document.createElement("button");
+    header.type = "button";
+    header.className = "modelCategoryHeader";
+    const titleWrap = document.createElement("span");
+    titleWrap.className = "modelCategoryTitle";
+    const title = document.createElement("strong");
+    title.textContent = categoryDef.label;
+    const meta = document.createElement("span");
+    meta.className = "modelCategoryMeta";
+    const count = categoryDef.type === "workers-hosted"
+      ? (category.models || []).length
+      : (category.providers || []).reduce((sum, provider) => sum + (provider.models || []).length, 0);
+    meta.textContent = categoryHint(categoryDef.type) + " / " + count + " models";
+    titleWrap.appendChild(title);
+    titleWrap.appendChild(meta);
+    const chevron = document.createElement("span");
+    chevron.textContent = collapsedModelCategories[categoryDef.type] ? "+" : "-";
+    header.appendChild(titleWrap);
+    header.appendChild(chevron);
+    header.addEventListener("click", () => toggleModelCategory(categoryDef.type));
+    section.appendChild(header);
+    const body = document.createElement("div");
+    body.className = "modelCategoryBody";
+
+    if(categoryDef.type === "workers-hosted"){
+      (category.models || []).forEach(model => appendModelRow(body, WORKERS_PROVIDER_ID, model));
+      if(!(category.models || []).length){
+        const empty = document.createElement("div");
+        empty.className = "providerMeta";
+        empty.textContent = "暂无模型";
+        body.appendChild(empty);
+      }
+    }else{
+      (category.providers || []).forEach(provider => {
+        const row = document.createElement("div");
+        row.className = "providerRow";
+        const rowHeader = document.createElement("div");
+        rowHeader.className = "providerRowHeader";
+        const main = document.createElement("div");
+        main.className = "providerMain";
+        const providerTitle = document.createElement("strong");
+        providerTitle.textContent = provider.providerName || provider.providerId;
+        const providerMeta = document.createElement("div");
+        providerMeta.className = "providerMeta";
+        providerMeta.textContent = provider.providerId + " / " + (provider.baseUrl || "Cloudflare proxied Claude") + (provider.enabled === false ? " / disabled" : "");
+        main.appendChild(providerTitle);
+        main.appendChild(providerMeta);
+        const actions = createActionMenu([
+          { label:"编辑 provider", onClick:() => editProvider(provider.providerId) },
+          { label:"删除 provider", onClick:() => removeProvider(provider.providerId) },
+          { label:"添加模型", onClick:() => {
+            modelProviderSelect.value = provider.providerId;
+            modelLabelInput.focus();
+          } }
+        ]);
+        actions.classList.add("providerActions");
+        rowHeader.appendChild(main);
+        rowHeader.appendChild(actions);
+        row.appendChild(rowHeader);
+        (provider.models || []).forEach(model => appendModelRow(row, provider.providerId, model));
+        body.appendChild(row);
+      });
+      if(!(category.providers || []).length){
+        const empty = document.createElement("div");
+        empty.className = "providerMeta";
+        empty.textContent = "暂无 provider";
+        body.appendChild(empty);
+      }
+    }
+
+    section.appendChild(body);
+    providersList.appendChild(section);
+  });
+}
+
+function renderCategoryTop(section, categoryDef){
+  const top = document.createElement("div");
+  top.className = "modelCategoryTop";
+  const header = document.createElement("button");
+  header.type = "button";
+  header.className = "modelCategoryHeader";
+  const titleWrap = document.createElement("span");
+  titleWrap.className = "modelCategoryTitle";
+  const title = document.createElement("strong");
+  title.textContent = categoryDef.label;
+  const meta = document.createElement("span");
+  meta.className = "modelCategoryMeta";
+  const category = getCategory(categoryDef.type);
+  const count = categoryDef.type === "workers-hosted"
+    ? (category.models || []).length
+    : (category.providers || []).reduce((sum, provider) => sum + (provider.models || []).length, 0);
+  meta.textContent = categoryHint(categoryDef.type) + " / " + count + " models";
+  titleWrap.appendChild(title);
+  titleWrap.appendChild(meta);
+  const chevron = document.createElement("span");
+  chevron.textContent = collapsedModelCategories[categoryDef.type] ? "+" : "-";
+  header.appendChild(titleWrap);
+  header.appendChild(chevron);
+  header.addEventListener("click", () => toggleModelCategory(categoryDef.type));
+
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "categoryAddBtn";
+  addBtn.textContent = "+";
+  addBtn.title = categoryDef.type === "workers-hosted" ? "新增模型" : "新增 provider";
+  addBtn.setAttribute("aria-label", addBtn.title);
+  addBtn.addEventListener("click", event => {
+    event.stopPropagation();
+    if(categoryDef.type === "workers-hosted"){
+      openAddModelDialog(WORKERS_PROVIDER_ID);
+    }else{
+      openAddProviderDialog(categoryDef.type);
+    }
+  });
+
+  top.appendChild(header);
+  top.appendChild(addBtn);
+  section.appendChild(top);
+}
+
+function renderProvidersList(){
+  providersList.innerHTML = "";
+  MODEL_CATEGORY_DEFS.forEach(categoryDef => {
+    const category = getCategory(categoryDef.type);
+    const section = document.createElement("section");
+    section.className = "modelCategory" + (collapsedModelCategories[categoryDef.type] ? " collapsed" : "");
+    renderCategoryTop(section, categoryDef);
+    const body = document.createElement("div");
+    body.className = "modelCategoryBody";
+
+    if(categoryDef.type === "workers-hosted"){
+      (category.models || []).forEach(model => appendModelRow(body, WORKERS_PROVIDER_ID, model));
+      if(!(category.models || []).length){
+        const empty = document.createElement("div");
+        empty.className = "providerMeta";
+        empty.textContent = "暂无模型";
+        body.appendChild(empty);
+      }
+    }else{
+      (category.providers || []).forEach(provider => {
+        const row = document.createElement("div");
+        row.className = "providerRow";
+        const rowHeader = document.createElement("div");
+        rowHeader.className = "providerRowHeader";
+        const main = document.createElement("div");
+        main.className = "providerMain";
+        const providerTitle = document.createElement("strong");
+        providerTitle.textContent = provider.providerName || provider.providerId;
+        const providerMeta = document.createElement("div");
+        providerMeta.className = "providerMeta";
+        providerMeta.textContent = provider.providerId + " / " + (provider.baseUrl || "Cloudflare proxied Claude") + (provider.enabled === false ? " / disabled" : "");
+        main.appendChild(providerTitle);
+        main.appendChild(providerMeta);
+        const actions = createActionMenu([
+          { label:"编辑 provider", onClick:() => editProvider(provider.providerId) },
+          { label:"删除 provider", onClick:() => removeProvider(provider.providerId) },
+          { label:"添加模型", onClick:() => openAddModelDialog(provider.providerId) }
+        ]);
+        actions.classList.add("providerActions");
+        rowHeader.appendChild(main);
+        rowHeader.appendChild(actions);
+        row.appendChild(rowHeader);
+        (provider.models || []).forEach(model => appendModelRow(row, provider.providerId, model));
+        body.appendChild(row);
+      });
+      if(!(category.providers || []).length){
+        const empty = document.createElement("div");
+        empty.className = "providerMeta";
+        empty.textContent = "暂无 provider";
+        body.appendChild(empty);
+      }
+    }
+
+    section.appendChild(body);
+    providersList.appendChild(section);
+  });
+}
+
 function getModelConfigForRequest(modelId){
   const model = modelOptions.find(item => item.id === modelId);
   if(!model || model.providerType !== "openai-compatible"){
@@ -4418,7 +5798,10 @@ toolMenuBtn.addEventListener("click", event => {
 });
 attachmentMenu.addEventListener("click", event => event.stopPropagation());
 toolMenu.addEventListener("click", event => event.stopPropagation());
-document.addEventListener("click", closeInputMenus);
+document.addEventListener("click", () => {
+  closeInputMenus();
+  closeModelActionMenus();
+});
 document.addEventListener("keydown", event => {
   if(event.key === "Escape"){
     closeInputMenus();

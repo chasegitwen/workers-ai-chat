@@ -205,6 +205,10 @@ function isPlainObject(value) {
 }
 
 function providerLabelFromModel(model) {
+  if ((model.provider || "") === "cloudflare-proxied") {
+    return "Cloudflare proxied Claude";
+  }
+
   if ((model.provider || "") === "glm") {
     return "GLM Coding";
   }
@@ -228,13 +232,16 @@ function providersFromModels(models) {
       return;
     }
 
-    const providerId = model.provider || model.providerType || "workers-ai";
+    const isClaudeCompatible = (model.provider || "") === "cloudflare-proxied" ||
+      String(model.id || model.modelName || "").startsWith("anthropic/claude");
+    const providerType = isClaudeCompatible ? "claude-compatible" : (model.providerType || "workers-ai");
+    const providerId = isClaudeCompatible ? (model.provider || "cloudflare-proxied") : (model.provider || model.providerType || "workers-ai");
 
     if (!providers.has(providerId)) {
       providers.set(providerId, {
         id: providerId,
         label: providerLabelFromModel(model),
-        providerType: model.providerType || "workers-ai",
+        providerType,
         apiBase: model.apiBase || "",
         apiKeyEnv: model.apiKeyEnv || "",
         builtin: true,
@@ -246,7 +253,7 @@ function providersFromModels(models) {
       id: model.id,
       label: model.label || model.id,
       modelName: model.modelName || model.id,
-      providerType: model.providerType || "workers-ai",
+      providerType,
       apiBase: model.apiBase || "",
       apiKeyEnv: model.apiKeyEnv || "",
       capabilities: model.capabilities || { text: true, streaming: true },
@@ -263,7 +270,7 @@ function normalizeProvider(provider) {
     return null;
   }
 
-  const id = String(provider.id || provider.provider || "").trim();
+  const id = String(provider.providerId || provider.id || provider.provider || "").trim();
 
   if (!id) {
     return null;
@@ -271,11 +278,12 @@ function normalizeProvider(provider) {
 
   return {
     id,
-    label: String(provider.label || id),
-    providerType: String(provider.providerType || provider.type || id || "workers-ai"),
+    label: String(provider.providerName || provider.label || id),
+    providerType: String(provider.providerType || provider.type || provider.category || id || "workers-ai"),
     apiBase: String(provider.apiBase || provider.baseUrl || ""),
     apiKeyEnv: String(provider.apiKeyEnv || ""),
     builtin: Boolean(provider.builtin),
+    enabled: provider.enabled !== false,
     models: Array.isArray(provider.models)
       ? provider.models
         .map(model => normalizeProviderModel(model, provider))
@@ -289,7 +297,7 @@ function normalizeProviderModel(model, provider) {
     return null;
   }
 
-  const id = String(model.id || model.model || model.modelName || "").trim();
+  const id = String(model.modelId || model.id || model.model || model.modelName || "").trim();
 
   if (!id) {
     return null;
@@ -297,8 +305,8 @@ function normalizeProviderModel(model, provider) {
 
   return {
     id,
-    label: String(model.label || id),
-    modelName: String(model.modelName || model.model || id),
+    label: String(model.displayName || model.label || id),
+    modelName: String(model.upstreamModelName || model.modelName || model.model || id),
     providerType: String(model.providerType || provider.providerType || "workers-ai"),
     apiBase: String(model.apiBase || model.baseUrl || provider.apiBase || ""),
     apiKeyEnv: String(model.apiKeyEnv || provider.apiKeyEnv || ""),
@@ -349,6 +357,59 @@ function mergeProviders(baseProviders, nextProviders) {
   return Array.from(merged.values());
 }
 
+function providersFromCategories(categories) {
+  const providers = [];
+
+  (categories || []).forEach(category => {
+    const type = String(category?.type || category?.category || "").trim();
+
+    if (type === "workers-hosted") {
+      providers.push({
+        id: "workers-ai",
+        label: "Workers 托管",
+        providerType: "workers-ai",
+        apiBase: "",
+        apiKeyEnv: "",
+        builtin: true,
+        enabled: true,
+        models: (category.models || []).map(model => ({
+          id: model.modelId || model.id,
+          label: model.displayName || model.label || model.modelId || model.id,
+          modelName: model.upstreamModelName || model.modelName || model.modelId || model.id,
+          providerType: "workers-ai",
+          capabilities: model.capabilities || { text: true, streaming: true },
+          enabled: model.enabled !== false
+        }))
+      });
+      return;
+    }
+
+    if (type === "claude-compatible" || type === "openai-compatible") {
+      (category.providers || []).forEach(provider => {
+        providers.push({
+          id: provider.providerId || provider.id,
+          label: provider.providerName || provider.label || provider.providerId || provider.id,
+          providerType: type,
+          apiBase: provider.baseUrl || provider.apiBase || "",
+          apiKeyEnv: provider.apiKeyEnv || "",
+          builtin: Boolean(provider.builtin),
+          enabled: provider.enabled !== false,
+          models: (provider.models || []).map(model => ({
+            id: model.modelId || model.id,
+            label: model.displayName || model.label || model.modelId || model.id,
+            modelName: model.upstreamModelName || model.modelName || model.modelId || model.id,
+            providerType: type,
+            capabilities: model.capabilities || { text: true, streaming: true },
+            enabled: model.enabled !== false
+          }))
+        });
+      });
+    }
+  });
+
+  return providers.filter(provider => provider.id);
+}
+
 async function readSavedProviders(env) {
   if (!env.DB) {
     return [];
@@ -364,7 +425,13 @@ async function readSavedProviders(env) {
     }
 
     const settings = JSON.parse(row.value);
-    return Array.isArray(settings?.providers) ? settings.providers : [];
+    if (Array.isArray(settings?.providers) && settings.providers.length) {
+      return settings.providers;
+    }
+    if (Array.isArray(settings?.categories) || Array.isArray(settings?.modelCategories)) {
+      return providersFromCategories(settings.categories || settings.modelCategories);
+    }
+    return [];
   } catch (err) {
     console.warn("[model-settings] failed to read settings.providers", err.message || String(err));
     return [];
@@ -419,11 +486,12 @@ async function buildModelProviderCatalog(env, requestProviders, customModelConfi
 function findProviderModel(providerCatalog, providerId, modelId) {
   const requestedProvider = String(providerId || "").trim();
   const requestedModel = String(modelId || "").trim();
+  const enabledProviders = (providerCatalog || []).filter(item => item.enabled !== false);
   const provider = requestedProvider
-    ? (providerCatalog || []).find(item => item.id === requestedProvider)
-    : (providerCatalog || []).find(item => (item.models || []).some(model => model.id === requestedModel || model.modelName === requestedModel));
+    ? enabledProviders.find(item => item.id === requestedProvider)
+    : enabledProviders.find(item => (item.models || []).some(model => model.enabled !== false && (model.id === requestedModel || model.modelName === requestedModel)));
   const model = provider
-    ? (provider.models || []).find(item => item.id === requestedModel || item.modelName === requestedModel)
+    ? (provider.models || []).find(item => item.enabled !== false && (item.id === requestedModel || item.modelName === requestedModel))
     : null;
 
   console.log("[model-validation]", {
@@ -540,7 +608,7 @@ async function callSelectedModel({ env, provider, model, messages, stream, provi
     };
   }
 
-  if (providerType === "workers-ai") {
+  if (providerType === "workers-ai" || providerType === "claude-compatible") {
     const runtimeConfig = getModelRuntimeConfig(selectedModel.id);
     const response = runtimeConfig
       ? (await callModel({

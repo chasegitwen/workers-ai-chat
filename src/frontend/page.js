@@ -782,6 +782,7 @@ body.authenticated .loginScreen{
 
 .msg{
   max-width:82%;
+  min-width:0;
   padding:14px 16px;
   border-radius:16px;
   line-height:1.7;
@@ -820,6 +821,8 @@ body.authenticated .loginScreen{
 }
 
 .assistantMessageBody{
+  width:100%;
+  max-width:100%;
   min-width:0;
 }
 
@@ -961,6 +964,7 @@ body.authenticated .loginScreen{
 }
 
 .tableWrap{
+  width:100%;
   max-width:100%;
   overflow-x:auto;
   margin-bottom:10px;
@@ -1646,12 +1650,18 @@ body.dark .toolErrorNotice{
 #input{
   flex:1 1 260px;
   min-width:160px;
+  min-height:44px;
+  max-height:180px;
   padding:12px 6px;
   border:none;
   font-size:16px;
+  line-height:20px;
   outline:none;
   background:transparent;
   color:var(--text);
+  resize:none;
+  overflow-y:hidden;
+  font-family:inherit;
 }
 
 #sendBtn{
@@ -1974,10 +1984,11 @@ body.dark .toolErrorNotice{
       </div>
     </div>
 
-    <input
+    <textarea
       id="input"
       placeholder="&#x8F93;&#x5165;&#x95EE;&#x9898;&#x3001;&#x641C;&#x7D22;&#x5173;&#x952E;&#x8BCD;&#x6216;&#x7F51;&#x9875; URL..."
-    />
+      rows="1"
+    ></textarea>
 
     <div class="inputPrimaryActions">
       <div class="inputMenuWrap toolMenuWrap">
@@ -2071,6 +2082,7 @@ let selectedWebPageChunks = [];
 let lastWebRelevantChunkCount = 0;
 
 const sendBtn = document.getElementById("sendBtn");
+const INPUT_MAX_HEIGHT = 180;
 
 const imageBtn = document.getElementById("imageBtn");
 const imageInput = document.getElementById("imageInput");
@@ -6187,11 +6199,13 @@ async function loadConversationMessages(conversationId){
 
 input.addEventListener("keydown", e => {
 
-  if(e.key === "Enter"){
+  if(e.key === "Enter" && !e.shiftKey){
+    e.preventDefault();
     sendMessage();
   }
 
 });
+input.addEventListener("input", autoResizeInput);
 
 sendBtn.addEventListener("click", sendMessage);
 newChatBtn.addEventListener("click", createNewConversation);
@@ -6277,6 +6291,18 @@ function toggleTheme(){
 
 function scrollBottom(){
   chat.scrollTop = chat.scrollHeight;
+}
+
+function autoResizeInput(){
+  input.style.height = "auto";
+  const nextHeight = Math.min(input.scrollHeight, INPUT_MAX_HEIGHT);
+  input.style.height = nextHeight + "px";
+  input.style.overflowY = input.scrollHeight > INPUT_MAX_HEIGHT ? "auto" : "hidden";
+}
+
+function resetInputHeight(){
+  input.style.height = "";
+  input.style.overflowY = "hidden";
 }
 
 async function copyText(text){
@@ -7084,6 +7110,7 @@ async function sendMessage(){
   });
 
   input.value = "";
+  resetInputHeight();
 
   sendBtn.disabled = true;
 

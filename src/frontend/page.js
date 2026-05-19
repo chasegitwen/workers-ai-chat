@@ -816,6 +816,44 @@ body.authenticated .loginScreen{
   border-bottom-left-radius:4px;
 }
 
+.welcomeMsg{
+  display:flex;
+  align-items:flex-start;
+  gap:12px;
+}
+
+.welcomeText{
+  flex:1 1 auto;
+  min-width:0;
+}
+
+.welcomeActions{
+  flex:0 0 auto;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+.welcomeNeverShow{
+  display:flex;
+  align-items:center;
+  gap:5px;
+  color:var(--muted);
+  font-size:12px;
+  white-space:nowrap;
+}
+
+.welcomeCloseBtn{
+  width:24px;
+  height:24px;
+  border:1px solid var(--border);
+  border-radius:999px;
+  background:transparent;
+  color:var(--muted);
+  cursor:pointer;
+  line-height:1;
+}
+
 .ai pre{
   background:#111827;
   color:#f9fafb;
@@ -1580,8 +1618,6 @@ body.dark .toolErrorNotice{
 
     <aside class="sidebar">
 
-      <h2>网页 AI 助手</h2>
-
       <button id="newChatBtn" class="newChatBtn" type="button">
         New Chat
       </button>
@@ -1660,7 +1696,6 @@ body.dark .toolErrorNotice{
     <section class="chatCard">
 
       <div class="chatHeader">
-        <span>AI Chat</span>
         <div id="summaryStatus" class="summaryStatus">
           <span>&#x5DF2;&#x542F;&#x7528;&#x957F;&#x4E0A;&#x4E0B;&#x6587;&#x6458;&#x8981;</span>
           <button id="viewSummaryBtn" type="button">&#x67E5;&#x770B;&#x6458;&#x8981;</button>
@@ -1669,9 +1704,18 @@ body.dark .toolErrorNotice{
 
       <div id="chat">
 
-        <div class="msg ai">
-          你好，我是基于 Cloudflare Workers AI 的网页助手。
-          你可以问我问题，也可以让我写代码、总结、翻译或分析内容。
+        <div id="welcomeCard" class="msg ai welcomeMsg">
+          <div class="welcomeText">
+            你好，我是基于 Cloudflare Workers AI 的网页助手。
+            你可以问我问题，也可以让我写代码、总结、翻译或分析内容。
+          </div>
+          <div class="welcomeActions">
+            <label class="welcomeNeverShow">
+              <input id="welcomeNeverShowInput" type="checkbox" />
+              <span>不再显示</span>
+            </label>
+            <button class="welcomeCloseBtn" type="button" aria-label="关闭欢迎提示">&times;</button>
+          </div>
         </div>
         <div id="searchResults"></div>
 
@@ -1789,6 +1833,8 @@ let pendingToolCall = null;
 let searchResults = document.getElementById("searchResults");
 let currentConversationId = null;
 let conversationsCache = [];
+const WELCOME_HIDDEN_KEY = "welcome_hidden";
+syncWelcomeVisibility();
 
 const fetchUrlBtn = document.getElementById("fetchUrlBtn");
 
@@ -5527,9 +5573,46 @@ function resetLocalConversation(){
   conversation.length = 1;
 }
 
+function shouldShowWelcome(){
+  return localStorage.getItem(WELCOME_HIDDEN_KEY) !== "1";
+}
+
+function renderWelcomeCard(){
+  if(!shouldShowWelcome()){
+    return "";
+  }
+
+  return [
+    "<div id='welcomeCard' class='msg ai welcomeMsg'>",
+    "<div class='welcomeText'>你好，我是基于 Cloudflare Workers AI 的网页助手。你可以问我问题，也可以让我写代码、总结、翻译或分析内容。</div>",
+    "<div class='welcomeActions'>",
+    "<label class='welcomeNeverShow'><input id='welcomeNeverShowInput' type='checkbox' /><span>不再显示</span></label>",
+    "<button class='welcomeCloseBtn' type='button' aria-label='关闭欢迎提示'>&times;</button>",
+    "</div>",
+    "</div>"
+  ].join("");
+}
+
+function dismissWelcomeCard(){
+  const welcomeCard = document.getElementById("welcomeCard");
+  const neverShowInput = document.getElementById("welcomeNeverShowInput");
+
+  if(neverShowInput?.checked){
+    localStorage.setItem(WELCOME_HIDDEN_KEY, "1");
+  }
+
+  welcomeCard?.remove();
+}
+
+function syncWelcomeVisibility(){
+  if(!shouldShowWelcome()){
+    document.getElementById("welcomeCard")?.remove();
+  }
+}
+
 function resetChatView(){
   chat.innerHTML =
-    "<div class='msg ai'>你好，我是基于 Cloudflare Workers AI 的网页助手。你可以问我问题，也可以让我写代码、总结、翻译或分析内容。</div>" +
+    renderWelcomeCard() +
     "<div id='searchResults'></div>";
   searchResults = document.getElementById("searchResults");
   scrollBottom();
@@ -5760,6 +5843,11 @@ input.addEventListener("keydown", e => {
 sendBtn.addEventListener("click", sendMessage);
 newChatBtn.addEventListener("click", createNewConversation);
 viewSummaryBtn.addEventListener("click", viewCurrentSummary);
+chat.addEventListener("click", event => {
+  if(event.target.closest(".welcomeCloseBtn")){
+    dismissWelcomeCard();
+  }
+});
 modelSelect.addEventListener("change", () => {
   if(modelSettingsState?.rememberLastModel && modelSelect.value){
     modelSettingsState.lastModel = modelSelect.value;

@@ -11,7 +11,9 @@ export function htmlPage() {
 
 <title>Workers AI Assistant</title>
 
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
 
@@ -814,6 +816,34 @@ body.authenticated .loginScreen{
   color:var(--text);
   border:1px solid var(--border);
   border-bottom-left-radius:4px;
+  position:relative;
+}
+
+.assistantMessageBody{
+  min-width:0;
+}
+
+.messageCopyBtn,
+.codeCopyBtn{
+  border:1px solid var(--border);
+  background:rgba(148,163,184,.1);
+  color:var(--muted);
+  border-radius:999px;
+  padding:3px 8px;
+  font-size:12px;
+  cursor:pointer;
+  line-height:1.4;
+}
+
+.messageCopyBtn{
+  float:right;
+  margin:0 0 8px 10px;
+}
+
+.messageCopyBtn:hover,
+.codeCopyBtn:hover{
+  color:var(--text);
+  background:rgba(148,163,184,.16);
 }
 
 .welcomeMsg{
@@ -864,6 +894,126 @@ body.authenticated .loginScreen{
 
 .ai code{
   font-family:Consolas,Monaco,monospace;
+}
+
+.assistantMessageBody h1,
+.assistantMessageBody h2,
+.assistantMessageBody h3,
+.assistantMessageBody h4{
+  margin:10px 0 6px;
+  line-height:1.35;
+}
+
+.assistantMessageBody p,
+.assistantMessageBody ul,
+.assistantMessageBody ol,
+.assistantMessageBody blockquote,
+.assistantMessageBody pre,
+.assistantMessageBody table{
+  margin-top:0;
+  margin-bottom:10px;
+}
+
+.assistantMessageBody ul,
+.assistantMessageBody ol{
+  padding-left:22px;
+}
+
+.assistantMessageBody blockquote{
+  border-left:3px solid var(--border);
+  padding:4px 0 4px 10px;
+  color:var(--muted);
+}
+
+.assistantMessageBody a{
+  color:var(--primary);
+}
+
+.assistantMessageBody hr{
+  border:0;
+  border-top:1px solid var(--border);
+  margin:14px 0;
+}
+
+.assistantMessageBody :not(pre) > code{
+  padding:2px 5px;
+  border-radius:6px;
+  background:rgba(148,163,184,.16);
+}
+
+.codeBlock{
+  margin:0 0 10px;
+  border-radius:10px;
+  overflow:hidden;
+  background:#111827;
+}
+
+.codeBlockToolbar{
+  display:flex;
+  justify-content:flex-end;
+  padding:6px 8px;
+  border-bottom:1px solid rgba(255,255,255,.08);
+}
+
+.codeBlock pre{
+  margin:0;
+  border-radius:0;
+}
+
+.tableWrap{
+  max-width:100%;
+  overflow-x:auto;
+  margin-bottom:10px;
+}
+
+.assistantMessageBody table{
+  width:max-content;
+  min-width:100%;
+  border-collapse:collapse;
+  font-size:13px;
+}
+
+.assistantMessageBody th,
+.assistantMessageBody td{
+  border:1px solid var(--border);
+  padding:6px 8px;
+  text-align:left;
+  vertical-align:top;
+}
+
+.assistantMessageBody th{
+  background:rgba(148,163,184,.12);
+  font-weight:600;
+}
+
+.mathInline,
+.mathBlock{
+  font-family:Cambria Math,Georgia,serif;
+}
+
+.mathInline{
+  display:inline-block;
+}
+
+.mathBlock{
+  display:block;
+  overflow-x:auto;
+  margin:10px 0;
+  text-align:center;
+}
+
+.mathFallback{
+  background:rgba(148,163,184,.12);
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:0 5px;
+}
+
+.mathBlock.mathFallback{
+  text-align:left;
+  padding:10px 12px;
+  border-radius:10px;
+  white-space:pre-wrap;
 }
 
 .sourceCitations{
@@ -5992,7 +6142,7 @@ function renderHistoryMessage(message){
   div.className = message.role === "user" ? "msg user" : "msg ai";
 
   if(message.role === "assistant"){
-    div.innerHTML = marked.parse(message.content || "");
+    renderAssistantMarkdown(div, message.content || "");
   }else{
     div.textContent = message.content || "";
   }
@@ -6049,7 +6199,9 @@ viewSummaryBtn.addEventListener("click", viewCurrentSummary);
 chat.addEventListener("click", event => {
   if(event.target.closest(".welcomeCloseBtn")){
     dismissWelcomeCard();
+    return;
   }
+  handleCopyClick(event);
 });
 modelSelect.addEventListener("change", () => {
   if(modelSettingsState?.rememberLastModel && modelSelect.value){
@@ -6114,6 +6266,7 @@ document.addEventListener("keydown", event => {
 });
 loginForm.addEventListener("submit", login);
 logoutBtn.addEventListener("click", logout);
+window.addEventListener("load", refreshRenderedMath);
 setFileLibraryExpanded(false);
 setupSettingsHeaderActions();
 checkAuth();
@@ -6124,6 +6277,58 @@ function toggleTheme(){
 
 function scrollBottom(){
   chat.scrollTop = chat.scrollHeight;
+}
+
+async function copyText(text){
+  const value = String(text || "");
+  if(navigator.clipboard?.writeText){
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
+}
+
+function showCopiedFeedback(button){
+  const original = button.textContent;
+  button.textContent = "已复制";
+  window.setTimeout(() => {
+    button.textContent = original;
+  }, 1200);
+}
+
+async function handleCopyClick(event){
+  const codeButton = event.target.closest("[data-copy-code]");
+  if(codeButton){
+    event.stopPropagation();
+    const code = codeButton.dataset.code || codeButton.closest(".codeBlock")?.querySelector("code")?.textContent || "";
+    try{
+      await copyText(code);
+      showCopiedFeedback(codeButton);
+    }catch(err){
+      console.warn("copy code failed", err);
+    }
+    return;
+  }
+
+  const messageButton = event.target.closest("[data-copy-message]");
+  if(messageButton){
+    event.stopPropagation();
+    const message = messageButton.closest(".msg.ai");
+    try{
+      await copyText(message?.dataset.markdownSource || "");
+      showCopiedFeedback(messageButton);
+    }catch(err){
+      console.warn("copy message failed", err);
+    }
+  }
 }
 
 function addUserMessage(text, imageDataUrl, fileInfo){
@@ -6380,8 +6585,161 @@ function renderModelDiagnostics(element, diagnostics){
   element.appendChild(info);
 }
 
+function escapeHtml(value){
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function encodeMathLatex(value){
+  return encodeURIComponent(String(value || ""));
+}
+
+function decodeMathLatex(value){
+  try{
+    return decodeURIComponent(String(value || ""));
+  }catch(err){
+    return String(value || "");
+  }
+}
+
+function protectMarkdownCode(markdown){
+  const protectedParts = [];
+  const backtick = String.fromCharCode(96);
+  const fence = backtick + backtick + backtick;
+  const fencePattern = new RegExp(fence + "[^]*?" + fence, "g");
+  const inlineCodePattern = new RegExp(backtick + "[^" + backtick + "]*" + backtick, "g");
+  const token = value => {
+    const key = "%%MD_PROTECTED_" + protectedParts.length + "%%";
+    protectedParts.push(value);
+    return key;
+  };
+  const text = String(markdown || "")
+    .replace(fencePattern, token)
+    .replace(inlineCodePattern, token);
+  return { text, protectedParts };
+}
+
+function restoreMarkdownCode(markdown, protectedParts){
+  return String(markdown || "").replace(new RegExp("%%MD_PROTECTED_([0-9]+)%%", "g"), (_, index) => protectedParts[Number(index)] || "");
+}
+
+function renderMathMarkup(markdown){
+  const protectedMarkdown = protectMarkdownCode(markdown);
+  const backslash = String.fromCharCode(92);
+  const dollar = String.fromCharCode(36);
+  const literalDollar = backslash + dollar;
+  const newline = String.fromCharCode(10);
+  const blockMathPattern = new RegExp(literalDollar + literalDollar + "([^]*?)" + literalDollar + literalDollar, "g");
+  const inlineMathPattern = new RegExp("(^|[^" + backslash + backslash + dollar + "])" + literalDollar + "([^" + newline + dollar + "]+?)" + literalDollar, "g");
+  const withMath = protectedMarkdown.text
+    .replace(blockMathPattern, (_, expression) => (
+      "<div class='mathBlock mathFallback' data-math-display='1' data-latex='" + encodeMathLatex(expression.trim()) + "'>$$" + escapeHtml(expression.trim()) + "$$</div>"
+    ))
+    .replace(inlineMathPattern, (_, prefix, expression) => (
+      prefix + "<span class='mathInline mathFallback' data-math-display='0' data-latex='" + encodeMathLatex(expression.trim()) + "'>$" + escapeHtml(expression.trim()) + "$</span>"
+    ));
+  return restoreMarkdownCode(withMath, protectedMarkdown.protectedParts);
+}
+
+function parseAssistantMarkdown(markdown){
+  if(window.marked?.setOptions){
+    marked.setOptions({
+      gfm:true,
+      breaks:false
+    });
+  }
+  return marked.parse(renderMathMarkup(markdown || ""));
+}
+
+function enhanceCodeBlocks(container){
+  container.querySelectorAll("pre").forEach(pre => {
+    if(pre.closest(".codeBlock")){
+      return;
+    }
+    const code = pre.querySelector("code");
+    const wrapper = document.createElement("div");
+    wrapper.className = "codeBlock";
+    const toolbar = document.createElement("div");
+    toolbar.className = "codeBlockToolbar";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "codeCopyBtn";
+    button.textContent = "复制";
+    button.dataset.copyCode = "1";
+    toolbar.appendChild(button);
+    pre.parentNode.insertBefore(wrapper, pre);
+    wrapper.appendChild(toolbar);
+    wrapper.appendChild(pre);
+    if(code){
+      button.dataset.code = code.textContent || "";
+    }
+  });
+}
+
+function enhanceTables(container){
+  container.querySelectorAll("table").forEach(table => {
+    if(table.parentElement?.classList.contains("tableWrap")){
+      return;
+    }
+    const wrapper = document.createElement("div");
+    wrapper.className = "tableWrap";
+    table.parentNode.insertBefore(wrapper, table);
+    wrapper.appendChild(table);
+  });
+}
+
+function renderKatexMath(container){
+  container.querySelectorAll("[data-latex]").forEach(element => {
+    const latex = decodeMathLatex(element.dataset.latex || "");
+    const displayMode = element.dataset.mathDisplay === "1";
+
+    if(!window.katex){
+      element.textContent = displayMode ? "$$" + latex + "$$" : "$" + latex + "$";
+      element.classList.add("mathFallback");
+      return;
+    }
+
+    try{
+      window.katex.render(latex, element, {
+        throwOnError:false,
+        displayMode
+      });
+      element.classList.remove("mathFallback");
+    }catch(err){
+      element.textContent = displayMode ? "$$" + latex + "$$" : "$" + latex + "$";
+      element.classList.add("mathFallback");
+    }
+  });
+}
+
+function refreshRenderedMath(){
+  document.querySelectorAll(".assistantMessageBody").forEach(renderKatexMath);
+}
+
+function renderAssistantMarkdown(element, markdown){
+  element.dataset.markdownSource = markdown || "";
+  element.innerHTML = "";
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "messageCopyBtn";
+  copyBtn.dataset.copyMessage = "1";
+  copyBtn.textContent = "复制";
+  const body = document.createElement("div");
+  body.className = "assistantMessageBody";
+  body.innerHTML = parseAssistantMarkdown(markdown || "");
+  element.appendChild(copyBtn);
+  element.appendChild(body);
+  enhanceCodeBlocks(body);
+  enhanceTables(body);
+  renderKatexMath(body);
+}
+
 function renderAssistantMessage(element, text, sources, toolSources, toolError, toolDebug, diagnostics){
-  element.innerHTML = marked.parse(text || "");
+  renderAssistantMarkdown(element, text || "");
   renderToolError(element, toolError);
   renderToolDebug(element, toolDebug);
   renderModelDiagnostics(element, diagnostics);
@@ -6422,7 +6780,7 @@ async function typeWriter(element, text){
 
     current += text[i];
 
-    element.innerHTML = marked.parse(current);
+    renderAssistantMarkdown(element, current);
 
     scrollBottom();
 
@@ -6815,7 +7173,7 @@ async function sendMessage(){
     const reply = streamResult.reply || "";
 
     if(!reply){
-      aiDiv.innerHTML = marked.parse("没有返回内容");
+      renderAssistantMarkdown(aiDiv, "没有返回内容");
     }
 
     conversation.push({

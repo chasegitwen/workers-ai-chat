@@ -3,6 +3,7 @@ import { handleChat } from "./api/chat.js";
 import { handleFiles } from "./api/files.js";
 import { handleFetchUrl } from "./api/fetchUrl.js";
 import { handleHistory } from "./api/history.js";
+import { handleModelHealth } from "./api/modelHealth.js";
 import { handleSearchAndFetch } from "./api/searchAndFetch.js";
 import { handleSearchWeb } from "./api/searchWeb.js";
 import { handleSettings } from "./api/settings.js";
@@ -92,6 +93,10 @@ export default {
       if (settingsResponse) {
         return settingsResponse;
       }
+    }
+
+    if (url.pathname === "/api/model-health") {
+      return handleModelHealth(request, env);
     }
 
     if (request.method === "GET") {

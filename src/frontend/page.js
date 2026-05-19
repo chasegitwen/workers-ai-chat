@@ -265,9 +265,9 @@ body.authenticated .loginScreen{
 }
 
 .topbar{
-  height:64px;
-  flex:0 0 64px;
-  padding:0 24px;
+  height:52px;
+  flex:0 0 52px;
+  padding:0 18px;
   display:flex;
   align-items:center;
   justify-content:space-between;
@@ -290,7 +290,7 @@ body.authenticated .loginScreen{
   background:transparent;
   color:var(--text);
   border-radius:999px;
-  padding:8px 14px;
+  padding:6px 12px;
   cursor:pointer;
 }
 
@@ -305,8 +305,8 @@ body.authenticated .loginScreen{
   min-height:0;
   display:grid;
   grid-template-columns:280px minmax(0,1fr);
-  gap:20px;
-  padding:20px;
+  gap:14px;
+  padding:12px 14px 14px;
   overflow:hidden;
 }
 
@@ -1168,6 +1168,60 @@ body.dark .toolErrorNotice{
   margin-top:8px;
 }
 
+.modelHealthPanel{
+  grid-column:1 / -1;
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:10px;
+  margin-top:4px;
+}
+
+.modelHealthHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+}
+
+.modelHealthTitle{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+
+.modelHealthTitle strong{
+  font-size:14px;
+}
+
+.modelHealthList{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  margin-top:8px;
+}
+
+.modelHealthItem{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  color:var(--muted);
+  font-size:12px;
+}
+
+.modelHealthName{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.modelHealthStatus{
+  flex:0 0 auto;
+  color:var(--text);
+  font-variant-numeric:tabular-nums;
+}
+
 .modelCategory{
   border:1px solid var(--border);
   border-radius:12px;
@@ -1481,7 +1535,7 @@ body.dark .toolErrorNotice{
   }
 
   .topbar{
-    padding:0 16px;
+    padding:0 12px;
   }
 
   .inputBar{
@@ -1590,6 +1644,16 @@ body.dark .toolErrorNotice{
       <div class="settingsField full">
         <button id="addProviderModelBtn" class="settingsBtn" type="button">添加模型到 provider</button>
         <button id="cancelModelEditBtn" class="settingsBtn" type="button" style="display:none;">取消模型编辑</button>
+        <div class="modelHealthPanel">
+          <div class="modelHealthHeader">
+            <div class="modelHealthTitle">
+              <strong>模型健康检查</strong>
+              <span class="modelCategoryMeta">轻量请求当前已配置模型</span>
+            </div>
+            <button id="modelHealthBtn" class="settingsBtn" type="button">检查</button>
+          </div>
+          <div id="modelHealthResults" class="modelHealthList"></div>
+        </div>
         <div id="providersList" class="providerList"></div>
       </div>
     </div>
@@ -3209,6 +3273,8 @@ const modelIdInput = document.getElementById("modelIdInput");
 const modelNameInput = document.getElementById("modelNameInput");
 const addProviderModelBtn = document.getElementById("addProviderModelBtn");
 const cancelModelEditBtn = document.getElementById("cancelModelEditBtn");
+const modelHealthBtn = document.getElementById("modelHealthBtn");
+const modelHealthResults = document.getElementById("modelHealthResults");
 const providersList = document.getElementById("providersList");
 const settingsSyncStatus = document.getElementById("settingsSyncStatus");
 let modelSettingsState = null;
@@ -3295,11 +3361,6 @@ function createEditDialog(){
 
   editDialog.closeBtn.addEventListener("click", closeEditDialog);
   editDialog.cancelBtn.addEventListener("click", closeEditDialog);
-  overlay.addEventListener("click", event => {
-    if(event.target === overlay){
-      closeEditDialog();
-    }
-  });
 
   return editDialog;
 }
@@ -4662,6 +4723,8 @@ function renderModelOptions(){
 }
 
 function refreshSettingsControls(){
+  const settingsPanel = settingsModal.querySelector(".settingsPanel");
+  const settingsScrollTop = settingsPanel?.scrollTop || 0;
   const fillSelect = (select, includeEmpty) => {
     select.innerHTML = "";
     if(includeEmpty){
@@ -4697,6 +4760,9 @@ function refreshSettingsControls(){
       modelProviderSelect.appendChild(option);
     });
   renderProvidersList();
+  if(settingsPanel){
+    settingsPanel.scrollTop = settingsScrollTop;
+  }
 }
 
 async function loadModels(){
@@ -5053,6 +5119,74 @@ function toggleModelCategory(type){
   collapsedModelCategories[type] = !collapsedModelCategories[type];
   localStorage.setItem(MODEL_CATEGORY_COLLAPSED_KEY, JSON.stringify(collapsedModelCategories));
   renderProvidersList();
+}
+
+function formatHealthLatency(latencyMs){
+  if(typeof latencyMs !== "number" || !Number.isFinite(latencyMs)){
+    return "";
+  }
+  return (latencyMs / 1000).toFixed(1).replace(/\.0$/, "") + "s";
+}
+
+function healthIcon(result){
+  if(result.ok){
+    return "✅";
+  }
+  const status = String(result.status || "");
+  return status === "429" ? "⚠️" : "❌";
+}
+
+function renderModelHealthResults(results){
+  modelHealthResults.innerHTML = "";
+
+  if(!Array.isArray(results) || !results.length){
+    const empty = document.createElement("div");
+    empty.className = "modelHealthItem";
+    empty.textContent = "暂无模型结果";
+    modelHealthResults.appendChild(empty);
+    return;
+  }
+
+  results.forEach(result => {
+    const item = document.createElement("div");
+    item.className = "modelHealthItem";
+    const name = document.createElement("span");
+    name.className = "modelHealthName";
+    name.textContent = result.label || result.model || "Model";
+    name.title = [result.provider, result.model, result.error].filter(Boolean).join(" / ");
+    const status = document.createElement("span");
+    status.className = "modelHealthStatus";
+    status.textContent = result.ok
+      ? healthIcon(result) + " " + formatHealthLatency(result.latencyMs)
+      : healthIcon(result) + " " + (result.status || "error");
+    item.appendChild(name);
+    item.appendChild(status);
+    modelHealthResults.appendChild(item);
+  });
+}
+
+async function runModelHealthCheck(){
+  modelHealthBtn.disabled = true;
+  modelHealthBtn.textContent = "检查中";
+  modelHealthResults.innerHTML = "<div class='modelHealthItem'>正在检查...</div>";
+
+  try{
+    const res = await fetch("/api/model-health");
+    const data = await res.json();
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "模型健康检查失败");
+    }
+    renderModelHealthResults(data.results || []);
+  }catch(err){
+    modelHealthResults.innerHTML = "";
+    const item = document.createElement("div");
+    item.className = "modelHealthItem";
+    item.textContent = err.message || "模型健康检查失败";
+    modelHealthResults.appendChild(item);
+  }finally{
+    modelHealthBtn.disabled = false;
+    modelHealthBtn.textContent = "检查";
+  }
 }
 
 function closeModelActionMenus(exceptMenu){
@@ -5864,9 +5998,10 @@ addProviderBtn.addEventListener("click", addProvider);
 cancelProviderEditBtn.addEventListener("click", clearProviderForm);
 addProviderModelBtn.addEventListener("click", addProviderModel);
 cancelModelEditBtn.addEventListener("click", clearModelForm);
+modelHealthBtn.addEventListener("click", runModelHealthCheck);
 settingsModal.addEventListener("click", event => {
   if(event.target === settingsModal){
-    closeSettings();
+    event.stopPropagation();
   }
 });
 libraryToggle.addEventListener("click", toggleFileLibrary);

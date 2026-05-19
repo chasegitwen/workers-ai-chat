@@ -471,7 +471,7 @@ function customConfigToProvider(config) {
   };
 }
 
-async function buildModelProviderCatalog(env, requestProviders, customModelConfig, fallbackCustomModelConfig) {
+export async function buildModelProviderCatalog(env, requestProviders, customModelConfig, fallbackCustomModelConfig) {
   const defaultProviders = providersFromModels(MODELS);
   const savedProviders = await readSavedProviders(env);
   const customProviders = [
@@ -558,7 +558,7 @@ function normalizeCustomModelConfig(config, { required = false } = {}) {
   };
 }
 
-async function callSelectedModel({ env, provider, model, messages, stream, providerCatalog }) {
+export async function callSelectedModel({ env, provider, model, messages, stream, providerCatalog, max_tokens, temperature }) {
   const requestedModel = String(model || "").trim();
   const requestedProvider = String(provider || "").trim();
   const providerMessages = filterEmptySystemMessages(messages);
@@ -602,7 +602,9 @@ async function callSelectedModel({ env, provider, model, messages, stream, provi
       env,
       config,
       messages: providerMessages,
-      stream
+      stream,
+      max_tokens,
+      temperature
     });
 
     return {
@@ -622,13 +624,17 @@ async function callSelectedModel({ env, provider, model, messages, stream, provi
         env,
         model: selectedModel.id,
         messages: providerMessages,
-        stream
+        stream,
+        max_tokens,
+        temperature
       })).response
       : await callWorkersAI({
         env,
         model: selectedModel.modelName || selectedModel.id,
         messages: providerMessages,
-        stream
+        stream,
+        max_tokens,
+        temperature
       });
 
     return {

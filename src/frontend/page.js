@@ -1183,6 +1183,13 @@ body.dark .toolErrorNotice{
   gap:10px;
 }
 
+.modelHealthActions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex:0 0 auto;
+}
+
 .modelHealthTitle{
   display:flex;
   flex-direction:column;
@@ -1198,6 +1205,10 @@ body.dark .toolErrorNotice{
   flex-direction:column;
   gap:6px;
   margin-top:8px;
+}
+
+.modelHealthList.collapsed{
+  display:none;
 }
 
 .modelHealthItem{
@@ -1650,7 +1661,10 @@ body.dark .toolErrorNotice{
               <strong>模型健康检查</strong>
               <span class="modelCategoryMeta">轻量请求当前已配置模型</span>
             </div>
-            <button id="modelHealthBtn" class="settingsBtn" type="button">检查</button>
+            <div class="modelHealthActions">
+              <button id="modelHealthBtn" class="settingsBtn" type="button">检查</button>
+              <button id="modelHealthToggleBtn" class="settingsBtn" type="button" hidden>收起</button>
+            </div>
           </div>
           <div id="modelHealthResults" class="modelHealthList"></div>
         </div>
@@ -3274,6 +3288,7 @@ const modelNameInput = document.getElementById("modelNameInput");
 const addProviderModelBtn = document.getElementById("addProviderModelBtn");
 const cancelModelEditBtn = document.getElementById("cancelModelEditBtn");
 const modelHealthBtn = document.getElementById("modelHealthBtn");
+const modelHealthToggleBtn = document.getElementById("modelHealthToggleBtn");
 const modelHealthResults = document.getElementById("modelHealthResults");
 const providersList = document.getElementById("providersList");
 const settingsSyncStatus = document.getElementById("settingsSyncStatus");
@@ -3285,6 +3300,8 @@ let settingsSnapshot = null;
 let editingProviderId = null;
 let editingModelRef = null;
 let editDialog = null;
+let modelHealthCache = [];
+let modelHealthCollapsed = false;
 
 const conversation = [
   {
@@ -5136,7 +5153,28 @@ function healthIcon(result){
   return status === "429" ? "⚠️" : "❌";
 }
 
+function updateModelHealthActions(){
+  const hasResults = Array.isArray(modelHealthCache) && modelHealthCache.length > 0;
+  modelHealthToggleBtn.hidden = !hasResults;
+  modelHealthToggleBtn.textContent = modelHealthCollapsed ? "展开" : "收起";
+  if(!modelHealthBtn.disabled){
+    modelHealthBtn.textContent = hasResults ? "重新检查" : "检查";
+  }
+  modelHealthResults.classList.toggle("collapsed", modelHealthCollapsed && hasResults);
+}
+
+function withModelHealthScrollPreserved(callback){
+  const settingsPanel = settingsModal.querySelector(".settingsPanel");
+  const scrollTop = settingsPanel?.scrollTop || 0;
+  const result = callback();
+  if(settingsPanel){
+    settingsPanel.scrollTop = scrollTop;
+  }
+  return result;
+}
+
 function renderModelHealthResults(results){
+  withModelHealthScrollPreserved(() => {
   modelHealthResults.innerHTML = "";
 
   if(!Array.isArray(results) || !results.length){
@@ -5144,6 +5182,7 @@ function renderModelHealthResults(results){
     empty.className = "modelHealthItem";
     empty.textContent = "暂无模型结果";
     modelHealthResults.appendChild(empty);
+    updateModelHealthActions();
     return;
   }
 
@@ -5163,12 +5202,35 @@ function renderModelHealthResults(results){
     item.appendChild(status);
     modelHealthResults.appendChild(item);
   });
+
+  updateModelHealthActions();
+  });
+}
+
+function toggleModelHealthResults(){
+  if(!modelHealthCache.length){
+    return;
+  }
+  withModelHealthScrollPreserved(() => {
+    modelHealthCollapsed = !modelHealthCollapsed;
+    if(!modelHealthCollapsed){
+      renderModelHealthResults(modelHealthCache);
+      return;
+    }
+    updateModelHealthActions();
+  });
 }
 
 async function runModelHealthCheck(){
+  const previousText = modelHealthBtn.textContent;
   modelHealthBtn.disabled = true;
+  modelHealthToggleBtn.disabled = true;
   modelHealthBtn.textContent = "检查中";
-  modelHealthResults.innerHTML = "<div class='modelHealthItem'>正在检查...</div>";
+  modelHealthCollapsed = false;
+  updateModelHealthActions();
+  withModelHealthScrollPreserved(() => {
+    modelHealthResults.innerHTML = "<div class='modelHealthItem'>正在检查...</div>";
+  });
 
   try{
     const res = await fetch("/api/model-health");
@@ -5176,16 +5238,23 @@ async function runModelHealthCheck(){
     if(!res.ok || !data.ok){
       throw new Error(data.error || "模型健康检查失败");
     }
-    renderModelHealthResults(data.results || []);
+    modelHealthCache = data.results || [];
+    renderModelHealthResults(modelHealthCache);
   }catch(err){
-    modelHealthResults.innerHTML = "";
-    const item = document.createElement("div");
-    item.className = "modelHealthItem";
-    item.textContent = err.message || "模型健康检查失败";
-    modelHealthResults.appendChild(item);
+    modelHealthCache = [];
+    withModelHealthScrollPreserved(() => {
+      modelHealthResults.innerHTML = "";
+      const item = document.createElement("div");
+      item.className = "modelHealthItem";
+      item.textContent = err.message || "模型健康检查失败";
+      modelHealthResults.appendChild(item);
+      updateModelHealthActions();
+    });
   }finally{
     modelHealthBtn.disabled = false;
-    modelHealthBtn.textContent = "检查";
+    modelHealthToggleBtn.disabled = false;
+    modelHealthBtn.textContent = modelHealthCache.length ? "重新检查" : previousText;
+    updateModelHealthActions();
   }
 }
 
@@ -5999,6 +6068,7 @@ cancelProviderEditBtn.addEventListener("click", clearProviderForm);
 addProviderModelBtn.addEventListener("click", addProviderModel);
 cancelModelEditBtn.addEventListener("click", clearModelForm);
 modelHealthBtn.addEventListener("click", runModelHealthCheck);
+modelHealthToggleBtn.addEventListener("click", toggleModelHealthResults);
 settingsModal.addEventListener("click", event => {
   if(event.target === settingsModal){
     event.stopPropagation();

@@ -26,6 +26,7 @@ const defaultSystemMessage = {
 const MAX_AUTO_URL_LENGTH = 2048;
 const MAX_AUTO_SEARCH_QUERY_LENGTH = 300;
 const MAX_TOOL_DEBUG_SUMMARY_LENGTH = 120;
+const MAX_IMAGE_ATTACHMENTS = 3;
 const MODEL_SETTINGS_KEY = "model_settings";
 const AUTO_SEARCH_PATTERN = /搜索|查一下|查询|联网查|最新|最近|今天|现在|当前|目前|官网|价格|新闻|发布|更新|\bsearch\b|\blook up\b|\blatest\b|\brecent\b|\btoday\b|\bcurrent\b|\bnow\b|\bnews\b|\bprice\b|\brelease\b|\bupdate\b|\bofficial\b/i;
 
@@ -204,6 +205,91 @@ function createModelSelectionError(message) {
 
 function isPlainObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function normalizeImageAttachment(attachment, index) {
+    if (!isPlainObject(attachment)) {
+      throw createModelSelectionError("Invalid image attachment at index " + index);
+    }
+
+    const type = String(attachment.type || "");
+    const mimeType = String(attachment.mimeType || "");
+    const dataUrl = String(attachment.dataUrl || "");
+    const match = dataUrl.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i);
+
+    if (type !== "image") {
+      throw createModelSelectionError("Invalid image attachment type at index " + index);
+    }
+
+    if (!mimeType.startsWith("image/")) {
+      throw createModelSelectionError("Invalid image attachment mimeType at index " + index);
+    }
+
+    if (!match || match[1].toLowerCase() !== mimeType.toLowerCase()) {
+      throw createModelSelectionError("Invalid image attachment dataUrl at index " + index);
+    }
+
+    try {
+      atob(match[2].replace(/\s/g, ""));
+    } catch (err) {
+      throw createModelSelectionError("Invalid image attachment base64 at index " + index);
+    }
+
+    return {
+      type: "image",
+      mimeType,
+      dataUrl
+    };
+}
+
+function normalizeImageAttachments(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.slice(0, MAX_IMAGE_ATTACHMENTS).map((attachment, index) => {
+    return normalizeImageAttachment(attachment, index);
+  });
+}
+
+function imageDataUrlToAttachment(dataUrl, index = 0) {
+  const value = String(dataUrl || "");
+  const match = value.match(/^data:(image\/[a-z0-9.+-]+);base64,/i);
+
+  if (!match) {
+    throw createModelSelectionError("Invalid image dataUrl");
+  }
+
+  return normalizeImageAttachment({
+    type: "image",
+    mimeType: match[1],
+    dataUrl: value
+  }, index);
+}
+
+function buildMultimodalUserContent(text, attachments) {
+  return [
+    {
+      type: "text",
+      text
+    },
+    ...attachments.map(attachment => ({
+      type: "image_url",
+      image_url: {
+        url: attachment.dataUrl
+      }
+    }))
+  ];
+}
+
+function countProviderImages(messages) {
+  return (messages || []).reduce((count, message) => {
+    if (!Array.isArray(message?.content)) {
+      return count;
+    }
+
+    return count + message.content.filter(part => part?.type === "image_url").length;
+  }, 0);
 }
 
 function providerLabelFromModel(model) {
@@ -465,7 +551,7 @@ function customConfigToProvider(config) {
       providerType: String(config.providerType || "openai-compatible"),
       apiBase: String(config.apiBase || config.baseUrl || ""),
       apiKeyEnv: String(config.apiKeyEnv || ""),
-      capabilities: { text: true, streaming: true },
+      capabilities: config.capabilities || { text: true, streaming: true },
       enabled: true
     }]
   };
@@ -552,7 +638,8 @@ function normalizeCustomModelConfig(config, { required = false } = {}) {
     modelName,
     capabilities: {
       text: true,
-      streaming: true
+      streaming: true,
+      ...(config.capabilities || {})
     },
     enabled: true
   };
@@ -1154,6 +1241,7 @@ function streamChatWithToolStatus({
   modelMessages,
   historyMessages,
   userContent,
+  attachments = [],
   requestedToolCall,
   ragSources,
   debugTools
@@ -1212,8 +1300,11 @@ function streamChatWithToolStatus({
         finalMessages.push(...historyMessages);
         finalMessages.push({
           role: "user",
-          content: userContent
+          content: attachments.length
+            ? buildMultimodalUserContent(userContent, attachments)
+            : userContent
         });
+        console.log("[phase10.3] provider image count", countProviderImages(finalMessages));
 
         let result;
 
@@ -1421,15 +1512,38 @@ export async function handleChat(request, env) {
     customModelConfig = null,
     fallbackCustomModelConfig = null,
     image,
+    attachments,
     file,
     fileIds = [],
     conversationId,
     toolCall,
     debugTools = false
   } = await request.json();
+  let imageAttachments = [];
+  let allImageAttachments = [];
+
+  try {
+    imageAttachments = normalizeImageAttachments(attachments);
+    allImageAttachments = [
+      ...(image ? [imageDataUrlToAttachment(image, 0)] : []),
+      ...imageAttachments
+    ].slice(0, MAX_IMAGE_ATTACHMENTS);
+  } catch (err) {
+    return new Response(JSON.stringify({
+      ok: false,
+      error: err.message || "Invalid attachments"
+    }), {
+      status: 400,
+      headers: {
+        ...corsHeaders(),
+        "Content-Type": "application/json; charset=utf-8"
+      }
+    });
+  }
+  console.log("[phase10.3] backend image count", allImageAttachments.length);
 
   const userContent = getUserMessage(messages) ||
-    (image ? "\u8bf7\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\u3002" : "\u8bf7\u7ee7\u7eed\u3002");
+    (allImageAttachments.length ? "\u8bf7\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\u3002" : "\u8bf7\u7ee7\u7eed\u3002");
   const providerCatalog = await buildModelProviderCatalog(
     env,
     Array.isArray(providers) ? providers : [],
@@ -1439,7 +1553,7 @@ export async function handleChat(request, env) {
 
   const conversation = await prepareConversation(env, conversationId, userContent);
 
-  if (image) {
+  if (image && imageAttachments.length === 0) {
     try {
       console.log("received image");
 
@@ -1606,6 +1720,7 @@ export async function handleChat(request, env) {
     modelMessages,
     historyMessages,
     userContent,
+    attachments: allImageAttachments,
     requestedToolCall,
     ragSources,
     debugTools: Boolean(debugTools)

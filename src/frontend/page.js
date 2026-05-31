@@ -138,6 +138,58 @@ export function htmlPage() {
     padding:0;
   }
 
+  #pastedImageNotice{
+    display:none;
+    color:var(--muted);
+    font-size:12px;
+    line-height:1.4;
+  }
+
+  #pastedImagePreviewList{
+    display:none;
+    gap:8px;
+    flex-wrap:wrap;
+    align-items:center;
+  }
+
+  .pastedImagePreview{
+    position:relative;
+    width:72px;
+    height:72px;
+    border-radius:12px;
+    overflow:hidden;
+    border:1px solid var(--border);
+    background:#f3f4f6;
+    flex:0 0 auto;
+  }
+
+  body.dark .pastedImagePreview{
+    background:#1f2937;
+  }
+
+  .pastedImagePreview img{
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    display:block;
+  }
+
+  .removePastedImageBtn{
+    position:absolute;
+    top:4px;
+    right:4px;
+    width:22px;
+    height:22px;
+    border:none;
+    border-radius:999px;
+    background:rgba(0,0,0,.72);
+    color:white;
+    cursor:pointer;
+    font-size:14px;
+    line-height:22px;
+    padding:0;
+  }
+
   #uploadStatus{
     display:none;
   }
@@ -1972,6 +2024,10 @@ body.dark .toolErrorNotice{
 
   <div id="contextStatus"></div>
 
+  <div id="pastedImageNotice"></div>
+
+  <div id="pastedImagePreviewList"></div>
+
   <div class="inputShell">
 
     <div class="inputActions">
@@ -2027,6 +2083,8 @@ body.dark .toolErrorNotice{
 </div>
 
 <script>
+window.__APP_PHASE__ = "phase10.3-image-paste";
+
 if (window.pdfjsLib) {
   pdfjsLib.GlobalWorkerOptions.workerSrc =
     "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
@@ -2090,8 +2148,12 @@ const imagePreviewBox = document.getElementById("imagePreviewBox");
 const imagePreview = document.getElementById("imagePreview");
 const removeImageBtn = document.getElementById("removeImageBtn");
 const uploadStatus = document.getElementById("uploadStatus");
+const pastedImageNotice = document.getElementById("pastedImageNotice");
+const pastedImagePreviewList = document.getElementById("pastedImagePreviewList");
 
 let selectedImage = null;
+let pastedImageAttachments = [];
+const MAX_PASTED_IMAGES = 3;
 
 const fileBtn = document.getElementById("fileBtn");
 const fileInput = document.getElementById("fileInput");
@@ -2845,6 +2907,140 @@ function clearSelectedImage(){
   imagePreviewBox.style.display = "none";
   uploadStatus.textContent = "";
   setContextStatus(getCurrentContextStatus());
+}
+
+function fileToDataUrl(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("read image failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function showPastedImageNotice(message){
+  pastedImageNotice.textContent = message || "";
+  pastedImageNotice.style.display = message ? "block" : "none";
+}
+
+function renderPastedImagePreviews(){
+  pastedImagePreviewList.innerHTML = "";
+  pastedImagePreviewList.style.display = pastedImageAttachments.length ? "flex" : "none";
+
+  pastedImageAttachments.forEach((attachment, index) => {
+    const item = document.createElement("div");
+    item.className = "pastedImagePreview";
+
+    const img = document.createElement("img");
+    img.src = attachment.dataUrl;
+    img.alt = "\u7c98\u8d34\u7684\u56fe\u7247 " + (index + 1);
+    item.appendChild(img);
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "removePastedImageBtn";
+    button.title = "\u79fb\u9664\u56fe\u7247";
+    button.textContent = "\u00d7";
+    button.addEventListener("click", () => {
+      pastedImageAttachments.splice(index, 1);
+      renderPastedImagePreviews();
+      if(pastedImageAttachments.length < MAX_PASTED_IMAGES){
+        showPastedImageNotice("");
+      }
+      setContextStatus(getCurrentContextStatus());
+      input.focus();
+    });
+    item.appendChild(button);
+
+    pastedImagePreviewList.appendChild(item);
+  });
+}
+
+function clearPastedImageAttachments(){
+  pastedImageAttachments = [];
+  renderPastedImagePreviews();
+  showPastedImageNotice("");
+}
+
+function getClipboardImageFiles(event){
+  const items = Array.from(event.clipboardData?.items || []);
+  const filesFromItems = items
+    .filter(item => item.kind === "file" && String(item.type || "").startsWith("image/"))
+    .map(item => item.getAsFile())
+    .filter(Boolean);
+  const filesFromClipboard = Array.from(event.clipboardData?.files || [])
+    .filter(file => String(file.type || "").startsWith("image/"));
+  return [...filesFromItems, ...filesFromClipboard]
+    .filter((file, index, files) => {
+      const key = [
+        file.name || "",
+        file.type || "",
+        file.size || 0,
+        file.lastModified || 0
+      ].join(":");
+      return files.findIndex(item => [
+        item.name || "",
+        item.type || "",
+        item.size || 0,
+        item.lastModified || 0
+      ].join(":") === key) === index;
+    });
+}
+
+async function handleImagePaste(event){
+  const imageFiles = getClipboardImageFiles(event);
+
+  if(!imageFiles.length){
+    return false;
+  }
+
+  event.preventDefault();
+
+  const currentImageCount = (selectedImage ? 1 : 0) + pastedImageAttachments.length;
+  const availableSlots = MAX_PASTED_IMAGES - currentImageCount;
+
+  if(availableSlots <= 0){
+    showPastedImageNotice("\u6700\u591a\u53ea\u80fd\u7c98\u8d34 3 \u5f20\u56fe\u7247\uff0c\u8bf7\u5148\u79fb\u9664\u4e00\u5f20\u540e\u518d\u8bd5\u3002");
+    return true;
+  }
+
+  const acceptedFiles = imageFiles.slice(0, availableSlots);
+  const ignoredCount = imageFiles.length - acceptedFiles.length;
+
+  try{
+    const attachments = await Promise.all(acceptedFiles.map(async file => ({
+      type:"image",
+      mimeType:file.type || "image/png",
+      dataUrl:await fileToDataUrl(file)
+    })));
+    const uniqueAttachments = attachments.filter((attachment, index, list) => {
+      return list.findIndex(item => item.dataUrl === attachment.dataUrl) === index;
+    });
+    const nextAttachments = uniqueAttachments.slice();
+
+    if(!selectedImage && nextAttachments.length){
+      const firstAttachment = nextAttachments.shift();
+      selectedImage = firstAttachment.dataUrl;
+      imageInput.value = "";
+      imagePreview.src = selectedImage;
+      imagePreviewBox.style.display = "block";
+    }
+
+    pastedImageAttachments = pastedImageAttachments
+      .concat(nextAttachments)
+      .filter(attachment => attachment.dataUrl !== selectedImage)
+      .filter((attachment, index, list) => list.findIndex(item => item.dataUrl === attachment.dataUrl) === index);
+    renderPastedImagePreviews();
+    setContextStatus("\u5df2\u7c98\u8d34 " + ((selectedImage ? 1 : 0) + pastedImageAttachments.length) + " \u5f20\u56fe\u7247\uff0c\u51c6\u5907\u53d1\u9001");
+    showPastedImageNotice(ignoredCount > 0
+      ? "\u6700\u591a\u53ea\u80fd\u7c98\u8d34 3 \u5f20\u56fe\u7247\uff0c\u5df2\u5ffd\u7565\u591a\u4f59\u56fe\u7247\u3002"
+      : "");
+  }catch(err){
+    console.log("paste image failed", err);
+    showPastedImageNotice("\u56fe\u7247\u7c98\u8d34\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5\u3002");
+  }
+
+  return true;
 }
 imageBtn.addEventListener("click", () => {
   closeInputMenus();
@@ -6045,6 +6241,7 @@ function resetTransientContext(){
   selectedFileId = null;
   renderFilesLibrary();
   clearSelectedImage();
+  clearPastedImageAttachments();
   clearWebContext();
   setContextStatus("");
 }
@@ -6206,6 +6403,7 @@ input.addEventListener("keydown", e => {
 
 });
 input.addEventListener("input", autoResizeInput);
+input.addEventListener("paste", handleImagePaste);
 
 sendBtn.addEventListener("click", sendMessage);
 newChatBtn.addEventListener("click", createNewConversation);
@@ -6276,6 +6474,15 @@ document.addEventListener("click", () => {
 document.addEventListener("keydown", event => {
   if(event.key === "Escape"){
     closeInputMenus();
+  }
+});
+document.addEventListener("paste", event => {
+  if(event.target === input){
+    return;
+  }
+
+  if(document.activeElement === input || event.target?.closest?.(".inputBar")){
+    handleImagePaste(event);
   }
 });
 loginForm.addEventListener("submit", login);
@@ -6357,11 +6564,12 @@ async function handleCopyClick(event){
   }
 }
 
-function addUserMessage(text, imageDataUrl, fileInfo){
+function addUserMessage(text, imageDataUrl, fileInfo, attachments){
 
   const div = document.createElement("div");
+  const imageAttachments = Array.isArray(attachments) ? attachments : [];
 
-  div.className = imageDataUrl && !text && !fileInfo
+  div.className = (imageDataUrl || imageAttachments.length) && !text && !fileInfo
     ? "msg user userImageOnly"
     : "msg user";
 
@@ -6378,6 +6586,17 @@ function addUserMessage(text, imageDataUrl, fileInfo){
     img.alt = "上传的图片";
     div.appendChild(img);
   }
+
+  imageAttachments.forEach((attachment, index) => {
+    if(!attachment?.dataUrl){
+      return;
+    }
+    const img = document.createElement("img");
+    img.className = "userImage";
+    img.src = attachment.dataUrl;
+    img.alt = "\u7c98\u8d34\u7684\u56fe\u7247 " + (index + 1);
+    div.appendChild(img);
+  });
 
   if(fileInfo){
     const fileDiv = document.createElement("div");
@@ -7035,6 +7254,9 @@ async function sendMessage(){
 
   const message = input.value.trim();
   const imageToSend = selectedImage;
+  const attachmentsToSend = pastedImageAttachments.slice();
+  const legacyImageToSend = imageToSend || attachmentsToSend[0]?.dataUrl || null;
+  const extraAttachmentsToSend = imageToSend ? attachmentsToSend : attachmentsToSend.slice(1);
 
   const fileToSend = selectedFile;
   const fileTextToSend = selectedFileText;
@@ -7087,6 +7309,7 @@ async function sendMessage(){
   if(
     !message &&
     !imageToSend &&
+    attachmentsToSend.length === 0 &&
     !fileTextToSend &&
     selectedFileIds.length === 0 &&
     !webTextForAI &&
@@ -7099,10 +7322,10 @@ async function sendMessage(){
     message ||
     (fileToSend ? "\u8bf7\u603b\u7ed3\u8fd9\u4e2a\u6587\u4ef6\u3002" :
     (selectedFileIds.length ? "\u8bf7\u57fa\u4e8e\u5df2\u9009\u62e9\u7684\u6587\u4ef6\u56de\u7b54\u3002" :
-    (webPageToSend ? "\u8bf7\u603b\u7ed3\u8fd9\u4e2a\u7f51\u9875\u3002" : "\u8bf7\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\u3002")));
+    (webPageToSend ? "\u8bf7\u603b\u7ed3\u8fd9\u4e2a\u7f51\u9875\u3002" : (extraAttachmentsToSend.length ? "\u8bf7\u63cf\u8ff0\u8fd9\u4e9b\u56fe\u7247\u3002" : "\u8bf7\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\u3002"))));
 
-  const displayMessage = message || (imageToSend ? "" : userMessageForRequest);
-  addUserMessage(displayMessage, imageToSend, fileInfoForUI);
+  const displayMessage = message || ((imageToSend || attachmentsToSend.length) ? "" : userMessageForRequest);
+  addUserMessage(displayMessage, imageToSend, fileInfoForUI, extraAttachmentsToSend);
 
   conversation.push({
     role:"user",
@@ -7125,7 +7348,7 @@ async function sendMessage(){
   aiDiv.innerHTML =
     "<span class='loading'>思考中...</span>";
 
-  if(imageToSend){
+  if(imageToSend || attachmentsToSend.length){
     setContextStatus("\u56fe\u7247\u4e0a\u4f20\u4e2d...");
   }
 
@@ -7138,6 +7361,7 @@ async function sendMessage(){
     const fallbackModel = modelSettingsState?.fallbackModels?.[0] || "";
     const selectedModelConfig = getModelConfigForRequest(modelSelect.value);
     const fallbackModelConfig = getModelConfigForRequest(fallbackModel);
+    console.log("[phase10.3] frontend image count", (legacyImageToSend ? 1 : 0) + extraAttachmentsToSend.length);
 
     const res = await fetch("/", {
 
@@ -7164,7 +7388,8 @@ async function sendMessage(){
         fallbackCustomModelConfig:fallbackModelConfig,
         toolCall:toolCallForRequest,
         debugTools:localStorage.getItem("wa_tool_debug") === "1",
-        image:imageToSend,
+        image:legacyImageToSend,
+        attachments:extraAttachmentsToSend.length ? extraAttachmentsToSend : undefined,
         fileIds:selectedFileIds,
         file:fileToSend ? {
           name:fileToSend.name,
@@ -7218,6 +7443,10 @@ async function sendMessage(){
       clearSelectedImage();
     }
 
+    if(attachmentsToSend.length){
+      clearPastedImageAttachments();
+    }
+
     const currentContextStatus = getCurrentContextStatus();
 
     if(currentContextStatus){
@@ -7232,6 +7461,10 @@ async function sendMessage(){
       "请求失败：" + err.message;
 
     if(imageToSend){
+      setContextStatus("\u56fe\u7247\u53d1\u9001\u5931\u8d25\uff0c\u53ef\u91cd\u8bd5");
+    }
+
+    if(attachmentsToSend.length){
       setContextStatus("\u56fe\u7247\u53d1\u9001\u5931\u8d25\uff0c\u53ef\u91cd\u8bd5");
     }
 

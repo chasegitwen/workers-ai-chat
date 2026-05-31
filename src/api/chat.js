@@ -27,6 +27,7 @@ const MAX_AUTO_URL_LENGTH = 2048;
 const MAX_AUTO_SEARCH_QUERY_LENGTH = 300;
 const MAX_TOOL_DEBUG_SUMMARY_LENGTH = 120;
 const MAX_IMAGE_ATTACHMENTS = 3;
+const BROWSER_TOOL_TIMEOUT_MS = 25000;
 const MODEL_SETTINGS_KEY = "model_settings";
 const AUTO_SEARCH_PATTERN = /搜索|查一下|查询|联网查|最新|最近|今天|现在|当前|目前|官网|价格|新闻|发布|更新|\bsearch\b|\blook up\b|\blatest\b|\brecent\b|\btoday\b|\bcurrent\b|\bnow\b|\bnews\b|\bprice\b|\brelease\b|\bupdate\b|\bofficial\b/i;
 
@@ -78,6 +79,185 @@ function isBlockedHostname(hostname) {
     host === "[::1]" ||
     isPrivateIPv4(host)
   );
+}
+
+function isPrivateBrowserIPv4(hostname) {
+  const parts = String(hostname || "").split(".");
+
+  if (parts.length !== 4 || !parts.every(part => /^\d+$/.test(part))) {
+    return false;
+  }
+
+  const numbers = parts.map(part => Number(part));
+
+  if (numbers.some(value => value < 0 || value > 255)) {
+    return true;
+  }
+
+  const [a, b] = numbers;
+
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168)
+  );
+}
+
+function validateBrowserUrl(value) {
+  const raw = String(value || "").trim();
+
+  if (!raw) {
+    return {
+      ok: false,
+      error: "URL is required"
+    };
+  }
+
+  let parsed;
+
+  try {
+    parsed = new URL(raw);
+  } catch (err) {
+    return {
+      ok: false,
+      error: "Invalid URL"
+    };
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return {
+      ok: false,
+      error: "Only http and https URLs are allowed"
+    };
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  const bareHostname = hostname.replace(/^\[|\]$/g, "");
+
+  if (
+    !bareHostname ||
+    bareHostname === "localhost" ||
+    bareHostname.endsWith(".localhost") ||
+    bareHostname === "::1" ||
+    bareHostname === "0.0.0.0" ||
+    isPrivateBrowserIPv4(bareHostname)
+  ) {
+    return {
+      ok: false,
+      error: "Private or local URLs are not allowed"
+    };
+  }
+
+  return {
+    ok: true,
+    url: parsed.href
+  };
+}
+
+function browserJsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      ...corsHeaders(),
+      "Content-Type": "application/json; charset=utf-8"
+    }
+  });
+}
+
+async function callBrowserTool(env, payload) {
+  const endpoint = String(env.BROWSER_TOOL_ENDPOINT || "").trim();
+
+  if (!endpoint) {
+    return {
+      ok: false,
+      error: "BROWSER_TOOL_ENDPOINT is not configured"
+    };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), BROWSER_TOOL_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    const text = await response.text();
+    let data = {};
+
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch (err) {
+      data = {
+        text
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: data.error || "Browser tool upstream request failed",
+        details: data.details || text || ("HTTP " + response.status)
+      };
+    }
+
+    return {
+      ok: true,
+      url: data.url || payload.url,
+      title: data.title || "",
+      text: data.text || data.extractedText || "",
+      screenshot: data.screenshot || data.screenshotBase64 || data.screenshotUrl || "",
+      metadata: data.metadata || {}
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err.name === "AbortError" ? "Browser tool request timed out" : "Browser tool request failed",
+      details: err.message || String(err)
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function handleBrowserRequest(request, env) {
+  let body = {};
+
+  try {
+    body = await request.json();
+  } catch (err) {
+    return browserJsonResponse({
+      ok: false,
+      error: "Invalid JSON request body"
+    }, 400);
+  }
+
+  const validation = validateBrowserUrl(body.url);
+
+  if (!validation.ok) {
+    return browserJsonResponse({
+      ok: false,
+      error: validation.error
+    }, 400);
+  }
+
+  const mode = ["extract", "screenshot", "full"].includes(body.mode)
+    ? body.mode
+    : "full";
+  const result = await callBrowserTool(env, {
+    url: validation.url,
+    mode
+  });
+
+  return browserJsonResponse(result, result.ok ? 200 : 502);
 }
 
 function getAutoFetchToolCall(userContent) {
@@ -1502,6 +1682,10 @@ async function prepareConversation(env, conversationId, userContent) {
 }
 
 export async function handleChat(request, env) {
+  if (new URL(request.url).pathname === "/api/browser") {
+    return handleBrowserRequest(request, env);
+  }
+
   const {
     messages = [],
     model,

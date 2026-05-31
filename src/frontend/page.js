@@ -1238,6 +1238,42 @@ body.dark .toolErrorNotice{
   cursor:not-allowed;
 }
 
+.browserToolInput{
+  width:min(240px,32vw);
+  min-width:150px;
+  height:38px;
+  border:1px solid var(--border);
+  border-radius:999px;
+  padding:0 12px;
+  background:transparent;
+  color:var(--text);
+  font:inherit;
+  font-size:13px;
+  outline:none;
+}
+
+.browserToolInput:focus{
+  border-color:var(--primary);
+}
+
+.browserToolBtn{
+  min-height:38px;
+  border:none;
+  color:white;
+  padding:0 12px;
+  border-radius:999px;
+  font-size:14px;
+  cursor:pointer;
+  white-space:nowrap;
+  flex:0 0 auto;
+  background:#0f766e;
+}
+
+.browserToolBtn:disabled{
+  opacity:.6;
+  cursor:not-allowed;
+}
+
 .inputMenu button:disabled{
   opacity:.55;
   cursor:not-allowed;
@@ -2047,6 +2083,9 @@ body.dark .toolErrorNotice{
     ></textarea>
 
     <div class="inputPrimaryActions">
+      <input id="browserToolUrlInput" class="browserToolInput" type="url" placeholder="https://example.com" />
+      <button id="browserToolBtn" class="browserToolBtn" type="button">Browser</button>
+
       <div class="inputMenuWrap toolMenuWrap">
         <button id="toolMenuBtn" class="toolBtn" type="button" aria-haspopup="menu" aria-expanded="false" title="&#x8054;&#x7F51;&#x002F;&#x5DE5;&#x5177;">&#x8054;&#x7F51;</button>
         <div id="toolMenu" class="inputMenu toolMenu" role="menu">
@@ -2134,6 +2173,8 @@ const WELCOME_HIDDEN_KEY = "welcome_hidden";
 syncWelcomeVisibility();
 
 const fetchUrlBtn = document.getElementById("fetchUrlBtn");
+const browserToolUrlInput = document.getElementById("browserToolUrlInput");
+const browserToolBtn = document.getElementById("browserToolBtn");
 
 let selectedWebPage = null;
 let selectedWebPageChunks = [];
@@ -3231,11 +3272,122 @@ function renderSearchResults(results, meta){
   scrollBottom();
 }
 
+function normalizeBrowserScreenshot(data){
+  const value = String(data?.screenshot || data?.screenshotBase64 || data?.screenshotUrl || "");
+
+  if(!value){
+    return "";
+  }
+
+  if(value.startsWith("data:image/") || /^https?:\/\//i.test(value)){
+    return value;
+  }
+
+  return "data:image/png;base64," + value;
+}
+
+function renderBrowserToolResult(data, requestedUrl){
+  const box = document.createElement("div");
+  box.className = "msg ai";
+  box.style.maxWidth = "92%";
+
+  const title = document.createElement("div");
+  title.style.fontWeight = "700";
+  title.textContent = data?.ok ? "Browser Tool" : "Browser Tool Error";
+  box.appendChild(title);
+
+  const meta = document.createElement("div");
+  meta.style.fontSize = "12px";
+  meta.style.color = "var(--muted)";
+  meta.style.marginTop = "6px";
+  meta.textContent = data?.ok
+    ? [(data.title || "Untitled"), (data.url || requestedUrl)].filter(Boolean).join(" - ")
+    : (data?.error || "Browser request failed");
+  box.appendChild(meta);
+
+  const text = String(data?.text || data?.extractedText || data?.details || "").trim();
+  if(text){
+    const preview = document.createElement("div");
+    preview.className = "sourceCitationPreview active";
+    preview.style.marginTop = "10px";
+    preview.textContent = text.slice(0, 2500);
+    box.appendChild(preview);
+  }
+
+  const screenshot = normalizeBrowserScreenshot(data);
+  if(screenshot){
+    const img = document.createElement("img");
+    img.className = "userImage";
+    img.src = screenshot;
+    img.alt = "Browser screenshot";
+    img.style.marginTop = "10px";
+    box.appendChild(img);
+  }
+
+  chat.appendChild(box);
+  scrollBottom();
+}
+
+async function runBrowserTool(){
+  const url = browserToolUrlInput.value.trim() || input.value.trim();
+
+  if(!url){
+    alert("Please enter a URL for Browser.");
+    return;
+  }
+
+  browserToolBtn.disabled = true;
+  browserToolBtn.textContent = "Browsing...";
+  setContextStatus("Browser tool is running...");
+
+  try{
+    const res = await fetch("/api/browser", {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify({
+        url,
+        mode:"full"
+      })
+    });
+    const data = await res.json();
+    renderBrowserToolResult(data, url);
+
+    if(!res.ok || !data.ok){
+      setContextStatus("Browser tool failed");
+      return;
+    }
+
+    setContextStatus("Browser tool finished: " + (data.title || data.url || url));
+  }catch(err){
+    renderBrowserToolResult({
+      ok:false,
+      error:"Browser tool request failed",
+      details:err.message
+    }, url);
+    setContextStatus("Browser tool failed");
+  }finally{
+    browserToolBtn.disabled = false;
+    browserToolBtn.textContent = "Browser";
+  }
+}
+
 clearFileBtn.addEventListener("click", clearSelectedFile);
 
 searchBtn.addEventListener("click", () => {
   closeInputMenus();
   searchWeb();
+});
+browserToolBtn.addEventListener("click", () => {
+  closeInputMenus();
+  runBrowserTool();
+});
+browserToolUrlInput.addEventListener("keydown", event => {
+  if(event.key === "Enter"){
+    event.preventDefault();
+    runBrowserTool();
+  }
 });
 webAnswerBtn.addEventListener("click", () => {
   closeInputMenus();

@@ -178,15 +178,22 @@ async function callBrowserTool(env, payload) {
     };
   }
 
+  const token = String(env.BROWSER_TOOL_TOKEN || "").trim();
+  const headers = {
+    "Content-Type": "application/json"
+  };
+
+  if (token) {
+    headers["X-Browser-Token"] = token;
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), BROWSER_TOOL_TIMEOUT_MS);
 
   try {
     const response = await fetch(endpoint, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
+      headers,
       body: JSON.stringify(payload),
       signal: controller.signal
     });

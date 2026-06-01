@@ -27,7 +27,7 @@ const MAX_AUTO_URL_LENGTH = 2048;
 const MAX_AUTO_SEARCH_QUERY_LENGTH = 300;
 const MAX_TOOL_DEBUG_SUMMARY_LENGTH = 120;
 const MAX_IMAGE_ATTACHMENTS = 3;
-const BROWSER_TOOL_TIMEOUT_MS = 25000;
+const BROWSER_TOOL_TIMEOUT_MS = 60000;
 const MODEL_SETTINGS_KEY = "model_settings";
 const AUTO_SEARCH_PATTERN = /搜索|查一下|查询|联网查|最新|最近|今天|现在|当前|目前|官网|价格|新闻|发布|更新|\bsearch\b|\blook up\b|\blatest\b|\brecent\b|\btoday\b|\bcurrent\b|\bnow\b|\bnews\b|\bprice\b|\brelease\b|\bupdate\b|\bofficial\b/i;
 
@@ -170,11 +170,18 @@ function browserJsonResponse(body, status = 200) {
 
 async function callBrowserTool(env, payload) {
   const endpoint = String(env.BROWSER_TOOL_ENDPOINT || "").trim();
+  const authMode = String(env.BROWSER_TOOL_AUTH_MODE || "").trim().toLowerCase();
+  const debug = {
+    timeoutMs: BROWSER_TOOL_TIMEOUT_MS,
+    endpointConfigured: Boolean(endpoint),
+    authMode: authMode || "none"
+  };
 
   if (!endpoint) {
     return {
       ok: false,
-      error: "BROWSER_TOOL_ENDPOINT is not configured"
+      error: "BROWSER_TOOL_ENDPOINT is not configured",
+      debug
     };
   }
 
@@ -183,8 +190,10 @@ async function callBrowserTool(env, payload) {
     "Content-Type": "application/json"
   };
 
-  if (token) {
+  if (token && authMode === "x-browser-token") {
     headers["X-Browser-Token"] = token;
+  } else if (token && authMode === "bearer") {
+    headers.Authorization = "Bearer " + token;
   }
 
   const controller = new AbortController();
@@ -212,7 +221,8 @@ async function callBrowserTool(env, payload) {
       return {
         ok: false,
         error: data.error || "Browser tool upstream request failed",
-        details: data.details || text || ("HTTP " + response.status)
+        details: data.details || text || ("HTTP " + response.status),
+        debug
       };
     }
 
@@ -227,6 +237,104 @@ async function callBrowserTool(env, payload) {
   } catch (err) {
     return {
       ok: false,
+      error: err.name === "AbortError" ? "Browser tool request timed out" : "Browser tool request failed",
+      details: err.message || String(err),
+      debug
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function inspectBrowserToolEndpoint(env) {
+  const endpoint = String(env.BROWSER_TOOL_ENDPOINT || "").trim();
+
+  if (!endpoint) {
+    return {
+      ok: false,
+      error: "BROWSER_TOOL_ENDPOINT is not configured"
+    };
+  }
+
+  let parsed;
+
+  try {
+    parsed = new URL(endpoint);
+  } catch (err) {
+    return {
+      ok: false,
+      error: "BROWSER_TOOL_ENDPOINT is not a valid URL"
+    };
+  }
+
+  const endpointText = (parsed.hostname + " " + parsed.pathname).toLowerCase();
+  const token = String(env.BROWSER_TOOL_TOKEN || "").trim();
+  const authMode = String(env.BROWSER_TOOL_AUTH_MODE || "").trim().toLowerCase();
+  const headers = {
+    "Content-Type": "application/json"
+  };
+
+  if (token && authMode === "x-browser-token") {
+    headers["X-Browser-Token"] = token;
+  } else if (token && authMode === "bearer") {
+    headers.Authorization = "Bearer " + token;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), BROWSER_TOOL_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        url: "https://example.com",
+        mode: "extract"
+      }),
+      signal: controller.signal
+    });
+    const bodyText = await response.text();
+    const responseHeaders = {};
+
+    response.headers.forEach((value, key) => {
+      responseHeaders[key] = value;
+    });
+
+    return {
+      ok: true,
+      endpoint: {
+        hostname: parsed.hostname,
+        pathname: parsed.pathname,
+        contains: {
+          novnc: endpointText.includes("novnc"),
+          vnc: endpointText.includes("vnc"),
+          websockify: endpointText.includes("websockify"),
+          playwright: endpointText.includes("playwright"),
+          browser: endpointText.includes("browser"),
+          openclaw: endpointText.includes("openclaw")
+        }
+      },
+      upstream: {
+        status: response.status,
+        headers: responseHeaders,
+        bodyPrefix: bodyText.slice(0, 200)
+      }
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      endpoint: {
+        hostname: parsed.hostname,
+        pathname: parsed.pathname,
+        contains: {
+          novnc: endpointText.includes("novnc"),
+          vnc: endpointText.includes("vnc"),
+          websockify: endpointText.includes("websockify"),
+          playwright: endpointText.includes("playwright"),
+          browser: endpointText.includes("browser"),
+          openclaw: endpointText.includes("openclaw")
+        }
+      },
       error: err.name === "AbortError" ? "Browser tool request timed out" : "Browser tool request failed",
       details: err.message || String(err)
     };
@@ -1689,6 +1797,10 @@ async function prepareConversation(env, conversationId, userContent) {
 }
 
 export async function handleChat(request, env) {
+  if (new URL(request.url).pathname === "/api/browser/inspect") {
+    return browserJsonResponse(await inspectBrowserToolEndpoint(env));
+  }
+
   if (new URL(request.url).pathname === "/api/browser") {
     return handleBrowserRequest(request, env);
   }

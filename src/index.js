@@ -99,6 +99,10 @@ export default {
       return handleModelHealth(request, env);
     }
 
+    if (url.pathname === "/api/browser/inspect") {
+      return handleChat(request, env);
+    }
+
     if (request.method === "GET") {
       if (url.pathname === "/debug-path") {
         return jsonResponse({

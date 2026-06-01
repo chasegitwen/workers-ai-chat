@@ -1239,8 +1239,8 @@ body.dark .toolErrorNotice{
 }
 
 .browserToolInput{
-  width:min(240px,32vw);
-  min-width:150px;
+  flex:1 1 260px;
+  min-width:0;
   height:38px;
   border:1px solid var(--border);
   border-radius:999px;
@@ -1256,6 +1256,20 @@ body.dark .toolErrorNotice{
   border-color:var(--primary);
 }
 
+.browserToolPanel{
+  display:none;
+  width:100%;
+  flex:1 0 100%;
+  align-items:center;
+  gap:8px;
+  padding:2px 0 0 44px;
+}
+
+.browserToolPanel.open{
+  display:flex;
+}
+
+.browserToolToggleBtn,
 .browserToolBtn{
   min-height:38px;
   border:none;
@@ -1269,9 +1283,72 @@ body.dark .toolErrorNotice{
   background:#0f766e;
 }
 
+.browserToolToggleBtn{
+  background:#334155;
+}
+
 .browserToolBtn:disabled{
   opacity:.6;
   cursor:not-allowed;
+}
+
+.browserToolStats{
+  margin-top:8px;
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.4;
+}
+
+.browserScreenshotThumb{
+  width:min(320px,100%);
+  height:auto;
+  max-height:260px;
+  border:1px solid var(--border);
+  border-radius:14px;
+  box-shadow:0 8px 22px rgba(15,23,42,.16);
+  display:block;
+  object-fit:contain;
+  margin-top:10px;
+  cursor:zoom-in;
+  background:var(--panel);
+}
+
+.browserLightbox{
+  position:fixed;
+  inset:0;
+  z-index:80;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  padding:24px;
+  background:rgba(15,23,42,.78);
+}
+
+.browserLightbox.open{
+  display:flex;
+}
+
+.browserLightboxImage{
+  max-width:min(96vw,1180px);
+  max-height:90vh;
+  border-radius:14px;
+  box-shadow:0 18px 48px rgba(0,0,0,.35);
+  background:white;
+}
+
+.browserLightboxClose{
+  position:absolute;
+  top:18px;
+  right:18px;
+  width:38px;
+  height:38px;
+  border:none;
+  border-radius:999px;
+  background:rgba(255,255,255,.92);
+  color:#111827;
+  font-size:24px;
+  line-height:38px;
+  cursor:pointer;
 }
 
 .inputMenu button:disabled{
@@ -1810,6 +1887,10 @@ body.dark .toolErrorNotice{
     flex-wrap:wrap;
   }
 
+  .browserToolPanel{
+    padding-left:0;
+  }
+
   #input{
     order:-1;
     flex-basis:100%;
@@ -2082,9 +2163,13 @@ body.dark .toolErrorNotice{
       rows="1"
     ></textarea>
 
-    <div class="inputPrimaryActions">
+    <div id="browserToolPanel" class="browserToolPanel" aria-hidden="true">
       <input id="browserToolUrlInput" class="browserToolInput" type="url" placeholder="https://example.com" />
-      <button id="browserToolBtn" class="browserToolBtn" type="button">Browser</button>
+      <button id="browserToolBtn" class="browserToolBtn" type="button">Run</button>
+    </div>
+
+    <div class="inputPrimaryActions">
+      <button id="browserToolToggleBtn" class="browserToolToggleBtn" type="button" aria-expanded="false">Browser</button>
 
       <div class="inputMenuWrap toolMenuWrap">
         <button id="toolMenuBtn" class="toolBtn" type="button" aria-haspopup="menu" aria-expanded="false" title="&#x8054;&#x7F51;&#x002F;&#x5DE5;&#x5177;">&#x8054;&#x7F51;</button>
@@ -2173,6 +2258,8 @@ const WELCOME_HIDDEN_KEY = "welcome_hidden";
 syncWelcomeVisibility();
 
 const fetchUrlBtn = document.getElementById("fetchUrlBtn");
+const browserToolPanel = document.getElementById("browserToolPanel");
+const browserToolToggleBtn = document.getElementById("browserToolToggleBtn");
 const browserToolUrlInput = document.getElementById("browserToolUrlInput");
 const browserToolBtn = document.getElementById("browserToolBtn");
 
@@ -3279,14 +3366,90 @@ function normalizeBrowserScreenshot(data){
     return "";
   }
 
-  if(value.startsWith("data:image/") || /^https?:\/\//i.test(value)){
+  const lowerValue = value.toLowerCase();
+
+  if(value.startsWith("data:image/") || lowerValue.startsWith("http://") || lowerValue.startsWith("https://")){
     return value;
   }
 
   return "data:image/png;base64," + value;
 }
 
-function renderBrowserToolResult(data, requestedUrl){
+function getBrowserUrlLabel(value){
+  try{
+    return new URL(value).hostname;
+  }catch(err){
+    return "URL";
+  }
+}
+
+function getBrowserDurationMs(data, fallbackMs){
+  const candidates = [
+    data?.durationMs,
+    data?.elapsedMs,
+    data?.timing,
+    data?.metadata?.durationMs,
+    data?.metadata?.elapsedMs,
+    data?.metadata?.timing
+  ];
+
+  for(const candidate of candidates){
+    if(typeof candidate === "number" && Number.isFinite(candidate)){
+      return Math.round(candidate);
+    }
+
+    if(candidate && typeof candidate === "object"){
+      const nested = candidate.durationMs ?? candidate.elapsedMs ?? candidate.totalMs;
+      if(typeof nested === "number" && Number.isFinite(nested)){
+        return Math.round(nested);
+      }
+    }
+  }
+
+  return Math.round(fallbackMs || 0);
+}
+
+function openBrowserLightbox(src, alt){
+  const lightbox = document.createElement("div");
+  lightbox.className = "browserLightbox open";
+
+  const img = document.createElement("img");
+  img.className = "browserLightboxImage";
+  img.src = src;
+  img.alt = alt || "Browser screenshot";
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "browserLightboxClose";
+  closeBtn.setAttribute("aria-label", "Close image preview");
+  closeBtn.textContent = "\u00d7";
+
+  function close(){
+    document.removeEventListener("keydown", onKeydown);
+    lightbox.remove();
+  }
+
+  function onKeydown(event){
+    if(event.key === "Escape"){
+      close();
+    }
+  }
+
+  lightbox.addEventListener("click", event => {
+    if(event.target === lightbox){
+      close();
+    }
+  });
+  closeBtn.addEventListener("click", close);
+  document.addEventListener("keydown", onKeydown);
+
+  lightbox.appendChild(img);
+  lightbox.appendChild(closeBtn);
+  document.body.appendChild(lightbox);
+  closeBtn.focus();
+}
+
+function renderBrowserToolResult(data, requestedUrl, elapsedMs){
   const box = document.createElement("div");
   box.className = "msg ai";
   box.style.maxWidth = "92%";
@@ -3301,11 +3464,22 @@ function renderBrowserToolResult(data, requestedUrl){
   meta.style.color = "var(--muted)";
   meta.style.marginTop = "6px";
   meta.textContent = data?.ok
-    ? [(data.title || "Untitled"), (data.url || requestedUrl)].filter(Boolean).join(" - ")
+    ? [(data.title || "Untitled"), getBrowserUrlLabel(data.url || requestedUrl)].filter(Boolean).join(" - ")
     : (data?.error || "Browser request failed");
   box.appendChild(meta);
 
   const text = String(data?.text || data?.extractedText || data?.details || "").trim();
+  const screenshot = normalizeBrowserScreenshot(data);
+  const stats = document.createElement("div");
+  stats.className = "browserToolStats";
+  stats.textContent = [
+    getBrowserUrlLabel(data?.url || requestedUrl),
+    "\u6587\u5b57\u957f\u5ea6 " + text.length,
+    "\u622a\u56fe " + (screenshot ? "\u2713" : "\u2014"),
+    "\u8017\u65f6 " + getBrowserDurationMs(data, elapsedMs) + " ms"
+  ].join(" \u00b7 ");
+  box.appendChild(stats);
+
   if(text){
     const preview = document.createElement("div");
     preview.className = "sourceCitationPreview active";
@@ -3314,13 +3488,20 @@ function renderBrowserToolResult(data, requestedUrl){
     box.appendChild(preview);
   }
 
-  const screenshot = normalizeBrowserScreenshot(data);
   if(screenshot){
     const img = document.createElement("img");
-    img.className = "userImage";
+    img.className = "browserScreenshotThumb";
     img.src = screenshot;
     img.alt = "Browser screenshot";
-    img.style.marginTop = "10px";
+    img.tabIndex = 0;
+    img.setAttribute("role", "button");
+    img.addEventListener("click", () => openBrowserLightbox(screenshot, img.alt));
+    img.addEventListener("keydown", event => {
+      if(event.key === "Enter" || event.key === " "){
+        event.preventDefault();
+        openBrowserLightbox(screenshot, img.alt);
+      }
+    });
     box.appendChild(img);
   }
 
@@ -3328,17 +3509,29 @@ function renderBrowserToolResult(data, requestedUrl){
   scrollBottom();
 }
 
+function setBrowserToolPanelOpen(open){
+  browserToolPanel.classList.toggle("open", open);
+  browserToolPanel.setAttribute("aria-hidden", open ? "false" : "true");
+  browserToolToggleBtn.setAttribute("aria-expanded", open ? "true" : "false");
+
+  if(open){
+    browserToolUrlInput.focus();
+  }
+}
+
 async function runBrowserTool(){
   const url = browserToolUrlInput.value.trim() || input.value.trim();
 
   if(!url){
-    alert("Please enter a URL for Browser.");
+    setBrowserToolPanelOpen(true);
+    browserToolUrlInput.focus();
     return;
   }
 
   browserToolBtn.disabled = true;
-  browserToolBtn.textContent = "Browsing...";
+  browserToolBtn.textContent = "Running...";
   setContextStatus("Browser tool is running...");
+  const startedAt = performance.now();
 
   try{
     const res = await fetch("/api/browser", {
@@ -3352,7 +3545,8 @@ async function runBrowserTool(){
       })
     });
     const data = await res.json();
-    renderBrowserToolResult(data, url);
+    const elapsedMs = performance.now() - startedAt;
+    renderBrowserToolResult(data, url, elapsedMs);
 
     if(!res.ok || !data.ok){
       setContextStatus("Browser tool failed");
@@ -3365,11 +3559,11 @@ async function runBrowserTool(){
       ok:false,
       error:"Browser tool request failed",
       details:err.message
-    }, url);
+    }, url, performance.now() - startedAt);
     setContextStatus("Browser tool failed");
   }finally{
     browserToolBtn.disabled = false;
-    browserToolBtn.textContent = "Browser";
+    browserToolBtn.textContent = "Run";
   }
 }
 
@@ -3378,6 +3572,10 @@ clearFileBtn.addEventListener("click", clearSelectedFile);
 searchBtn.addEventListener("click", () => {
   closeInputMenus();
   searchWeb();
+});
+browserToolToggleBtn.addEventListener("click", () => {
+  closeInputMenus();
+  setBrowserToolPanelOpen(!browserToolPanel.classList.contains("open"));
 });
 browserToolBtn.addEventListener("click", () => {
   closeInputMenus();

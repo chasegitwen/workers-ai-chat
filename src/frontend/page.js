@@ -1547,9 +1547,14 @@ body.dark .toolErrorNotice{
 }
 
 .modelHealthStatus{
+  display:flex;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+  gap:4px 8px;
   flex:0 0 auto;
   color:var(--text);
   font-variant-numeric:tabular-nums;
+  text-align:right;
 }
 
 .modelCategory{
@@ -5853,6 +5858,28 @@ function formatHealthLatency(latencyMs){
   return (latencyMs / 1000).toFixed(1).replace(/\.0$/, "") + "s";
 }
 
+function formatHealthSuccessRate(successRate, sampleSize){
+  if(typeof successRate !== "number" || !Number.isFinite(successRate) || !sampleSize){
+    return "成功率 --";
+  }
+  return "成功率 " + Math.round(successRate * 100) + "%";
+}
+
+function formatHealthCheckedAt(checkedAt){
+  if(!checkedAt){
+    return "最后检查 --";
+  }
+  const date = new Date(checkedAt);
+  if(Number.isNaN(date.getTime())){
+    return "最后检查 --";
+  }
+  return "最后检查 " + date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
+}
+
 function healthIcon(result){
   if(result.ok){
     return "✅";
@@ -5903,9 +5930,22 @@ function renderModelHealthResults(results){
     name.title = [result.provider, result.model, result.error].filter(Boolean).join(" / ");
     const status = document.createElement("span");
     status.className = "modelHealthStatus";
-    status.textContent = result.ok
-      ? healthIcon(result) + " " + formatHealthLatency(result.latencyMs)
-      : healthIcon(result) + " " + (result.status || "error");
+    const stateText = result.ok ? "在线" : "离线";
+    const latencyText = formatHealthLatency(result.latencyMs);
+    const detailParts = [
+      healthIcon(result) + " " + stateText,
+      latencyText ? "Latency " + latencyText : "",
+      formatHealthSuccessRate(result.successRate, result.sampleSize),
+      formatHealthCheckedAt(result.checkedAt)
+    ].filter(Boolean);
+    if(!result.ok && result.status){
+      detailParts.splice(1, 0, String(result.status));
+    }
+    detailParts.forEach(part => {
+      const detail = document.createElement("span");
+      detail.textContent = part;
+      status.appendChild(detail);
+    });
     item.appendChild(name);
     item.appendChild(status);
     modelHealthResults.appendChild(item);

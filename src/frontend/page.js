@@ -4606,13 +4606,29 @@ function renderProvidersList(){
 
 async function syncSettingsToServer(settings){
   try{
+    const payload = {
+      ...settings,
+      clientUpdatedAt:settings?.updatedAt || settings?.version || 0
+    };
     const res = await fetch("/api/settings", {
       method:"POST",
       headers:{ "Content-Type":"application/json" },
-      body:JSON.stringify({ settings })
+      body:JSON.stringify({ settings:payload })
     });
     if(!res.ok){
       throw new Error(await res.text());
+    }
+    const data = await res.json().catch(() => null);
+    if(data?.settings){
+      modelSettingsState = normalizeModelSettings(data.settings, modelProviders);
+      modelCategories = modelSettingsState.categories;
+      modelProviders = modelSettingsState.providers;
+      writeSettingsCache(modelSettingsState);
+      renderModelOptions();
+    }else if(data?.version || data?.updatedAt){
+      settings.updatedAt = data.updatedAt || data.version;
+      settings.version = data.version || data.updatedAt;
+      writeSettingsCache(settings);
     }
     settingsSyncStatus.textContent = "已同步";
     return true;
@@ -5403,7 +5419,9 @@ function normalizeModelSettings(settings, fallbackProviders){
     customProviders:Array.isArray(base.customProviders) ? base.customProviders : [],
     categories,
     modelCategories:categories,
-    providers
+    providers,
+    updatedAt:Number(base.updatedAt || base.version || 0) || 0,
+    version:Number(base.version || base.updatedAt || 0) || 0
   };
 }
 

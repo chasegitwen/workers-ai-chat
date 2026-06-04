@@ -311,7 +311,56 @@ async function readOpenClawTasks(env, options = {}) {
   return (result?.results || []).map(serializeOpenClawTask).filter(Boolean);
 }
 
+async function readActiveOpenClawTask(env, conversationId) {
+  if (!env.DB) {
+    return null;
+  }
+  const id = String(conversationId || "").trim();
+  if (!id) {
+    return null;
+  }
+  const result = await env.DB.prepare(
+    `SELECT *
+      FROM openclaw_tasks
+      WHERE conversation_id = ?
+        AND status NOT IN ('completed', 'failed', 'aborted')
+      ORDER BY updated_at DESC, started_at DESC
+      LIMIT 20`
+  ).bind(id).all();
+  return (result?.results || [])
+    .map(serializeOpenClawTask)
+    .find(isOpenClawTaskActive) || null;
+}
+
+function isOpenClawTaskActive(task) {
+  return ["running", "disconnected", "expired"].includes(String(task?.status || ""));
+}
+
 async function handleOpenClawTasksRequest(request, env, url) {
+  if (url.pathname === "/api/openclaw/tasks/active" && request.method === "GET") {
+    const conversationId = url.searchParams.get("conversation_id") || url.searchParams.get("conversationId");
+    if (!conversationId) {
+      return jsonResponse({
+        ok: false,
+        error: "conversation_id is required"
+      }, 400);
+    }
+    try {
+      const task = await readActiveOpenClawTask(env, conversationId);
+      return jsonResponse({
+        ok: true,
+        active: Boolean(task),
+        task
+      });
+    } catch (err) {
+      return jsonResponse({
+        ok: false,
+        error: "Failed to read active OpenClaw task",
+        detail: err?.message || String(err)
+      }, 500);
+    }
+  }
+
   if (url.pathname === "/api/openclaw/tasks" && request.method === "GET") {
     try {
       const tasks = await readOpenClawTasks(env, {

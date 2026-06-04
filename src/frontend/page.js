@@ -2440,6 +2440,10 @@ let activeOpenClawTask = null;
 let ignoredOpenClawTaskIds = new Set();
 let allowOpenClawRepeatOnce = false;
 let openClawTaskHistoryView = "recent";
+let openClawReconnectTask = null;
+let openClawReconnectPollingTimer = null;
+let openClawReconnectPollingTaskId = "";
+const OPENCLAW_RECONNECT_POLL_MS = 7000;
 
 const imageBtn = document.getElementById("imageBtn");
 const imageInput = document.getElementById("imageInput");
@@ -6823,6 +6827,64 @@ function formatOpenClawTaskTime(value){
   return new Date(time).toLocaleString();
 }
 
+function openClawReconnectDismissKey(conversationId = currentConversationId){
+  return "openclaw_reconnect_dismissed:" + (conversationId || "none");
+}
+
+function readDismissedOpenClawReconnectTasks(conversationId = currentConversationId){
+  return safeJsonParse(sessionStorage.getItem(openClawReconnectDismissKey(conversationId)), []);
+}
+
+function isOpenClawReconnectDismissed(task){
+  if(!task?.id){
+    return true;
+  }
+  return readDismissedOpenClawReconnectTasks(task.conversation_id || task.conversationId).includes(task.id);
+}
+
+function dismissOpenClawReconnectTask(task){
+  if(!task?.id){
+    return;
+  }
+  const conversationId = task.conversation_id || task.conversationId || currentConversationId;
+  const dismissed = new Set(readDismissedOpenClawReconnectTasks(conversationId));
+  dismissed.add(task.id);
+  sessionStorage.setItem(openClawReconnectDismissKey(conversationId), JSON.stringify([...dismissed]));
+  if(openClawReconnectTask?.id === task.id){
+    openClawReconnectTask = null;
+  }
+  renderOpenClawTaskBanner();
+}
+
+function isOpenClawStreamingActive(){
+  return Boolean(activeChatAbortController && activeOpenClawTask?.id);
+}
+
+function shouldShowOpenClawReconnectBanner(task){
+  return Boolean(task?.id
+    && isOpenClawTaskPending(task)
+    && !isOpenClawStreamingActive()
+    && !isOpenClawReconnectDismissed(task)
+    && openClawReconnectTask?.id === task.id);
+}
+
+function renderOpenClawReconnectBanner(task){
+  openClawTaskBanner.innerHTML = [
+    "<strong>OpenClaw task still running</strong>",
+    "<div class='openClawTaskMeta'>",
+    escapeHtml(openClawTaskStatusLabel(task.status)),
+    task.model ? "<br />model: " + escapeHtml(task.upstreamModelName || task.model) : "",
+    "</div>",
+    "<div class='openClawTaskActions'>",
+    "<button type='button' data-openclaw-task-action='reconnect'>Reconnect</button>",
+    "<button type='button' data-openclaw-task-action='dismiss-reconnect'>Dismiss</button>",
+    "</div>"
+  ].join("");
+  openClawTaskBanner.dataset.taskId = task.id;
+  openClawTaskBanner.dataset.mode = "reconnect";
+  openClawTaskBanner.classList.add("open");
+}
+
 function mergeOpenClawTask(task){
   if(!task?.id){
     return;
@@ -6864,6 +6926,22 @@ function renderOpenClawTaskBanner(){
   if(!task || ignoredOpenClawTaskIds.has(task.id)){
     openClawTaskBanner.classList.remove("open");
     openClawTaskBanner.innerHTML = "";
+    openClawTaskBanner.dataset.mode = "";
+    return;
+  }
+
+  if(isOpenClawTaskPending(task)
+    && isOpenClawReconnectDismissed(task)
+    && openClawReconnectPollingTaskId !== task.id
+    && !isOpenClawStreamingActive()){
+    openClawTaskBanner.classList.remove("open");
+    openClawTaskBanner.innerHTML = "";
+    openClawTaskBanner.dataset.mode = "";
+    return;
+  }
+
+  if(shouldShowOpenClawReconnectBanner(task)){
+    renderOpenClawReconnectBanner(task);
     return;
   }
 
@@ -6886,10 +6964,13 @@ function renderOpenClawTaskBanner(){
     "</div>"
   ].join("");
   openClawTaskBanner.dataset.taskId = task.id;
+  openClawTaskBanner.dataset.mode = "task";
   openClawTaskBanner.classList.add("open");
 }
 
 async function loadOpenClawTasksForConversation(conversationId){
+  stopOpenClawReconnectPolling();
+  openClawReconnectTask = null;
   if(!conversationId){
     openClawTasks = [];
     activeOpenClawTask = null;
@@ -6902,6 +6983,9 @@ async function loadOpenClawTasksForConversation(conversationId){
     if(res.ok && data.ok){
       openClawTasks = Array.isArray(data.tasks) ? data.tasks : [];
       activeOpenClawTask = openClawTasks[0] || null;
+      if(await checkOpenClawActiveTask(conversationId)){
+        return openClawTasks;
+      }
       renderOpenClawTaskBanner();
       return openClawTasks;
     }
@@ -6909,6 +6993,99 @@ async function loadOpenClawTasksForConversation(conversationId){
     console.warn("load OpenClaw tasks failed", err);
   }
   return openClawTasks;
+}
+
+async function checkOpenClawActiveTask(conversationId){
+  const id = String(conversationId || "").trim();
+  if(!id || isOpenClawStreamingActive()){
+    return false;
+  }
+  try{
+    const res = await fetch("/api/openclaw/tasks/active?conversation_id=" + encodeURIComponent(id));
+    const data = await res.json();
+    if(!res.ok || !data.ok || !data.active || !data.task?.id){
+      if(openClawReconnectTask && (openClawReconnectTask.conversation_id || openClawReconnectTask.conversationId) === id){
+        openClawReconnectTask = null;
+      }
+      renderOpenClawTaskBanner();
+      return false;
+    }
+    mergeOpenClawTask(data.task);
+    if(!isOpenClawReconnectDismissed(data.task) && openClawReconnectPollingTaskId !== data.task.id){
+      openClawReconnectTask = data.task;
+      renderOpenClawTaskBanner();
+      return true;
+    }
+  }catch(err){
+    console.warn("check active OpenClaw task failed", err);
+  }
+  return false;
+}
+
+function stopOpenClawReconnectPolling(){
+  if(openClawReconnectPollingTimer){
+    clearInterval(openClawReconnectPollingTimer);
+    openClawReconnectPollingTimer = null;
+  }
+  openClawReconnectPollingTaskId = "";
+}
+
+async function pollOpenClawReconnectTask(taskId){
+  if(!currentConversationId || !taskId || openClawReconnectPollingTaskId !== taskId){
+    return;
+  }
+  try{
+    const params = new URLSearchParams({
+      conversation_id:currentConversationId,
+      limit:"20",
+      offset:"0",
+      sort:"created_desc"
+    });
+    const res = await fetch("/api/openclaw/tasks?" + params.toString());
+    const data = await res.json();
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "OpenClaw task polling failed");
+    }
+    const task = (data.tasks || []).find(item => item.id === taskId);
+    if(!task){
+      return;
+    }
+    mergeOpenClawTask(task);
+    if(openClawTaskHistoryPanel && !openClawTaskHistoryPanel.hidden){
+      loadOpenClawTaskHistory(openClawTaskHistoryView);
+    }
+    if(task.status === "completed"){
+      stopOpenClawReconnectPolling();
+      setContextStatus("OpenClaw task completed.");
+      await loadConversationMessages(currentConversationId);
+      return;
+    }
+    if(task.status === "failed" || task.status === "aborted"){
+      stopOpenClawReconnectPolling();
+      setContextStatus(task.status === "failed" ? "OpenClaw task failed." : "OpenClaw task aborted locally.");
+      renderOpenClawTaskBanner();
+      return;
+    }
+    if(task.status === "expired"){
+      stopOpenClawReconnectPolling();
+      setContextStatus("OpenClaw task record expired. Remote progress cannot be confirmed.");
+      renderOpenClawTaskBanner();
+    }
+  }catch(err){
+    console.warn("poll OpenClaw reconnect task failed", err);
+  }
+}
+
+function startOpenClawReconnectPolling(taskId){
+  if(!taskId){
+    return;
+  }
+  stopOpenClawReconnectPolling();
+  openClawReconnectPollingTaskId = taskId;
+  pollOpenClawReconnectTask(taskId);
+  openClawReconnectPollingTimer = setInterval(() => {
+    pollOpenClawReconnectTask(taskId);
+  }, OPENCLAW_RECONNECT_POLL_MS);
 }
 
 function shouldInterceptOpenClawProgressMessage(message){
@@ -7190,9 +7367,11 @@ function resetTransientContext(){
 }
 
 function enterBlankChat(){
+  stopOpenClawReconnectPolling();
   currentConversationId = null;
   openClawTasks = [];
   activeOpenClawTask = null;
+  openClawReconnectTask = null;
   renderOpenClawTaskBanner();
   resetLocalConversation();
   resetChatView();
@@ -7366,6 +7545,18 @@ openClawTaskBanner.addEventListener("click", event => {
   }
   const task = openClawTasks.find(item => item.id === openClawTaskBanner.dataset.taskId) || currentPendingOpenClawTask();
   if(!task){
+    return;
+  }
+  if(action === "reconnect"){
+    openClawReconnectTask = null;
+    activeOpenClawTask = task;
+    renderOpenClawTaskBanner();
+    startOpenClawReconnectPolling(task.id);
+    setContextStatus("Reconnected to local OpenClaw task tracking. Remote stream cannot be restored.");
+    return;
+  }
+  if(action === "dismiss-reconnect"){
+    dismissOpenClawReconnectTask(task);
     return;
   }
   if(action === "view"){
@@ -8385,6 +8576,8 @@ async function sendMessage(){
     setContextStatus("已确认重新发起新的 OpenClaw 请求。");
   }
   if(isOpenClawRequest){
+    stopOpenClawReconnectPolling();
+    openClawReconnectTask = null;
     activeChatAbortController = new AbortController();
   }
 

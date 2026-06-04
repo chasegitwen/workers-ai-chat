@@ -7594,6 +7594,9 @@ function handleStreamEvent(eventText, state, element){
   }
 
   if(event.type === "tool_sources"){
+    if(state.isOpenClawRequest){
+      return false;
+    }
     try{
       const data = JSON.parse(event.data || "{}");
       state.toolSources = Array.isArray(data.sources) ? data.sources : [];
@@ -7606,6 +7609,9 @@ function handleStreamEvent(eventText, state, element){
   }
 
   if(event.type === "tool_status"){
+    if(state.isOpenClawRequest){
+      return false;
+    }
     try{
       handleToolStatus(JSON.parse(event.data || "{}"));
     }catch(err){
@@ -7616,6 +7622,9 @@ function handleStreamEvent(eventText, state, element){
   }
 
   if(event.type === "tool_error"){
+    if(state.isOpenClawRequest){
+      return false;
+    }
     try{
       state.toolError = JSON.parse(event.data || "{}");
       handleToolError(state.toolError);
@@ -7628,6 +7637,9 @@ function handleStreamEvent(eventText, state, element){
   }
 
   if(event.type === "tool_debug"){
+    if(state.isOpenClawRequest){
+      return false;
+    }
     try{
       state.toolDebug = JSON.parse(event.data || "{}");
       renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug, state.diagnostics);
@@ -7714,7 +7726,7 @@ function handleStreamEvent(eventText, state, element){
   return false;
 }
 
-async function streamAIResponse(response, element){
+async function streamAIResponse(response, element, isOpenClawRequest = false){
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -7730,7 +7742,8 @@ async function streamAIResponse(response, element){
       done:null,
       providerError:null
     },
-    openClawFriendlyError:false
+    openClawFriendlyError:false,
+    isOpenClawRequest:Boolean(isOpenClawRequest)
   };
 
   while(true){
@@ -7946,7 +7959,7 @@ async function sendMessage(){
 
     aiDiv.innerHTML = "";
 
-    const streamResult = await streamAIResponse(res, aiDiv);
+    const streamResult = await streamAIResponse(res, aiDiv, isOpenClawRequest);
     const reply = streamResult.reply || "";
 
     if(!reply){

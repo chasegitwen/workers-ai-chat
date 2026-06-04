@@ -60,6 +60,22 @@ function isOpenClawProviderModel(provider, model) {
     || value.includes("hnsnowground.cfd"));
 }
 
+function isOpenClawRequestTarget(providerCatalog, requestedProvider, requestedModel) {
+  try {
+    const selected = findProviderModel(
+      providerCatalog,
+      String(requestedProvider || "").trim(),
+      String(requestedModel || "").trim()
+    );
+    return isOpenClawProviderModel(selected.provider, selected.model);
+  } catch (err) {
+    return isOpenClawProviderModel(
+      { id: requestedProvider },
+      { id: requestedModel, modelName: requestedModel }
+    );
+  }
+}
+
 function cleanCandidateUrl(value) {
   return String(value || "").replace(/[)\].,;!?，。；！？）】]+$/u, "");
 }
@@ -1975,8 +1991,9 @@ export async function handleChat(request, env) {
 
   const ragFiles = [];
   let ragSources = [];
-  const autoFetchToolCall = getAutoFetchToolCall(userContent);
-  const autoSearchToolCall = autoFetchToolCall ? null : getAutoSearchToolCall(userContent);
+  const isOpenClawRequest = isOpenClawRequestTarget(providerCatalog, provider, model || DEFAULT_TEXT_MODEL);
+  const autoFetchToolCall = isOpenClawRequest ? null : getAutoFetchToolCall(userContent);
+  const autoSearchToolCall = isOpenClawRequest || autoFetchToolCall ? null : getAutoSearchToolCall(userContent);
   const requestedToolCall = toolCall?.name
     ? withToolTrigger(toolCall, "explicit")
     : (autoFetchToolCall

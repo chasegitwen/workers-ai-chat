@@ -11,7 +11,8 @@ export async function callOpenAICompatible({
   messages,
   stream = true,
   max_tokens,
-  temperature
+  temperature,
+  timeoutMs
 }) {
   const apiBase = normalizeApiBase(config?.apiBase);
   const apiKeyEnv = config?.apiKeyEnv || "";
@@ -45,14 +46,30 @@ export async function callOpenAICompatible({
     body.max_tokens = max_tokens;
   }
 
-  const response = await fetch(apiBase + "/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": "Bearer " + apiKey,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(body)
-  });
+  const controller = typeof timeoutMs === "number" && timeoutMs > 0
+    ? new AbortController()
+    : null;
+  const timer = controller
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : null;
+
+  let response;
+
+  try {
+    response = await fetch(apiBase + "/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer " + apiKey,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body),
+      signal: controller?.signal
+    });
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");

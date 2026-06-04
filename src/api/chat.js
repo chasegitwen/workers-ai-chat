@@ -28,6 +28,7 @@ const MAX_AUTO_SEARCH_QUERY_LENGTH = 300;
 const MAX_TOOL_DEBUG_SUMMARY_LENGTH = 120;
 const MAX_IMAGE_ATTACHMENTS = 3;
 const BROWSER_TOOL_TIMEOUT_MS = 60000;
+const OPENCLAW_CHAT_TIMEOUT_MS = 240000;
 const MODEL_SETTINGS_KEY = "model_settings";
 const AUTO_SEARCH_PATTERN = /搜索|查一下|查询|联网查|最新|最近|今天|现在|当前|目前|官网|价格|新闻|发布|更新|\bsearch\b|\blook up\b|\blatest\b|\brecent\b|\btoday\b|\bcurrent\b|\bnow\b|\bnews\b|\bprice\b|\brelease\b|\bupdate\b|\bofficial\b/i;
 
@@ -37,6 +38,26 @@ function getUserMessage(messages) {
     .find(message => message.role === "user");
 
   return (userMessage?.content || "").trim();
+}
+
+function isOpenClawProviderModel(provider, model) {
+  const values = [
+    provider?.id,
+    provider?.label,
+    provider?.providerName,
+    provider?.apiBase,
+    provider?.baseUrl,
+    model?.id,
+    model?.modelId,
+    model?.modelName,
+    model?.upstreamModelName,
+    model?.label,
+    model?.displayName
+  ].map(value => String(value || "").toLowerCase());
+
+  return values.some(value => value.startsWith("openclaw-")
+    || value.includes("openclaw")
+    || value.includes("hnsnowground.cfd"));
 }
 
 function cleanCandidateUrl(value) {
@@ -986,7 +1007,10 @@ export async function callSelectedModel({ env, provider, model, messages, stream
       messages: providerMessages,
       stream,
       max_tokens,
-      temperature
+      temperature,
+      timeoutMs: isOpenClawProviderModel(selectedProvider, selectedModel)
+        ? OPENCLAW_CHAT_TIMEOUT_MS
+        : undefined
     });
 
     return {

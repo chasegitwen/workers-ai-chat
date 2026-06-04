@@ -2273,7 +2273,10 @@ let selectedWebPageChunks = [];
 let lastWebRelevantChunkCount = 0;
 
 const sendBtn = document.getElementById("sendBtn");
+const SEND_BUTTON_TEXT = sendBtn.textContent.trim() || "发送";
 const INPUT_MAX_HEIGHT = 180;
+let activeChatAbortController = null;
+let openClawWaitTimers = [];
 
 const imageBtn = document.getElementById("imageBtn");
 const imageInput = document.getElementById("imageInput");
@@ -6538,6 +6541,90 @@ function getSelectedProviderForRequest(modelId){
   return model?.provider || "";
 }
 
+function isOpenClawModelTarget(model){
+  if(!model){
+    return false;
+  }
+  return [
+    model.provider,
+    model.providerLabel,
+    model.providerName,
+    model.id,
+    model.modelId,
+    model.modelName,
+    model.upstreamModelName,
+    model.label,
+    model.displayName,
+    model.apiBase,
+    model.baseUrl
+  ].some(value => {
+    const text = String(value || "").toLowerCase();
+    return text.startsWith("openclaw-")
+      || text.includes("openclaw")
+      || text.includes("hnsnowground.cfd");
+  });
+}
+
+function isSelectedOpenClawRequest(modelId){
+  return isOpenClawModelTarget(modelOptions.find(item => item.id === modelId));
+}
+
+function clearOpenClawWaitTimers(){
+  openClawWaitTimers.forEach(timer => clearTimeout(timer));
+  openClawWaitTimers = [];
+}
+
+function startOpenClawWaitHints(aiDiv){
+  clearOpenClawWaitTimers();
+  const hints = [
+    [15000, "OpenClaw 仍在处理，请继续等待……"],
+    [45000, "任务较慢，可能正在执行工具、访问网页或操作 VPS……"],
+    [90000, "OpenClaw 仍未返回。你可以继续等待，或停止本次请求。"]
+  ];
+
+  openClawWaitTimers = hints.map(([delay, message]) => setTimeout(() => {
+    if(!activeChatAbortController){
+      return;
+    }
+    setContextStatus(message);
+    if(aiDiv && !aiDiv.textContent.trim()){
+      aiDiv.innerHTML = "<span class='loading'>" + message + "</span>";
+    }
+    if(delay >= 90000){
+      sendBtn.disabled = false;
+      sendBtn.textContent = "停止";
+      sendBtn.title = "停止本次 OpenClaw 请求";
+    }
+  }, delay));
+}
+
+function stopActiveChatRequest(){
+  if(activeChatAbortController){
+    activeChatAbortController.abort();
+  }
+}
+
+function openClawFriendlyError(err){
+  const message = err?.message || "";
+  if(err?.name === "AbortError"){
+    return "已停止本次 OpenClaw 请求。";
+  }
+  if(/network|connection|fetch|abort|lost|timed out|timeout/i.test(message)){
+    return "OpenClaw 长任务连接中断，任务可能仍在远端执行。你可以稍后检查 OpenClaw WebChat 或重新发起请求。";
+  }
+  return "请求失败：" + message;
+}
+
+function isOpenClawProviderError(error){
+  return isOpenClawModelTarget({
+    provider:error?.provider,
+    id:error?.model,
+    modelName:error?.modelName,
+    label:error?.model,
+    providerLabel:error?.provider
+  });
+}
+
 function resetLocalConversation(){
   conversation.length = 1;
 }
@@ -6813,7 +6900,13 @@ input.addEventListener("keydown", e => {
 input.addEventListener("input", autoResizeInput);
 input.addEventListener("paste", handleImagePaste);
 
-sendBtn.addEventListener("click", sendMessage);
+sendBtn.addEventListener("click", () => {
+  if(activeChatAbortController){
+    stopActiveChatRequest();
+    return;
+  }
+  sendMessage();
+});
 newChatBtn.addEventListener("click", createNewConversation);
 viewSummaryBtn.addEventListener("click", viewCurrentSummary);
 chat.addEventListener("click", event => {
@@ -7576,6 +7669,11 @@ function handleStreamEvent(eventText, state, element){
   if(event.type === "provider_error"){
     try{
       state.diagnostics.providerError = JSON.parse(event.data || "{}");
+      if(isOpenClawProviderError(state.diagnostics.providerError)){
+        state.reply = openClawFriendlyError(new Error(state.diagnostics.providerError.message || "Network connection lost"));
+        state.openClawFriendlyError = true;
+        setContextStatus(state.reply);
+      }
       renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug, state.diagnostics);
     }catch(err){
       console.log("parse provider error failed", err);
@@ -7607,7 +7705,9 @@ function handleStreamEvent(eventText, state, element){
   }
 
   if(chunk.text){
-    state.reply += chunk.text;
+    if(!state.openClawFriendlyError){
+      state.reply += chunk.text;
+    }
     renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug, state.diagnostics);
   }
 
@@ -7629,7 +7729,8 @@ async function streamAIResponse(response, element){
       fallbacks:[],
       done:null,
       providerError:null
-    }
+    },
+    openClawFriendlyError:false
   };
 
   while(true){
@@ -7659,6 +7760,9 @@ async function streamAIResponse(response, element){
 }
 
 async function sendMessage(){
+  if(activeChatAbortController){
+    return;
+  }
 
   const message = input.value.trim();
   const imageToSend = selectedImage;
@@ -7743,7 +7847,14 @@ async function sendMessage(){
   input.value = "";
   resetInputHeight();
 
+  const isOpenClawRequest = isSelectedOpenClawRequest(modelSelect.value);
+  if(isOpenClawRequest){
+    activeChatAbortController = new AbortController();
+  }
+
   sendBtn.disabled = true;
+  sendBtn.textContent = SEND_BUTTON_TEXT;
+  sendBtn.title = "";
 
   const aiDiv = addAIMessage();
   const toolCallForRequest = pendingToolCall || (webPageToSend ? {
@@ -7755,6 +7866,10 @@ async function sendMessage(){
 
   aiDiv.innerHTML =
     "<span class='loading'>思考中...</span>";
+
+  if(isOpenClawRequest){
+    startOpenClawWaitHints(aiDiv);
+  }
 
   if(imageToSend || attachmentsToSend.length){
     setContextStatus("\u56fe\u7247\u4e0a\u4f20\u4e2d...");
@@ -7778,6 +7893,8 @@ async function sendMessage(){
       headers:{
         "Content-Type":"application/json"
       },
+
+      signal:activeChatAbortController?.signal,
 
       body:JSON.stringify({
         conversationId:currentConversationId,
@@ -7866,7 +7983,11 @@ async function sendMessage(){
   }catch(err){
 
     aiDiv.innerHTML =
-      "请求失败：" + err.message;
+      isOpenClawRequest ? openClawFriendlyError(err) : "请求失败：" + err.message;
+
+    if(isOpenClawRequest){
+      setContextStatus(openClawFriendlyError(err));
+    }
 
     if(imageToSend){
       setContextStatus("\u56fe\u7247\u53d1\u9001\u5931\u8d25\uff0c\u53ef\u91cd\u8bd5");
@@ -7881,7 +8002,11 @@ async function sendMessage(){
     }
   }
 
+  clearOpenClawWaitTimers();
+  activeChatAbortController = null;
   sendBtn.disabled = false;
+  sendBtn.textContent = SEND_BUTTON_TEXT;
+  sendBtn.title = "";
 
   input.focus();
 }

@@ -123,20 +123,35 @@ function serializeOpenClawTask(row) {
   } catch (err) {
     metadata = {};
   }
+  const startedAt = Number(row.started_at || 0);
+  const completedAt = row.completed_at ? Number(row.completed_at) : null;
+  const latencyMs = row.latency_ms ? Number(row.latency_ms) : null;
+  const durationMs = latencyMs ?? (completedAt && startedAt ? Math.max(0, completedAt - startedAt) : null);
+  const status = taskStatus(row);
   return {
     id: row.id,
     conversationId: row.conversation_id,
+    conversation_id: row.conversation_id,
     provider: row.provider,
     model: row.model,
     upstreamModelName: row.upstream_model_name || "",
+    upstream_model_name: row.upstream_model_name || "",
+    agent_id: row.upstream_model_name || row.model || "",
     promptPreview: row.prompt_preview || "",
-    status: taskStatus(row),
+    prompt_preview: row.prompt_preview || "",
+    status,
     storedStatus: row.status || "",
-    startedAt: Number(row.started_at || 0),
+    created_at: startedAt,
+    started_at: startedAt,
+    startedAt,
     updatedAt: Number(row.updated_at || 0),
-    completedAt: row.completed_at ? Number(row.completed_at) : null,
+    updated_at: Number(row.updated_at || 0),
+    finished_at: completedAt,
+    completedAt,
     error: row.error || "",
-    latencyMs: row.latency_ms ? Number(row.latency_ms) : null,
+    error_message: row.error || "",
+    latencyMs,
+    duration_ms: durationMs,
     assistantMessageId: row.assistant_message_id || "",
     remoteTaskId: row.remote_task_id || "",
     metadata,
@@ -144,6 +159,14 @@ function serializeOpenClawTask(row) {
     canQueryRemoteStatus: Boolean(metadata.canQueryRemoteStatus),
     abortStopsRemote: Boolean(metadata.abortStopsRemote)
   };
+}
+
+function clampInteger(value, fallback, min, max) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, parsed));
 }
 
 async function createOpenClawTask(env, details) {
@@ -252,29 +275,58 @@ async function updateOpenClawTask(env, task, patch = {}) {
   }
 }
 
-async function readOpenClawTasks(env, conversationId) {
+async function readOpenClawTasks(env, options = {}) {
   if (!env.DB) {
     return [];
   }
-  const id = String(conversationId || "").trim();
-  if (!id) {
-    return [];
+  const conversationId = String(options.conversationId || "").trim();
+  const status = String(options.status || "").trim();
+  const sort = String(options.sort || "created_desc").trim();
+  const limit = clampInteger(options.limit, 20, 1, 100);
+  const offset = clampInteger(options.offset, 0, 0, 10000);
+  const where = [];
+  const bindings = [];
+
+  if (conversationId) {
+    where.push("conversation_id = ?");
+    bindings.push(conversationId);
   }
+
+  if (status) {
+    where.push("status = ?");
+    bindings.push(status);
+  }
+
+  const whereSql = where.length ? "WHERE " + where.join(" AND ") : "";
+  const orderBy = sort === "duration_desc"
+    ? "ORDER BY COALESCE(latency_ms, completed_at - started_at, updated_at - started_at, 0) DESC, updated_at DESC"
+    : "ORDER BY started_at DESC, updated_at DESC";
   const result = await env.DB.prepare(
     `SELECT *
       FROM openclaw_tasks
-      WHERE conversation_id = ?
-      ORDER BY updated_at DESC
-      LIMIT 20`
-  ).bind(id).all();
+      ${whereSql}
+      ${orderBy}
+      LIMIT ? OFFSET ?`
+  ).bind(...bindings, limit, offset).all();
   return (result?.results || []).map(serializeOpenClawTask).filter(Boolean);
 }
 
 async function handleOpenClawTasksRequest(request, env, url) {
   if (url.pathname === "/api/openclaw/tasks" && request.method === "GET") {
     try {
-      const tasks = await readOpenClawTasks(env, url.searchParams.get("conversationId"));
-      return jsonResponse({ ok: true, tasks });
+      const tasks = await readOpenClawTasks(env, {
+        conversationId: url.searchParams.get("conversation_id") || url.searchParams.get("conversationId"),
+        status: url.searchParams.get("status"),
+        sort: url.searchParams.get("sort") || "created_desc",
+        limit: url.searchParams.get("limit") || 20,
+        offset: url.searchParams.get("offset") || 0
+      });
+      return jsonResponse({
+        ok: true,
+        tasks,
+        limit: clampInteger(url.searchParams.get("limit"), 20, 1, 100),
+        offset: clampInteger(url.searchParams.get("offset"), 0, 0, 10000)
+      });
     } catch (err) {
       return jsonResponse({
         ok: false,

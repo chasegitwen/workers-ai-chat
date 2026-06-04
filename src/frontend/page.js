@@ -1228,6 +1228,99 @@ body.dark .toolErrorNotice{
   font-size:12px;
 }
 
+.openClawTaskHistory{
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:8px;
+  color:var(--text);
+  background:var(--panel);
+  font-size:12px;
+}
+
+.openClawTaskHistory[hidden]{
+  display:none;
+}
+
+.openClawTaskHistoryHeader,
+.openClawTaskHistoryTabs{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+}
+
+.openClawTaskHistoryHeader strong{
+  font-size:13px;
+}
+
+.openClawTaskHistoryTabs{
+  flex-wrap:wrap;
+  justify-content:flex-start;
+  margin-top:8px;
+}
+
+.openClawTaskHistory button{
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:var(--panel);
+  color:var(--text);
+  cursor:pointer;
+  padding:5px 8px;
+  font-size:12px;
+}
+
+.openClawTaskHistory button.active{
+  background:rgba(59,130,246,.14);
+  border-color:rgba(59,130,246,.5);
+}
+
+.openClawTaskHistoryList{
+  display:flex;
+  flex-direction:column;
+  gap:7px;
+  margin-top:8px;
+  max-height:260px;
+  overflow:auto;
+}
+
+.openClawTaskHistoryItem{
+  border:1px solid var(--border);
+  border-radius:8px;
+  padding:7px;
+  background:rgba(148,163,184,.06);
+}
+
+.openClawTaskHistoryTop{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  font-variant-numeric:tabular-nums;
+}
+
+.openClawTaskHistoryMeta,
+.openClawTaskHistoryPreview,
+.openClawTaskHistoryError{
+  color:var(--muted);
+  line-height:1.45;
+  margin-top:4px;
+}
+
+.openClawTaskHistoryPreview{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.openClawTaskHistoryError summary{
+  cursor:pointer;
+  color:var(--text);
+}
+
+.openClawTaskHistoryToggle{
+  align-self:flex-start;
+}
+
 .inputShell{
   width:100%;
   display:flex;
@@ -2190,6 +2283,22 @@ body.dark .toolErrorNotice{
 
   <div id="openClawTaskBanner" class="openClawTaskBanner" aria-live="polite"></div>
 
+  <button id="openClawTaskHistoryToggle" class="openClawTaskHistoryToggle" type="button">OpenClaw Tasks</button>
+
+  <div id="openClawTaskHistoryPanel" class="openClawTaskHistory" hidden>
+    <div class="openClawTaskHistoryHeader">
+      <strong>Task History</strong>
+      <button id="openClawTaskHistoryRefresh" type="button">刷新</button>
+    </div>
+    <div class="openClawTaskHistoryTabs">
+      <button type="button" data-openclaw-task-view="recent" class="active">Recent</button>
+      <button type="button" data-openclaw-task-view="failed">Failed All</button>
+      <button type="button" data-openclaw-task-view="slow">Slow All</button>
+      <button type="button" data-openclaw-task-view="conversation">This Chat</button>
+    </div>
+    <div id="openClawTaskHistoryList" class="openClawTaskHistoryList"></div>
+  </div>
+
   <div id="pastedImageNotice"></div>
 
   <div id="pastedImagePreviewList"></div>
@@ -2291,6 +2400,10 @@ const attachmentMenu = document.getElementById("attachmentMenu");
 
 const contextStatus = document.getElementById("contextStatus");
 const openClawTaskBanner = document.getElementById("openClawTaskBanner");
+const openClawTaskHistoryToggle = document.getElementById("openClawTaskHistoryToggle");
+const openClawTaskHistoryPanel = document.getElementById("openClawTaskHistoryPanel");
+const openClawTaskHistoryRefresh = document.getElementById("openClawTaskHistoryRefresh");
+const openClawTaskHistoryList = document.getElementById("openClawTaskHistoryList");
 
 const toolMenuBtn = document.getElementById("toolMenuBtn");
 const toolMenu = document.getElementById("toolMenu");
@@ -2326,6 +2439,7 @@ let openClawTasks = [];
 let activeOpenClawTask = null;
 let ignoredOpenClawTaskIds = new Set();
 let allowOpenClawRepeatOnce = false;
+let openClawTaskHistoryView = "recent";
 
 const imageBtn = document.getElementById("imageBtn");
 const imageInput = document.getElementById("imageInput");
@@ -6728,6 +6842,9 @@ function mergeOpenClawTask(task){
     activeOpenClawTask = task;
   }
   renderOpenClawTaskBanner();
+  if(openClawTaskHistoryPanel && !openClawTaskHistoryPanel.hidden){
+    loadOpenClawTaskHistory(openClawTaskHistoryView);
+  }
 }
 
 function currentPendingOpenClawTask(){
@@ -6780,7 +6897,7 @@ async function loadOpenClawTasksForConversation(conversationId){
     return [];
   }
   try{
-    const res = await fetch("/api/openclaw/tasks?conversationId=" + encodeURIComponent(conversationId));
+    const res = await fetch("/api/openclaw/tasks?conversation_id=" + encodeURIComponent(conversationId));
     const data = await res.json();
     if(res.ok && data.ok){
       openClawTasks = Array.isArray(data.tasks) ? data.tasks : [];
@@ -6825,6 +6942,113 @@ function showOpenClawTaskRecord(task){
     "这是 Worker 本地记录，不能确认 VPS 端真实进度，也不能恢复远端 stream。"
   ].filter(line => line !== "").join(String.fromCharCode(10));
   alert(lines);
+}
+
+function formatTaskDuration(task){
+  const duration = Number(task.duration_ms ?? task.durationMs ?? task.latencyMs ?? 0);
+  if(!duration){
+    return "耗时 --";
+  }
+  if(duration < 1000){
+    return "耗时 " + duration + "ms";
+  }
+  return "耗时 " + (duration / 1000).toFixed(1).replace(/\.0$/, "") + "s";
+}
+
+function formatTaskAbsoluteTime(value){
+  const time = Number(value || 0);
+  return time ? new Date(time).toLocaleString() : "--";
+}
+
+function openClawTaskHistoryQuery(view){
+  const params = new URLSearchParams();
+  params.set("limit", "20");
+  params.set("offset", "0");
+  if(view === "failed"){
+    params.set("status", "failed");
+    params.set("sort", "created_desc");
+  }else if(view === "slow"){
+    params.set("sort", "duration_desc");
+  }else{
+    params.set("sort", "created_desc");
+  }
+  if(view === "conversation"){
+    if(!currentConversationId){
+      return null;
+    }
+    params.set("conversation_id", currentConversationId);
+  }
+  return params;
+}
+
+function taskConversationLabel(task){
+  const id = task.conversation_id || task.conversationId || "";
+  return id ? "conversation " + id.slice(0, 8) : "conversation --";
+}
+
+function renderOpenClawTaskHistory(tasks){
+  openClawTaskHistoryList.innerHTML = "";
+  if(!Array.isArray(tasks) || !tasks.length){
+    const empty = document.createElement("div");
+    empty.className = "openClawTaskHistoryItem";
+    empty.textContent = openClawTaskHistoryView === "conversation" && !currentConversationId
+      ? "当前还没有会话。"
+      : "暂无 OpenClaw 任务记录。";
+    openClawTaskHistoryList.appendChild(empty);
+    return;
+  }
+
+  tasks.forEach(task => {
+    const item = document.createElement("div");
+    item.className = "openClawTaskHistoryItem";
+    const status = task.status || "";
+    const prompt = task.prompt_preview || task.promptPreview || "";
+    const error = task.error_message || task.error || "";
+    const model = task.agent_id || task.upstreamModelName || task.model || "";
+    item.innerHTML = [
+      "<div class='openClawTaskHistoryTop'>",
+      "<strong>" + escapeHtml(openClawTaskStatusLabel(status)) + "</strong>",
+      "<span>" + escapeHtml(formatTaskDuration(task)) + "</span>",
+      "</div>",
+      "<div class='openClawTaskHistoryPreview'>" + escapeHtml(prompt || "无摘要") + "</div>",
+      "<div class='openClawTaskHistoryMeta'>",
+      escapeHtml(model || "model --"),
+      " · ",
+      escapeHtml(taskConversationLabel(task)),
+      "<br />开始：" + escapeHtml(formatTaskAbsoluteTime(task.created_at || task.started_at || task.startedAt)),
+      task.finished_at || task.completedAt ? "<br />完成：" + escapeHtml(formatTaskAbsoluteTime(task.finished_at || task.completedAt)) : "",
+      "</div>",
+      error ? "<details class='openClawTaskHistoryError'><summary>错误摘要</summary><div>" + escapeHtml(error) + "</div></details>" : ""
+    ].join("");
+    openClawTaskHistoryList.appendChild(item);
+  });
+}
+
+async function loadOpenClawTaskHistory(view = openClawTaskHistoryView){
+  openClawTaskHistoryView = view;
+  openClawTaskHistoryPanel.querySelectorAll("[data-openclaw-task-view]").forEach(button => {
+    button.classList.toggle("active", button.dataset.openclawTaskView === view);
+  });
+  const params = openClawTaskHistoryQuery(view);
+  if(!params){
+    renderOpenClawTaskHistory([]);
+    return;
+  }
+  openClawTaskHistoryList.innerHTML = "<div class='openClawTaskHistoryItem'>正在加载...</div>";
+  try{
+    const res = await fetch("/api/openclaw/tasks?" + params.toString());
+    const data = await res.json();
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "OpenClaw task history failed");
+    }
+    renderOpenClawTaskHistory(data.tasks || []);
+  }catch(err){
+    const item = document.createElement("div");
+    item.className = "openClawTaskHistoryItem";
+    item.textContent = err.message || "OpenClaw task history failed";
+    openClawTaskHistoryList.innerHTML = "";
+    openClawTaskHistoryList.appendChild(item);
+  }
 }
 
 async function markOpenClawTaskAborted(taskId){
@@ -7163,6 +7387,24 @@ openClawTaskBanner.addEventListener("click", event => {
     ignoredOpenClawTaskIds.add(task.id);
     renderOpenClawTaskBanner();
   }
+});
+openClawTaskHistoryToggle.addEventListener("click", () => {
+  const shouldOpen = openClawTaskHistoryPanel.hidden;
+  openClawTaskHistoryPanel.hidden = !shouldOpen;
+  openClawTaskHistoryToggle.classList.toggle("active", shouldOpen);
+  if(shouldOpen){
+    loadOpenClawTaskHistory(openClawTaskHistoryView);
+  }
+});
+openClawTaskHistoryRefresh.addEventListener("click", () => {
+  loadOpenClawTaskHistory(openClawTaskHistoryView);
+});
+openClawTaskHistoryPanel.addEventListener("click", event => {
+  const view = event.target?.dataset?.openclawTaskView;
+  if(!view){
+    return;
+  }
+  loadOpenClawTaskHistory(view);
 });
 newChatBtn.addEventListener("click", createNewConversation);
 viewSummaryBtn.addEventListener("click", viewCurrentSummary);

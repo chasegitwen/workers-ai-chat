@@ -1,4 +1,4 @@
-import { corsHeaders } from "../utils/response.js";
+import { corsHeaders, jsonResponse } from "../utils/response.js";
 import { getRelevantFileChunksByIds } from "./files.js";
 import {
   ensureConversation,
@@ -29,6 +29,7 @@ const MAX_TOOL_DEBUG_SUMMARY_LENGTH = 120;
 const MAX_IMAGE_ATTACHMENTS = 3;
 const BROWSER_TOOL_TIMEOUT_MS = 60000;
 const OPENCLAW_CHAT_TIMEOUT_MS = 240000;
+const OPENCLAW_TASK_EXPIRE_MS = 10 * 60 * 1000;
 const MODEL_SETTINGS_KEY = "model_settings";
 const AUTO_SEARCH_PATTERN = /搜索|查一下|查询|联网查|最新|最近|今天|现在|当前|目前|官网|价格|新闻|发布|更新|\bsearch\b|\blook up\b|\blatest\b|\brecent\b|\btoday\b|\bcurrent\b|\bnow\b|\bnews\b|\bprice\b|\brelease\b|\bupdate\b|\bofficial\b/i;
 
@@ -74,6 +75,246 @@ function isOpenClawRequestTarget(providerCatalog, requestedProvider, requestedMo
       { id: requestedModel, modelName: requestedModel }
     );
   }
+}
+
+function resolveOpenClawProviderModel(providerCatalog, requestedProvider, requestedModel) {
+  try {
+    return findProviderModel(
+      providerCatalog,
+      String(requestedProvider || "").trim(),
+      String(requestedModel || "").trim()
+    );
+  } catch (err) {
+    return {
+      provider: { id: requestedProvider },
+      model: { id: requestedModel, modelName: requestedModel }
+    };
+  }
+}
+
+function openClawTaskMetadata(extra = {}) {
+  return JSON.stringify({
+    source: "worker-local",
+    canReconnect: false,
+    canQueryRemoteStatus: false,
+    abortStopsRemote: false,
+    ...extra
+  });
+}
+
+function taskStatus(row) {
+  if (!row) {
+    return "";
+  }
+  const status = String(row.status || "");
+  if (status === "running" && Date.now() - Number(row.updated_at || row.started_at || 0) > OPENCLAW_TASK_EXPIRE_MS) {
+    return "expired";
+  }
+  return status;
+}
+
+function serializeOpenClawTask(row) {
+  if (!row) {
+    return null;
+  }
+  let metadata = {};
+  try {
+    metadata = JSON.parse(row.metadata || "{}");
+  } catch (err) {
+    metadata = {};
+  }
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    provider: row.provider,
+    model: row.model,
+    upstreamModelName: row.upstream_model_name || "",
+    promptPreview: row.prompt_preview || "",
+    status: taskStatus(row),
+    storedStatus: row.status || "",
+    startedAt: Number(row.started_at || 0),
+    updatedAt: Number(row.updated_at || 0),
+    completedAt: row.completed_at ? Number(row.completed_at) : null,
+    error: row.error || "",
+    latencyMs: row.latency_ms ? Number(row.latency_ms) : null,
+    assistantMessageId: row.assistant_message_id || "",
+    remoteTaskId: row.remote_task_id || "",
+    metadata,
+    canReconnect: Boolean(metadata.canReconnect),
+    canQueryRemoteStatus: Boolean(metadata.canQueryRemoteStatus),
+    abortStopsRemote: Boolean(metadata.abortStopsRemote)
+  };
+}
+
+async function createOpenClawTask(env, details) {
+  if (!env.DB) {
+    return null;
+  }
+  const now = Date.now();
+  const task = {
+    id: crypto.randomUUID(),
+    conversationId: details.conversationId,
+    provider: details.provider || "",
+    model: details.model || "",
+    upstreamModelName: details.upstreamModelName || "",
+    promptPreview: String(details.prompt || "").replace(/\s+/g, " ").trim().slice(0, 240),
+    status: "running",
+    startedAt: now,
+    updatedAt: now,
+    completedAt: null,
+    error: "",
+    latencyMs: null,
+    assistantMessageId: "",
+    remoteTaskId: "",
+    metadata: {
+      source: "worker-local",
+      canReconnect: false,
+      canQueryRemoteStatus: false,
+      abortStopsRemote: false
+    }
+  };
+
+  try {
+    await env.DB.prepare(
+      `INSERT INTO openclaw_tasks (
+        id,
+        conversation_id,
+        provider,
+        model,
+        upstream_model_name,
+        prompt_preview,
+        status,
+        started_at,
+        updated_at,
+        metadata
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      task.id,
+      task.conversationId,
+      task.provider,
+      task.model,
+      task.upstreamModelName,
+      task.promptPreview,
+      task.status,
+      task.startedAt,
+      task.updatedAt,
+      openClawTaskMetadata()
+    ).run();
+    return task;
+  } catch (err) {
+    console.warn("[openclaw-task] failed to create task", err?.message || String(err));
+    return null;
+  }
+}
+
+async function updateOpenClawTask(env, task, patch = {}) {
+  if (!env.DB || !task?.id) {
+    return null;
+  }
+  const now = Date.now();
+  const nextStatus = patch.status || task.status || "running";
+  const completedAt = patch.completedAt ?? (nextStatus === "completed" ? now : task.completedAt || null);
+  const latencyMs = patch.latencyMs ?? task.latencyMs ?? null;
+  const error = patch.error ?? task.error ?? "";
+  const assistantMessageId = patch.assistantMessageId ?? task.assistantMessageId ?? "";
+
+  try {
+    await env.DB.prepare(
+      `UPDATE openclaw_tasks
+        SET status = ?,
+          updated_at = ?,
+          completed_at = ?,
+          error = ?,
+          latency_ms = ?,
+          assistant_message_id = ?
+        WHERE id = ?`
+    ).bind(
+      nextStatus,
+      now,
+      completedAt,
+      error,
+      latencyMs,
+      assistantMessageId,
+      task.id
+    ).run();
+    return {
+      ...task,
+      status: nextStatus,
+      updatedAt: now,
+      completedAt,
+      error,
+      latencyMs,
+      assistantMessageId
+    };
+  } catch (err) {
+    console.warn("[openclaw-task] failed to update task", err?.message || String(err));
+    return null;
+  }
+}
+
+async function readOpenClawTasks(env, conversationId) {
+  if (!env.DB) {
+    return [];
+  }
+  const id = String(conversationId || "").trim();
+  if (!id) {
+    return [];
+  }
+  const result = await env.DB.prepare(
+    `SELECT *
+      FROM openclaw_tasks
+      WHERE conversation_id = ?
+      ORDER BY updated_at DESC
+      LIMIT 20`
+  ).bind(id).all();
+  return (result?.results || []).map(serializeOpenClawTask).filter(Boolean);
+}
+
+async function handleOpenClawTasksRequest(request, env, url) {
+  if (url.pathname === "/api/openclaw/tasks" && request.method === "GET") {
+    try {
+      const tasks = await readOpenClawTasks(env, url.searchParams.get("conversationId"));
+      return jsonResponse({ ok: true, tasks });
+    } catch (err) {
+      return jsonResponse({
+        ok: false,
+        error: "Failed to read OpenClaw tasks",
+        detail: err?.message || String(err)
+      }, 500);
+    }
+  }
+
+  const match = url.pathname.match(/^\/api\/openclaw\/tasks\/([^/]+)\/mark-aborted$/);
+  if (match && request.method === "POST") {
+    if (!env.DB) {
+      return jsonResponse({ ok: false, error: "D1 binding DB is not configured" }, 500);
+    }
+    const id = decodeURIComponent(match[1]);
+    const now = Date.now();
+    try {
+      await env.DB.prepare(
+        `UPDATE openclaw_tasks
+          SET status = ?,
+            updated_at = ?,
+            error = ?
+          WHERE id = ? AND status IN ('running', 'disconnected', 'expired')`
+      ).bind(
+        "aborted",
+        now,
+        "User stopped waiting locally. Remote task may still be running.",
+        id
+      ).run();
+      return jsonResponse({ ok: true, id, status: "aborted", updatedAt: now });
+    } catch (err) {
+      return jsonResponse({
+        ok: false,
+        error: "Failed to update OpenClaw task",
+        detail: err?.message || String(err)
+      }, 500);
+    }
+  }
+
+  return null;
 }
 
 function cleanCandidateUrl(value) {
@@ -1579,7 +1820,8 @@ function streamChatWithToolStatus({
   attachments = [],
   requestedToolCall,
   ragSources,
-  debugTools
+  debugTools,
+  openClawTask = null
 }) {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -1591,6 +1833,28 @@ function streamChatWithToolStatus({
       let toolSources = [];
 
       const enqueueText = text => controller.enqueue(encoder.encode(text));
+      const enqueueOpenClawTask = task => {
+        if (task) {
+          enqueueText(encodeSseEvent("openclaw_task", {
+            id: task.id,
+            conversationId: task.conversationId,
+            provider: task.provider,
+            model: task.model,
+            upstreamModelName: task.upstreamModelName || "",
+            promptPreview: task.promptPreview || "",
+            status: task.status || "running",
+            startedAt: task.startedAt,
+            updatedAt: task.updatedAt,
+            completedAt: task.completedAt || null,
+            error: task.error || "",
+            latencyMs: task.latencyMs ?? null,
+            remoteTaskId: task.remoteTaskId || "",
+            canReconnect: false,
+            canQueryRemoteStatus: false,
+            abortStopsRemote: false
+          }));
+        }
+      };
       const enqueueToolStatus = (name, status) => {
         enqueueText(encodeSseEvent("tool_status", {
           name,
@@ -1621,6 +1885,9 @@ function streamChatWithToolStatus({
         let fallbackCount = 0;
         let activeCallStartedAt = 0;
         let activeResult = null;
+        let activeOpenClawTask = openClawTask;
+
+        enqueueOpenClawTask(activeOpenClawTask);
 
         if (requestedToolCall?.name) {
           enqueueToolStatus(requestedToolCall.name, "running");
@@ -1704,9 +1971,25 @@ function streamChatWithToolStatus({
 
         const latencyMs = activeCallStartedAt ? Date.now() - activeCallStartedAt : 0;
 
+        let assistantMessage = null;
+
         if (env.DB && replyState.value) {
-          await saveMessage(env.DB, conversationId, "assistant", replyState.value);
+          assistantMessage = await saveMessage(env.DB, conversationId, "assistant", replyState.value);
           await maybeUpdateConversationSummary(env, conversationId);
+        }
+
+        if (activeOpenClawTask) {
+          activeOpenClawTask = await updateOpenClawTask(env, activeOpenClawTask, {
+            status: "completed",
+            latencyMs,
+            assistantMessageId: assistantMessage?.id || ""
+          }) || {
+            ...activeOpenClawTask,
+            status: "completed",
+            latencyMs,
+            assistantMessageId: assistantMessage?.id || ""
+          };
+          enqueueOpenClawTask(activeOpenClawTask);
         }
 
         if (ragSources.length) {
@@ -1731,6 +2014,20 @@ function streamChatWithToolStatus({
           provider,
           model: model || DEFAULT_TEXT_MODEL
         });
+
+        if (openClawTask) {
+          const failedTask = await updateOpenClawTask(env, openClawTask, {
+            status: "failed",
+            error: providerError.message || String(err),
+            latencyMs: 0
+          }) || {
+            ...openClawTask,
+            status: "failed",
+            error: providerError.message || String(err),
+            latencyMs: 0
+          };
+          enqueueOpenClawTask(failedTask);
+        }
 
         enqueueText(encodeSseEvent("provider_error", providerError));
         enqueueText("data: " + JSON.stringify({
@@ -1837,11 +2134,18 @@ async function prepareConversation(env, conversationId, userContent) {
 }
 
 export async function handleChat(request, env) {
-  if (new URL(request.url).pathname === "/api/browser/inspect") {
+  const url = new URL(request.url);
+  const openClawTasksResponse = await handleOpenClawTasksRequest(request, env, url);
+
+  if (openClawTasksResponse) {
+    return openClawTasksResponse;
+  }
+
+  if (url.pathname === "/api/browser/inspect") {
     return browserJsonResponse(await inspectBrowserToolEndpoint(env));
   }
 
-  if (new URL(request.url).pathname === "/api/browser") {
+  if (url.pathname === "/api/browser") {
     return handleBrowserRequest(request, env);
   }
 
@@ -1992,6 +2296,18 @@ export async function handleChat(request, env) {
   const ragFiles = [];
   let ragSources = [];
   const isOpenClawRequest = isOpenClawRequestTarget(providerCatalog, provider, model || DEFAULT_TEXT_MODEL);
+  const openClawTarget = isOpenClawRequest
+    ? resolveOpenClawProviderModel(providerCatalog, provider, model || DEFAULT_TEXT_MODEL)
+    : null;
+  const openClawTask = isOpenClawRequest
+    ? await createOpenClawTask(env, {
+      conversationId: conversation.id,
+      provider: openClawTarget?.provider?.id || provider,
+      model: openClawTarget?.model?.id || model || DEFAULT_TEXT_MODEL,
+      upstreamModelName: openClawTarget?.model?.modelName || openClawTarget?.model?.upstreamModelName || "",
+      prompt: userContent
+    })
+    : null;
   const autoFetchToolCall = isOpenClawRequest ? null : getAutoFetchToolCall(userContent);
   const autoSearchToolCall = isOpenClawRequest || autoFetchToolCall ? null : getAutoSearchToolCall(userContent);
   const requestedToolCall = toolCall?.name
@@ -2067,7 +2383,8 @@ export async function handleChat(request, env) {
     attachments: allImageAttachments,
     requestedToolCall,
     ragSources,
-    debugTools: Boolean(debugTools)
+    debugTools: Boolean(debugTools),
+    openClawTask
   }), {
     headers: {
       ...corsHeaders(),

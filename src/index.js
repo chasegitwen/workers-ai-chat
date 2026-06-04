@@ -103,6 +103,10 @@ export default {
       return handleChat(request, env);
     }
 
+    if (url.pathname.startsWith("/api/openclaw/tasks")) {
+      return handleChat(request, env);
+    }
+
     if (request.method === "GET") {
       if (url.pathname === "/debug-path") {
         return jsonResponse({

@@ -1186,6 +1186,48 @@ body.dark .toolErrorNotice{
   text-overflow:ellipsis;
 }
 
+.openClawTaskBanner{
+  display:none;
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:8px;
+  color:var(--text);
+  background:rgba(59,130,246,.08);
+  font-size:12px;
+}
+
+.openClawTaskBanner.open{
+  display:block;
+}
+
+.openClawTaskBanner strong{
+  display:block;
+  margin-bottom:3px;
+  font-size:13px;
+}
+
+.openClawTaskMeta{
+  color:var(--muted);
+  line-height:1.45;
+}
+
+.openClawTaskActions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin-top:7px;
+}
+
+.openClawTaskActions button{
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:var(--panel);
+  color:var(--text);
+  cursor:pointer;
+  padding:5px 8px;
+  font-size:12px;
+}
+
 .inputShell{
   width:100%;
   display:flex;
@@ -2146,6 +2188,8 @@ body.dark .toolErrorNotice{
 
   <div id="contextStatus"></div>
 
+  <div id="openClawTaskBanner" class="openClawTaskBanner" aria-live="polite"></div>
+
   <div id="pastedImageNotice"></div>
 
   <div id="pastedImagePreviewList"></div>
@@ -2246,6 +2290,7 @@ const attachmentMenuBtn = document.getElementById("attachmentMenuBtn");
 const attachmentMenu = document.getElementById("attachmentMenu");
 
 const contextStatus = document.getElementById("contextStatus");
+const openClawTaskBanner = document.getElementById("openClawTaskBanner");
 
 const toolMenuBtn = document.getElementById("toolMenuBtn");
 const toolMenu = document.getElementById("toolMenu");
@@ -2277,6 +2322,10 @@ const SEND_BUTTON_TEXT = sendBtn.textContent.trim() || "发送";
 const INPUT_MAX_HEIGHT = 180;
 let activeChatAbortController = null;
 let openClawWaitTimers = [];
+let openClawTasks = [];
+let activeOpenClawTask = null;
+let ignoredOpenClawTaskIds = new Set();
+let allowOpenClawRepeatOnce = false;
 
 const imageBtn = document.getElementById("imageBtn");
 const imageInput = document.getElementById("imageInput");
@@ -6600,6 +6649,9 @@ function startOpenClawWaitHints(aiDiv){
 
 function stopActiveChatRequest(){
   if(activeChatAbortController){
+    if(activeOpenClawTask?.id){
+      markOpenClawTaskAborted(activeOpenClawTask.id);
+    }
     activeChatAbortController.abort();
   }
 }
@@ -6623,6 +6675,178 @@ function isOpenClawProviderError(error){
     label:error?.model,
     providerLabel:error?.provider
   });
+}
+
+function isOpenClawTaskPending(task){
+  return ["running", "disconnected", "expired"].includes(String(task?.status || ""));
+}
+
+function openClawTaskStatusLabel(status){
+  const labels = {
+    running:"本地记录：仍在等待",
+    completed:"已完成",
+    failed:"请求失败",
+    aborted:"已停止本地等待",
+    disconnected:"连接已中断",
+    expired:"本地记录已过期"
+  };
+  return labels[status] || status || "未知";
+}
+
+function formatOpenClawTaskTime(value){
+  const time = Number(value || 0);
+  if(!time){
+    return "";
+  }
+  const seconds = Math.max(1, Math.round((Date.now() - time) / 1000));
+  if(seconds < 60){
+    return seconds + " 秒前";
+  }
+  const minutes = Math.round(seconds / 60);
+  if(minutes < 60){
+    return minutes + " 分钟前";
+  }
+  return new Date(time).toLocaleString();
+}
+
+function mergeOpenClawTask(task){
+  if(!task?.id){
+    return;
+  }
+  const index = openClawTasks.findIndex(item => item.id === task.id);
+  if(index >= 0){
+    openClawTasks[index] = {
+      ...openClawTasks[index],
+      ...task
+    };
+  }else{
+    openClawTasks.unshift(task);
+  }
+  if(isOpenClawTaskPending(task)){
+    activeOpenClawTask = task;
+  }else if(activeOpenClawTask?.id === task.id){
+    activeOpenClawTask = task;
+  }
+  renderOpenClawTaskBanner();
+}
+
+function currentPendingOpenClawTask(){
+  return openClawTasks.find(task => isOpenClawTaskPending(task) && !ignoredOpenClawTaskIds.has(task.id)) || null;
+}
+
+function progressQuestionLooksLikeLocalTaskStatus(message){
+  const text = String(message || "").trim();
+  if(!text || text.length > 80){
+    return false;
+  }
+  return /进展|怎么样|如何了|完成了吗|结束了吗|还在运行|状态|进度|status|progress|done|finished|running/i.test(text);
+}
+
+function renderOpenClawTaskBanner(){
+  const task = currentPendingOpenClawTask() || activeOpenClawTask;
+  if(!task || ignoredOpenClawTaskIds.has(task.id)){
+    openClawTaskBanner.classList.remove("open");
+    openClawTaskBanner.innerHTML = "";
+    return;
+  }
+
+  const status = openClawTaskStatusLabel(task.status);
+  const started = formatOpenClawTaskTime(task.startedAt);
+  const modelLabel = [task.provider, task.upstreamModelName || task.model].filter(Boolean).join(" / ");
+  openClawTaskBanner.innerHTML = [
+    "<strong>OpenClaw 本地任务记录</strong>",
+    "<div class='openClawTaskMeta'>",
+    escapeHtml(status),
+    modelLabel ? "<br />模型：" + escapeHtml(modelLabel) : "",
+    started ? "<br />开始：" + escapeHtml(started) : "",
+    "<br />这是 Worker 本地记录，不能确认 VPS 端真实进度，也不能恢复远端 stream。",
+    "</div>",
+    "<div class='openClawTaskActions'>",
+    "<button type='button' data-openclaw-task-action='view'>查看记录</button>",
+    isOpenClawTaskPending(task) ? "<button type='button' data-openclaw-task-action='wait'>继续等待</button>" : "",
+    "<button type='button' data-openclaw-task-action='rerun'>重新发起</button>",
+    "<button type='button' data-openclaw-task-action='ignore'>忽略</button>",
+    "</div>"
+  ].join("");
+  openClawTaskBanner.dataset.taskId = task.id;
+  openClawTaskBanner.classList.add("open");
+}
+
+async function loadOpenClawTasksForConversation(conversationId){
+  if(!conversationId){
+    openClawTasks = [];
+    activeOpenClawTask = null;
+    renderOpenClawTaskBanner();
+    return [];
+  }
+  try{
+    const res = await fetch("/api/openclaw/tasks?conversationId=" + encodeURIComponent(conversationId));
+    const data = await res.json();
+    if(res.ok && data.ok){
+      openClawTasks = Array.isArray(data.tasks) ? data.tasks : [];
+      activeOpenClawTask = openClawTasks[0] || null;
+      renderOpenClawTaskBanner();
+      return openClawTasks;
+    }
+  }catch(err){
+    console.warn("load OpenClaw tasks failed", err);
+  }
+  return openClawTasks;
+}
+
+function shouldInterceptOpenClawProgressMessage(message){
+  return Boolean(currentConversationId
+    && progressQuestionLooksLikeLocalTaskStatus(message)
+    && currentPendingOpenClawTask());
+}
+
+function showOpenClawProgressIntercept(){
+  const task = currentPendingOpenClawTask();
+  if(!task){
+    return;
+  }
+  setContextStatus("检测到这个会话已有 OpenClaw 长任务记录。当前只能查看 Worker 本地状态，不能确认远端真实进度。");
+  renderOpenClawTaskBanner();
+}
+
+function showOpenClawTaskRecord(task){
+  const lines = [
+    "OpenClaw 本地任务记录",
+    "",
+    "task id: " + (task.id || ""),
+    "status: " + (task.status || ""),
+    "provider: " + (task.provider || ""),
+    "model: " + (task.model || ""),
+    "upstreamModelName: " + (task.upstreamModelName || ""),
+    "startedAt: " + (task.startedAt ? new Date(Number(task.startedAt)).toLocaleString() : ""),
+    "updatedAt: " + (task.updatedAt ? new Date(Number(task.updatedAt)).toLocaleString() : ""),
+    task.error ? "error: " + task.error : "",
+    "",
+    "这是 Worker 本地记录，不能确认 VPS 端真实进度，也不能恢复远端 stream。"
+  ].filter(line => line !== "").join(String.fromCharCode(10));
+  alert(lines);
+}
+
+async function markOpenClawTaskAborted(taskId){
+  if(!taskId){
+    return;
+  }
+  try{
+    const res = await fetch("/api/openclaw/tasks/" + encodeURIComponent(taskId) + "/mark-aborted", {
+      method:"POST"
+    });
+    const data = await res.json().catch(() => null);
+    if(res.ok && data?.ok){
+      mergeOpenClawTask({
+        id:taskId,
+        status:"aborted",
+        updatedAt:data.updatedAt || Date.now(),
+        error:"User stopped waiting locally. Remote task may still be running."
+      });
+    }
+  }catch(err){
+    console.warn("mark OpenClaw task aborted failed", err);
+  }
 }
 
 function resetLocalConversation(){
@@ -6743,6 +6967,9 @@ function resetTransientContext(){
 
 function enterBlankChat(){
   currentConversationId = null;
+  openClawTasks = [];
+  activeOpenClawTask = null;
+  renderOpenClawTaskBanner();
   resetLocalConversation();
   resetChatView();
   resetTransientContext();
@@ -6882,6 +7109,7 @@ async function loadConversationMessages(conversationId){
 
     setActiveConversation();
     setContextStatus(getCurrentContextStatus());
+    await loadOpenClawTasksForConversation(currentConversationId);
     await loadSummaryStatus();
     scrollBottom();
   }catch(err){
@@ -6906,6 +7134,35 @@ sendBtn.addEventListener("click", () => {
     return;
   }
   sendMessage();
+});
+openClawTaskBanner.addEventListener("click", event => {
+  const action = event.target?.dataset?.openclawTaskAction;
+  if(!action){
+    return;
+  }
+  const task = openClawTasks.find(item => item.id === openClawTaskBanner.dataset.taskId) || currentPendingOpenClawTask();
+  if(!task){
+    return;
+  }
+  if(action === "view"){
+    showOpenClawTaskRecord(task);
+    return;
+  }
+  if(action === "wait"){
+    setContextStatus("继续等待当前 OpenClaw 本地任务记录；如果连接已断开，页面无法恢复远端 stream。");
+    return;
+  }
+  if(action === "rerun"){
+    allowOpenClawRepeatOnce = true;
+    ignoredOpenClawTaskIds.add(task.id);
+    renderOpenClawTaskBanner();
+    sendMessage();
+    return;
+  }
+  if(action === "ignore"){
+    ignoredOpenClawTaskIds.add(task.id);
+    renderOpenClawTaskBanner();
+  }
 });
 newChatBtn.addEventListener("click", createNewConversation);
 viewSummaryBtn.addEventListener("click", viewCurrentSummary);
@@ -7663,6 +7920,20 @@ function handleStreamEvent(eventText, state, element){
     return false;
   }
 
+  if(event.type === "openclaw_task"){
+    try{
+      const data = JSON.parse(event.data || "{}");
+      if(data?.id){
+        state.openClawTask = data;
+        mergeOpenClawTask(data);
+      }
+    }catch(err){
+      console.log("parse OpenClaw task failed", err);
+    }
+
+    return false;
+  }
+
   if(event.type === "fallback"){
     try{
       const data = JSON.parse(event.data || "{}");
@@ -7743,7 +8014,8 @@ async function streamAIResponse(response, element, isOpenClawRequest = false){
       providerError:null
     },
     openClawFriendlyError:false,
-    isOpenClawRequest:Boolean(isOpenClawRequest)
+    isOpenClawRequest:Boolean(isOpenClawRequest),
+    openClawTask:null
   };
 
   while(true){
@@ -7778,6 +8050,12 @@ async function sendMessage(){
   }
 
   const message = input.value.trim();
+  if(!allowOpenClawRepeatOnce && shouldInterceptOpenClawProgressMessage(message)){
+    showOpenClawProgressIntercept();
+    return;
+  }
+  const openClawRepeatAllowed = allowOpenClawRepeatOnce;
+  allowOpenClawRepeatOnce = false;
   const imageToSend = selectedImage;
   const attachmentsToSend = pastedImageAttachments.slice();
   const legacyImageToSend = imageToSend || attachmentsToSend[0]?.dataUrl || null;
@@ -7861,6 +8139,9 @@ async function sendMessage(){
   resetInputHeight();
 
   const isOpenClawRequest = isSelectedOpenClawRequest(modelSelect.value);
+  if(openClawRepeatAllowed){
+    setContextStatus("已确认重新发起新的 OpenClaw 请求。");
+  }
   if(isOpenClawRequest){
     activeChatAbortController = new AbortController();
   }
@@ -7994,6 +8275,14 @@ async function sendMessage(){
     }
 
   }catch(err){
+    if(isOpenClawRequest && activeOpenClawTask?.id && err?.name !== "AbortError"){
+      mergeOpenClawTask({
+        ...activeOpenClawTask,
+        status:"disconnected",
+        updatedAt:Date.now(),
+        error:err?.message || "Connection interrupted"
+      });
+    }
 
     aiDiv.innerHTML =
       isOpenClawRequest ? openClawFriendlyError(err) : "请求失败：" + err.message;

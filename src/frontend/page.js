@@ -2443,7 +2443,7 @@ let openClawTaskHistoryView = "recent";
 let openClawReconnectTask = null;
 let openClawReconnectPollingTimer = null;
 let openClawReconnectPollingTaskId = "";
-const OPENCLAW_RECONNECT_POLL_MS = 7000;
+const OPENCLAW_RECONNECT_POLL_MS = 4000;
 
 const imageBtn = document.getElementById("imageBtn");
 const imageInput = document.getElementById("imageInput");
@@ -6796,19 +6796,69 @@ function isOpenClawProviderError(error){
 }
 
 function isOpenClawTaskPending(task){
-  return ["running", "disconnected", "expired"].includes(String(task?.status || ""));
+  return ["running", "pending", "disconnected", "expired", "cancel_requested"].includes(String(task?.status || ""));
 }
 
 function openClawTaskStatusLabel(status){
   const labels = {
     running:"本地记录：仍在等待",
+    pending:"等待中",
     completed:"已完成",
     failed:"请求失败",
     aborted:"已停止本地等待",
+    cancelled:"已取消",
+    cancel_requested:"Cancel requested",
     disconnected:"连接已中断",
     expired:"本地记录已过期"
   };
   return labels[status] || status || "未知";
+}
+
+function openClawTaskRemoteStatus(task){
+  return task?.remote_status || task?.remoteStatus || "";
+}
+
+function openClawTaskRemoteProgress(task){
+  const value = task?.remote_progress ?? task?.remoteProgress;
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.min(100, number)) : null;
+}
+
+function openClawTaskRemoteMessage(task){
+  return task?.remote_message || task?.remoteMessage || "";
+}
+
+function openClawTaskHasRemoteState(task){
+  return Boolean(openClawTaskRemoteStatus(task)
+    || openClawTaskRemoteProgress(task) !== null
+    || openClawTaskRemoteMessage(task));
+}
+
+function openClawTaskDisplayStatus(task){
+  return openClawTaskHasRemoteState(task)
+    ? openClawTaskRemoteStatus(task) || task.status || ""
+    : openClawTaskStatusLabel(task.status);
+}
+
+function isOpenClawTaskTerminal(task){
+  return ["completed", "failed", "aborted", "cancelled"].includes(String(task?.status || ""));
+}
+
+function shouldPollOpenClawTask(task){
+  const status = String(task?.status || "");
+  const remoteStatus = String(openClawTaskRemoteStatus(task) || "").toLowerCase();
+  return ["running", "pending", "disconnected", "expired", "cancel_requested"].includes(status)
+    || ["running", "pending", "queued", "in_progress", "processing", "cancel_requested", "cancelling", "canceling"].includes(remoteStatus);
+}
+
+function shouldShowOpenClawCancel(task){
+  const status = String(task?.status || "");
+  const remoteStatus = String(openClawTaskRemoteStatus(task) || "").toLowerCase();
+  return Boolean(task?.id
+    && shouldPollOpenClawTask(task)
+    && !isOpenClawTaskTerminal(task)
+    && status !== "cancel_requested"
+    && remoteStatus !== "cancel_requested");
 }
 
 function formatOpenClawTaskTime(value){
@@ -6869,14 +6919,19 @@ function shouldShowOpenClawReconnectBanner(task){
 }
 
 function renderOpenClawReconnectBanner(task){
+  const progress = openClawTaskRemoteProgress(task);
+  const remoteMessage = openClawTaskRemoteMessage(task);
   openClawTaskBanner.innerHTML = [
     "<strong>OpenClaw task still running</strong>",
     "<div class='openClawTaskMeta'>",
-    escapeHtml(openClawTaskStatusLabel(task.status)),
+    escapeHtml(openClawTaskDisplayStatus(task)),
+    progress !== null ? "<br />progress: " + progress + "%" : "",
+    remoteMessage ? "<br />" + escapeHtml(remoteMessage) : "",
     task.model ? "<br />model: " + escapeHtml(task.upstreamModelName || task.model) : "",
     "</div>",
     "<div class='openClawTaskActions'>",
     "<button type='button' data-openclaw-task-action='reconnect'>Reconnect</button>",
+    shouldShowOpenClawCancel(task) ? "<button type='button' data-openclaw-task-action='cancel'>Cancel</button>" : "",
     "<button type='button' data-openclaw-task-action='dismiss-reconnect'>Dismiss</button>",
     "</div>"
   ].join("");
@@ -6945,19 +7000,24 @@ function renderOpenClawTaskBanner(){
     return;
   }
 
-  const status = openClawTaskStatusLabel(task.status);
+  const status = openClawTaskDisplayStatus(task);
+  const progress = openClawTaskRemoteProgress(task);
+  const remoteMessage = openClawTaskRemoteMessage(task);
   const started = formatOpenClawTaskTime(task.startedAt);
   const modelLabel = [task.provider, task.upstreamModelName || task.model].filter(Boolean).join(" / ");
   openClawTaskBanner.innerHTML = [
     "<strong>OpenClaw 本地任务记录</strong>",
     "<div class='openClawTaskMeta'>",
     escapeHtml(status),
+    progress !== null ? "<br />progress: " + progress + "%" : "",
+    remoteMessage ? "<br />" + escapeHtml(remoteMessage) : "",
     modelLabel ? "<br />模型：" + escapeHtml(modelLabel) : "",
     started ? "<br />开始：" + escapeHtml(started) : "",
     "<br />这是 Worker 本地记录，不能确认 VPS 端真实进度，也不能恢复远端 stream。",
     "</div>",
     "<div class='openClawTaskActions'>",
     "<button type='button' data-openclaw-task-action='view'>查看记录</button>",
+    shouldShowOpenClawCancel(task) ? "<button type='button' data-openclaw-task-action='cancel'>Cancel</button>" : "",
     isOpenClawTaskPending(task) ? "<button type='button' data-openclaw-task-action='wait'>继续等待</button>" : "",
     "<button type='button' data-openclaw-task-action='rerun'>重新发起</button>",
     "<button type='button' data-openclaw-task-action='ignore'>忽略</button>",
@@ -7030,23 +7090,36 @@ function stopOpenClawReconnectPolling(){
   openClawReconnectPollingTaskId = "";
 }
 
+async function fetchOpenClawTaskStatus(taskId){
+  const res = await fetch("/api/openclaw/tasks/" + encodeURIComponent(taskId) + "/status");
+  const data = await res.json();
+  if(!res.ok || !data.ok){
+    throw new Error(data.error || "OpenClaw task status failed");
+  }
+  return data.task || null;
+}
+
+async function fetchOpenClawTaskFromList(taskId){
+  const params = new URLSearchParams({
+    conversation_id:currentConversationId,
+    limit:"20",
+    offset:"0",
+    sort:"created_desc"
+  });
+  const res = await fetch("/api/openclaw/tasks?" + params.toString());
+  const data = await res.json();
+  if(!res.ok || !data.ok){
+    throw new Error(data.error || "OpenClaw task polling failed");
+  }
+  return (data.tasks || []).find(item => item.id === taskId) || null;
+}
+
 async function pollOpenClawReconnectTask(taskId){
   if(!currentConversationId || !taskId || openClawReconnectPollingTaskId !== taskId){
     return;
   }
   try{
-    const params = new URLSearchParams({
-      conversation_id:currentConversationId,
-      limit:"20",
-      offset:"0",
-      sort:"created_desc"
-    });
-    const res = await fetch("/api/openclaw/tasks?" + params.toString());
-    const data = await res.json();
-    if(!res.ok || !data.ok){
-      throw new Error(data.error || "OpenClaw task polling failed");
-    }
-    const task = (data.tasks || []).find(item => item.id === taskId);
+    const task = await fetchOpenClawTaskStatus(taskId) || await fetchOpenClawTaskFromList(taskId);
     if(!task){
       return;
     }
@@ -7060,15 +7133,20 @@ async function pollOpenClawReconnectTask(taskId){
       await loadConversationMessages(currentConversationId);
       return;
     }
-    if(task.status === "failed" || task.status === "aborted"){
+    if(task.status === "failed" || task.status === "aborted" || task.status === "cancelled"){
       stopOpenClawReconnectPolling();
-      setContextStatus(task.status === "failed" ? "OpenClaw task failed." : "OpenClaw task aborted locally.");
+      setContextStatus(task.status === "failed" ? "OpenClaw task failed." : "OpenClaw task cancelled.");
       renderOpenClawTaskBanner();
       return;
     }
-    if(task.status === "expired"){
+    if(task.status === "expired" && !task.remoteTaskId && !task.remote_task_id){
       stopOpenClawReconnectPolling();
       setContextStatus("OpenClaw task record expired. Remote progress cannot be confirmed.");
+      renderOpenClawTaskBanner();
+      return;
+    }
+    if(!shouldPollOpenClawTask(task)){
+      stopOpenClawReconnectPolling();
       renderOpenClawTaskBanner();
     }
   }catch(err){
@@ -7086,6 +7164,31 @@ function startOpenClawReconnectPolling(taskId){
   openClawReconnectPollingTimer = setInterval(() => {
     pollOpenClawReconnectTask(taskId);
   }, OPENCLAW_RECONNECT_POLL_MS);
+}
+
+async function cancelOpenClawTask(task){
+  if(!task?.id){
+    return;
+  }
+  try{
+    const res = await fetch("/api/openclaw/tasks/" + encodeURIComponent(task.id) + "/cancel", {
+      method:"POST"
+    });
+    const data = await res.json();
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "OpenClaw task cancel failed");
+    }
+    if(data.task){
+      mergeOpenClawTask(data.task);
+    }
+    setContextStatus((data.task?.status === "cancel_requested" || data.task?.remote_status === "cancel_requested")
+      ? "Cancel requested"
+      : "OpenClaw task cancel request sent.");
+    startOpenClawReconnectPolling(task.id);
+  }catch(err){
+    console.warn("cancel OpenClaw task failed", err);
+    setContextStatus("OpenClaw task cancel failed: " + (err.message || String(err)));
+  }
 }
 
 function shouldInterceptOpenClawProgressMessage(message){
@@ -7538,7 +7641,7 @@ sendBtn.addEventListener("click", () => {
   }
   sendMessage();
 });
-openClawTaskBanner.addEventListener("click", event => {
+openClawTaskBanner.addEventListener("click", async event => {
   const action = event.target?.dataset?.openclawTaskAction;
   if(!action){
     return;
@@ -7549,10 +7652,20 @@ openClawTaskBanner.addEventListener("click", event => {
   }
   if(action === "reconnect"){
     openClawReconnectTask = null;
-    activeOpenClawTask = task;
+    const latestTask = await fetchOpenClawTaskStatus(task.id).catch(() => task) || task;
+    mergeOpenClawTask(latestTask);
+    activeOpenClawTask = latestTask;
     renderOpenClawTaskBanner();
-    startOpenClawReconnectPolling(task.id);
+    if(shouldPollOpenClawTask(latestTask)){
+      startOpenClawReconnectPolling(latestTask.id);
+    }else{
+      stopOpenClawReconnectPolling();
+    }
     setContextStatus("Reconnected to local OpenClaw task tracking. Remote stream cannot be restored.");
+    return;
+  }
+  if(action === "cancel"){
+    await cancelOpenClawTask(task);
     return;
   }
   if(action === "dismiss-reconnect"){

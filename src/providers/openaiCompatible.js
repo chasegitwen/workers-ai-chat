@@ -5,6 +5,17 @@ function normalizeApiBase(apiBase) {
   return String(apiBase || "").replace(/\/+$/g, "");
 }
 
+function isOpenClawConfig(config) {
+  const values = [
+    config?.provider,
+    config?.id,
+    config?.modelName,
+    config?.label,
+    config?.apiBase
+  ].map(value => String(value || "").toLowerCase());
+  return values.some(value => value.startsWith("openclaw-") || value.includes("openclaw"));
+}
+
 export async function callOpenAICompatible({
   env,
   config,
@@ -56,12 +67,16 @@ export async function callOpenAICompatible({
   let response;
 
   try {
+    const headers = {
+      "Authorization": "Bearer " + apiKey,
+      "Content-Type": "application/json"
+    };
+    if (isOpenClawConfig(config)) {
+      headers["X-OpenClaw-Task-Events"] = "1";
+    }
     response = await fetch(apiBase + "/chat/completions", {
       method: "POST",
-      headers: {
-        "Authorization": "Bearer " + apiKey,
-        "Content-Type": "application/json"
-      },
+      headers,
       body: JSON.stringify(body),
       signal: controller?.signal
     });

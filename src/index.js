@@ -13,13 +13,32 @@ import { getEnabledModels } from "./providers/config.js";
 import { corsHeaders, jsonResponse } from "./utils/response.js";
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS") {
       return new Response(null, {
         headers: corsHeaders()
       });
+    }
+
+    if (url.pathname.startsWith("/api/openclaw/tasks")) {
+      if (request.method !== "GET" && request.method !== "POST") {
+        return jsonResponse({
+          ok: false,
+          error: "Method not allowed"
+        }, 405);
+      }
+
+      if (url.pathname !== "/api/openclaw/tasks/ping") {
+        const auth = await requireAuth(request, env);
+
+        if (!auth.ok) {
+          return auth.response;
+        }
+      }
+
+      return handleChat(request, env, ctx);
     }
 
     if (url.pathname.startsWith("/api/auth")) {
@@ -100,11 +119,7 @@ export default {
     }
 
     if (url.pathname === "/api/browser/inspect") {
-      return handleChat(request, env);
-    }
-
-    if (url.pathname.startsWith("/api/openclaw/tasks")) {
-      return handleChat(request, env);
+      return handleChat(request, env, ctx);
     }
 
     if (request.method === "GET") {
@@ -183,6 +198,6 @@ export default {
       return handleSearchAndFetch(request, env);
     }
 
-    return handleChat(request, env);
+    return handleChat(request, env, ctx);
   }
 };

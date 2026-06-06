@@ -284,12 +284,25 @@ async function updateOpenClawTask(env, task, patch = {}) {
   }
 }
 
-async function updateOpenClawTaskRemoteStart(env, task, remoteTaskId) {
-  const id = String(remoteTaskId || "").trim();
+async function updateOpenClawTaskRemoteStart(env, task, remoteTask) {
+  const detail = typeof remoteTask === "object" && remoteTask !== null
+    ? remoteTask
+    : { taskId: remoteTask };
+  const id = String(detail.taskId || "").trim();
   if (!env.DB || !task?.id || !id) {
     return task;
   }
+  const existingTask = await readOpenClawTaskById(env, task.id);
+  const existingRemoteStatus = String(existingTask?.remoteStatus || existingTask?.remote_status || "");
+  if (isOpenClawTaskTerminalStatus(localStatusFromRemoteStatus(existingRemoteStatus))) {
+    return existingTask || task;
+  }
   const now = Date.now();
+  const remoteStatus = String(detail.status || "running");
+  const remoteProgress = Number.isFinite(Number(detail.progress))
+    ? Math.max(0, Math.min(100, Number(detail.progress)))
+    : 0;
+  const remoteMessage = String(detail.message || "Remote task started");
   try {
     await env.DB.prepare(
       `UPDATE openclaw_tasks
@@ -298,25 +311,34 @@ async function updateOpenClawTaskRemoteStart(env, task, remoteTaskId) {
           remote_progress = ?,
           remote_message = ?,
           updated_at = ?
-        WHERE id = ?`
+        WHERE id = ?
+          AND LOWER(COALESCE(remote_status, '')) NOT IN (
+            'completed', 'complete', 'done', 'success', 'succeeded',
+            'failed', 'failure', 'error',
+            'cancelled', 'canceled'
+          )`
     ).bind(
       id,
-      "running",
-      0,
-      "Remote task started",
+      remoteStatus,
+      remoteProgress,
+      remoteMessage,
       now,
       task.id
     ).run();
+    const latestTask = await readOpenClawTaskById(env, task.id);
+    if (latestTask) {
+      return latestTask;
+    }
     return {
       ...task,
       remoteTaskId: id,
       remote_task_id: id,
-      remoteStatus: "running",
-      remote_status: "running",
-      remoteProgress: 0,
-      remote_progress: 0,
-      remoteMessage: "Remote task started",
-      remote_message: "Remote task started",
+      remoteStatus,
+      remote_status: remoteStatus,
+      remoteProgress,
+      remote_progress: remoteProgress,
+      remoteMessage,
+      remote_message: remoteMessage,
       updatedAt: now,
       updated_at: now
     };
@@ -408,19 +430,76 @@ async function readOpenClawTaskById(env, taskId) {
   return serializeOpenClawTask(row);
 }
 
-function openClawRemoteTaskEndpoint(env) {
-  return String(env.OPENCLAW_REMOTE_TASK_ENDPOINT
-    || env.OPENCLAW_TASK_ENDPOINT
-    || env.OPENCLAW_GATEWAY_BASE_URL
-    || "").trim().replace(/\/+$/g, "");
+function normalizeOpenClawTaskEndpoint(value) {
+  const endpoint = String(value || "").trim().replace(/\/+$/g, "");
+  if (!endpoint) {
+    return "";
+  }
+  if (/\/tasks$/i.test(endpoint)) {
+    return endpoint;
+  }
+  if (/\/chat\/completions$/i.test(endpoint)) {
+    return endpoint.replace(/\/chat\/completions$/i, "/tasks");
+  }
+  return endpoint + "/tasks";
 }
 
-function openClawRemoteTaskHeaders(env) {
-  const token = String(env.OPENCLAW_REMOTE_TASK_TOKEN
+function openClawRemoteTaskExplicitEndpoint(env) {
+  return normalizeOpenClawTaskEndpoint(env.OPENCLAW_REMOTE_TASK_ENDPOINT
+    || env.OPENCLAW_TASK_ENDPOINT
+    || env.OPENCLAW_GATEWAY_BASE_URL
+    || "");
+}
+
+function openClawRemoteTaskExplicitToken(env) {
+  return String(env.OPENCLAW_REMOTE_TASK_TOKEN
     || env.OPENCLAW_TASK_TOKEN
     || env.OPENCLAW_GATEWAY_TOKEN
-    || env.GLM_API_KEY
     || "").trim();
+}
+
+function openClawRemoteTaskLegacyToken(env) {
+  return String(env.GLM_API_KEY || "").trim();
+}
+
+async function openClawRemoteTaskProviderConfig(env, task) {
+  const providerId = String(task?.provider || "").trim();
+  if (!providerId) {
+    return null;
+  }
+
+  const providers = await readSavedProviders(env);
+  const provider = (providers || []).find(item => String(item.id || item.providerId || "") === providerId);
+
+  if (!provider) {
+    return null;
+  }
+
+  return {
+    endpoint: normalizeOpenClawTaskEndpoint(provider.apiBase || provider.baseUrl || ""),
+    apiKeyEnv: String(provider.apiKeyEnv || "").trim()
+  };
+}
+
+async function openClawRemoteTaskRequestConfig(env, task) {
+  const providerConfig = await openClawRemoteTaskProviderConfig(env, task);
+  const explicitEndpoint = openClawRemoteTaskExplicitEndpoint(env);
+  const explicitToken = openClawRemoteTaskExplicitToken(env);
+  const providerToken = providerConfig?.apiKeyEnv ? String(env[providerConfig.apiKeyEnv] || "").trim() : "";
+  const legacyToken = openClawRemoteTaskLegacyToken(env);
+  const endpoint = providerConfig?.endpoint || explicitEndpoint || "";
+  const token = providerToken || explicitToken || legacyToken;
+
+  return {
+    endpoint,
+    token,
+    endpointSource: providerConfig?.endpoint ? "provider" : explicitEndpoint ? "env" : "missing",
+    tokenSource: providerToken ? "provider:" + providerConfig.apiKeyEnv : explicitToken ? "env" : legacyToken ? "legacy:GLM_API_KEY" : "missing",
+    providerApiKeyEnv: providerConfig?.apiKeyEnv || ""
+  };
+}
+
+function openClawRemoteTaskHeaders(token) {
   const headers = {
     "Content-Type": "application/json"
   };
@@ -430,27 +509,32 @@ function openClawRemoteTaskHeaders(env) {
   return headers;
 }
 
-async function callOpenClawRemoteTask(env, remoteTaskId, action) {
-  const endpoint = openClawRemoteTaskEndpoint(env);
+async function callOpenClawRemoteTask(env, remoteTaskId, action, task = null) {
+  const requestConfig = await openClawRemoteTaskRequestConfig(env, task);
+  const endpoint = requestConfig.endpoint;
   if (!endpoint) {
     return {
       ok: false,
       unavailable: true,
-      error: "OpenClaw remote task endpoint is not configured"
+      error: "OpenClaw remote task endpoint is not configured",
+      debug: {
+        endpointSource: requestConfig.endpointSource,
+        tokenSource: requestConfig.tokenSource
+      }
     };
   }
   const id = encodeURIComponent(String(remoteTaskId || "").trim());
   const suffix = action === "cancel"
-    ? `/tasks/${id}/cancel`
+    ? `/${id}/cancel`
     : action === "result"
-      ? `/tasks/${id}/result`
-      : `/tasks/${id}/status`;
+      ? `/${id}/result`
+      : `/${id}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30000);
   try {
     const response = await fetch(endpoint + suffix, {
       method: action === "cancel" ? "POST" : "GET",
-      headers: openClawRemoteTaskHeaders(env),
+      headers: openClawRemoteTaskHeaders(requestConfig.token),
       signal: controller.signal
     });
     const text = await response.text();
@@ -465,44 +549,85 @@ async function callOpenClawRemoteTask(env, remoteTaskId, action) {
         ok: false,
         status: response.status,
         error: data.error || data.message || "OpenClaw remote task request failed",
-        data
+        data,
+        debug: {
+          endpointSource: requestConfig.endpointSource,
+          tokenSource: requestConfig.tokenSource,
+          hasToken: Boolean(requestConfig.token)
+        }
+      };
+    }
+    if (data && typeof data === "object" && data.ok === false) {
+      return {
+        ok: false,
+        status: response.status,
+        error: data.error || data.message || "OpenClaw remote task request failed",
+        data,
+        debug: {
+          endpointSource: requestConfig.endpointSource,
+          tokenSource: requestConfig.tokenSource,
+          hasToken: Boolean(requestConfig.token)
+        }
       };
     }
     return {
       ok: true,
-      data
+      status: response.status,
+      data,
+      debug: {
+        endpointSource: requestConfig.endpointSource,
+        tokenSource: requestConfig.tokenSource,
+        hasToken: Boolean(requestConfig.token)
+      }
     };
   } catch (err) {
     return {
       ok: false,
-      error: err?.message || String(err)
+      error: err?.message || String(err),
+      debug: {
+        endpointSource: requestConfig.endpointSource,
+        tokenSource: requestConfig.tokenSource,
+        hasToken: Boolean(requestConfig.token)
+      }
     };
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function getOpenClawTaskStatus(env, remoteTaskId) {
-  return callOpenClawRemoteTask(env, remoteTaskId, "status");
+async function getOpenClawTaskStatus(env, remoteTaskId, task = null) {
+  return callOpenClawRemoteTask(env, remoteTaskId, "status", task);
 }
 
-async function cancelOpenClawTask(env, remoteTaskId) {
-  return callOpenClawRemoteTask(env, remoteTaskId, "cancel");
+async function cancelOpenClawTask(env, remoteTaskId, task = null) {
+  return callOpenClawRemoteTask(env, remoteTaskId, "cancel", task);
 }
 
-async function getOpenClawTaskResult(env, remoteTaskId) {
-  return callOpenClawRemoteTask(env, remoteTaskId, "result");
+async function getOpenClawTaskResult(env, remoteTaskId, task = null) {
+  return callOpenClawRemoteTask(env, remoteTaskId, "result", task);
 }
 
 function normalizeRemoteTaskPayload(result) {
-  const data = result?.data || {};
+  const data = result?.data && typeof result.data === "object" ? result.data : {};
+  const task = data.task && typeof data.task === "object"
+    ? data.task
+    : data.data?.task && typeof data.data.task === "object"
+      ? data.data.task
+      : data.data && typeof data.data === "object"
+        ? data.data
+        : data;
+  const progressValue = task.progress ?? task.remote_progress ?? data.progress ?? data.remote_progress;
   return {
-    status: data.status || data.remote_status || data.state || "",
-    progress: Number.isFinite(Number(data.progress ?? data.remote_progress))
-      ? Math.max(0, Math.min(100, Number(data.progress ?? data.remote_progress)))
+    id: task.id || task.task_id || task.taskId || data.id || data.task_id || data.taskId || "",
+    task_id: task.task_id || task.id || task.taskId || data.task_id || data.id || data.taskId || "",
+    taskId: task.taskId || task.id || task.task_id || data.taskId || data.id || data.task_id || "",
+    status: task.status || task.remote_status || task.state || data.status || data.remote_status || data.state || "",
+    progress: Number.isFinite(Number(progressValue))
+      ? Math.max(0, Math.min(100, Number(progressValue)))
       : null,
-    message: data.message || data.remote_message || data.detail || data.error || "",
-    result: data.result || data.output || data.response || null
+    message: task.message || task.remote_message || task.detail || task.error
+      || data.message || data.remote_message || data.detail || data.error || "",
+    result: task.result || task.output || task.response || data.result || data.output || data.response || null
   };
 }
 
@@ -526,20 +651,40 @@ function localStatusFromRemoteStatus(remoteStatus, fallback = "") {
   return fallback || "";
 }
 
+function openClawRemoteTaskId(task) {
+  return String(task?.remoteTaskId || task?.remote_task_id || "").trim();
+}
+
+function isOpenClawRemoteTerminalStatus(status) {
+  return isOpenClawTaskTerminalStatus(localStatusFromRemoteStatus(status));
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function syncOpenClawRemoteTask(env, localTask, remoteResult, patch = {}) {
   if (!env.DB || !localTask?.id || !remoteResult?.ok) {
     return localTask;
   }
   const remote = normalizeRemoteTaskPayload(remoteResult);
   const now = Date.now();
+  const currentLocalStatus = localTask.storedStatus || localTask.status || "running";
   const nextStatus = patch.status
-    || localStatusFromRemoteStatus(remote.status, localTask.storedStatus || localTask.status || "running");
+    || (isOpenClawTaskTerminalStatus(currentLocalStatus)
+      ? currentLocalStatus
+      : localStatusFromRemoteStatus(remote.status, currentLocalStatus));
   const completedAt = nextStatus === "completed" || nextStatus === "failed"
     ? now
     : localTask.completedAt || null;
   const cancelledAt = nextStatus === "cancelled" || nextStatus === "cancel_requested"
     ? new Date(now).toISOString()
     : null;
+  const nextRemoteStatus = remote.status || localTask.remoteStatus || localTask.remote_status || "unknown";
+  const nextRemoteProgress = remote.progress !== null
+    ? remote.progress
+    : localTask.remoteProgress ?? localTask.remote_progress ?? null;
+  const nextRemoteMessage = remote.message || localTask.remoteMessage || localTask.remote_message || "";
   try {
     await env.DB.prepare(
       `UPDATE openclaw_tasks
@@ -556,18 +701,135 @@ async function syncOpenClawRemoteTask(env, localTask, remoteResult, patch = {}) 
       nextStatus,
       now,
       completedAt,
-      nextStatus === "failed" ? remote.message : (localTask.error || ""),
-      remote.status || "",
-      remote.progress,
-      remote.message || "",
+      nextStatus === "failed" ? (remote.message || localTask.error || "") : (localTask.error || ""),
+      nextRemoteStatus,
+      nextRemoteProgress,
+      nextRemoteMessage,
       cancelledAt,
       localTask.id
     ).run();
-    return await readOpenClawTaskById(env, localTask.id);
+    const syncedTask = await readOpenClawTaskById(env, localTask.id);
+    console.warn("[openclaw-task] remote sync completed", {
+      localTaskId: localTask.id,
+      remoteTaskId: openClawRemoteTaskId(localTask),
+      localStatus: nextStatus,
+      remoteStatus: nextRemoteStatus,
+      remoteProgress: nextRemoteProgress,
+      hasRemoteMessage: Boolean(nextRemoteMessage)
+    });
+    return syncedTask;
   } catch (err) {
     console.warn("[openclaw-task] failed to sync remote task", err?.message || String(err));
     return localTask;
   }
+}
+
+async function markOpenClawRemoteStatusUnavailable(env, task, message = "Remote status unavailable after local completion") {
+  if (!env.DB || !task?.id) {
+    return {
+      ...task,
+      remoteStatus: "unknown",
+      remote_status: "unknown",
+      remoteMessage: message,
+      remote_message: message
+    };
+  }
+  const now = Date.now();
+  try {
+    await env.DB.prepare(
+      `UPDATE openclaw_tasks
+        SET updated_at = ?,
+          remote_status = ?,
+          remote_message = ?
+        WHERE id = ?`
+    ).bind(
+      now,
+      "unknown",
+      message,
+      task.id
+    ).run();
+    return await readOpenClawTaskById(env, task.id);
+  } catch (err) {
+    console.warn("[openclaw-task] failed to mark remote status unavailable", err?.message || String(err));
+    return {
+      ...task,
+      remoteStatus: "unknown",
+      remote_status: "unknown",
+      remoteMessage: message,
+      remote_message: message,
+      updatedAt: now,
+      updated_at: now
+    };
+  }
+}
+
+async function syncOpenClawRemoteTaskAfterLocalTerminal(env, task, localStatus) {
+  const remoteTaskId = openClawRemoteTaskId(task);
+  if (!remoteTaskId) {
+    console.warn("[openclaw-task] terminal remote sync skipped: missing remote_task_id", {
+      localTaskId: task?.id || "",
+      localStatus: localStatus || task?.storedStatus || task?.status || ""
+    });
+    return task;
+  }
+  console.warn("[openclaw-task] terminal remote sync started", {
+    localTaskId: task?.id || "",
+    remoteTaskId,
+    localStatus: localStatus || task?.storedStatus || task?.status || ""
+  });
+  const remoteResult = await getOpenClawTaskStatus(env, remoteTaskId, task);
+  if (!remoteResult.ok) {
+    console.warn("[openclaw-task] terminal remote sync failed", {
+      localTaskId: task?.id || "",
+      remoteTaskId,
+      error: remoteResult.error || "",
+      status: remoteResult.status || null,
+      unavailable: Boolean(remoteResult.unavailable)
+    });
+    return markOpenClawRemoteStatusUnavailable(env, task);
+  }
+  const remote = normalizeRemoteTaskPayload(remoteResult);
+  console.warn("[openclaw-task] terminal remote sync response", {
+    localTaskId: task?.id || "",
+    remoteTaskId,
+    remoteStatus: remote.status || "",
+    remoteProgress: remote.progress,
+    hasRemoteMessage: Boolean(remote.message)
+  });
+  return syncOpenClawRemoteTask(env, task, remoteResult, {
+    status: localStatus || task.storedStatus || task.status
+  });
+}
+
+async function runOpenClawTerminalRemoteSync(env, ctx, task, localStatus) {
+  const promise = syncOpenClawRemoteTaskAfterLocalTerminal(env, task, localStatus);
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(promise.catch(err => {
+      console.warn("[openclaw-task] waitUntil terminal remote sync failed", err?.message || String(err));
+    }));
+  }
+  const syncedTask = await promise;
+  const remoteStatus = syncedTask?.remoteStatus || syncedTask?.remote_status || "";
+  const remoteTaskId = openClawRemoteTaskId(syncedTask || task);
+  if (ctx?.waitUntil
+    && remoteTaskId
+    && isOpenClawTaskTerminalStatus(localStatus)
+    && !isOpenClawRemoteTerminalStatus(remoteStatus)) {
+    ctx.waitUntil((async () => {
+      let latestTask = syncedTask || task;
+      for (const delayMs of [3000, 10000]) {
+        await sleep(delayMs);
+        latestTask = await syncOpenClawRemoteTaskAfterLocalTerminal(env, latestTask, localStatus) || latestTask;
+        const latestRemoteStatus = latestTask?.remoteStatus || latestTask?.remote_status || "";
+        if (isOpenClawRemoteTerminalStatus(latestRemoteStatus)) {
+          break;
+        }
+      }
+    })().catch(err => {
+      console.warn("[openclaw-task] delayed terminal remote sync failed", err?.message || String(err));
+    }));
+  }
+  return syncedTask;
 }
 
 async function markOpenClawTaskCancelRequested(env, task, message = "Cancel requested locally. Remote task state is unknown.") {
@@ -605,7 +867,14 @@ async function markOpenClawTaskCancelRequested(env, task, message = "Cancel requ
   }
 }
 
-async function handleOpenClawTasksRequest(request, env, url) {
+async function handleOpenClawTasksRequest(request, env, url, ctx) {
+  if (url.pathname === "/api/openclaw/tasks/ping" && request.method === "GET") {
+    return jsonResponse({
+      ok: true,
+      route: "openclaw-tasks"
+    });
+  }
+
   if (url.pathname === "/api/openclaw/tasks/active" && request.method === "GET") {
     const conversationId = url.searchParams.get("conversation_id") || url.searchParams.get("conversationId");
     if (!conversationId) {
@@ -662,21 +931,40 @@ async function handleOpenClawTasksRequest(request, env, url) {
       if (!task) {
         return jsonResponse({ ok: false, error: "OpenClaw task not found" }, 404);
       }
-      if (!task.remoteTaskId) {
+      const remoteTaskId = openClawRemoteTaskId(task);
+      if (!remoteTaskId) {
         return jsonResponse({
           ok: true,
           remote: false,
-          task
+          task,
+          debug: {
+            remoteTaskId: "",
+            remoteStatusAttempted: false,
+            remoteStatusOk: false,
+            remoteHttpStatus: null
+          }
         });
       }
-      const remoteResult = await getOpenClawTaskStatus(env, task.remoteTaskId);
+      const remoteResult = await getOpenClawTaskStatus(env, remoteTaskId, task);
       if (!remoteResult.ok) {
+        const nextTask = (isOpenClawTaskTerminalStatus(task.status) || isOpenClawTaskTerminalStatus(task.storedStatus))
+          ? await markOpenClawRemoteStatusUnavailable(env, task, "Remote status unavailable")
+          : task;
         return jsonResponse({
           ok: true,
           remote: true,
           remoteAvailable: false,
           error: remoteResult.error || "OpenClaw remote task status unavailable",
-          task
+          task: nextTask,
+          debug: {
+            remoteTaskId,
+            remoteStatusAttempted: true,
+            remoteStatusOk: false,
+            remoteHttpStatus: remoteResult.status || null,
+            endpointSource: remoteResult.debug?.endpointSource || "",
+            tokenSource: remoteResult.debug?.tokenSource || "",
+            hasToken: Boolean(remoteResult.debug?.hasToken)
+          }
         });
       }
       const syncedTask = await syncOpenClawRemoteTask(env, task, remoteResult);
@@ -685,7 +973,16 @@ async function handleOpenClawTasksRequest(request, env, url) {
         remote: true,
         remoteAvailable: true,
         task: syncedTask,
-        remoteStatus: normalizeRemoteTaskPayload(remoteResult)
+        remoteStatus: normalizeRemoteTaskPayload(remoteResult),
+        debug: {
+          remoteTaskId,
+          remoteStatusAttempted: true,
+          remoteStatusOk: true,
+          remoteHttpStatus: remoteResult.status || 200,
+          endpointSource: remoteResult.debug?.endpointSource || "",
+          tokenSource: remoteResult.debug?.tokenSource || "",
+          hasToken: Boolean(remoteResult.debug?.hasToken)
+        }
       });
     } catch (err) {
       return jsonResponse({
@@ -707,13 +1004,14 @@ async function handleOpenClawTasksRequest(request, env, url) {
       if (isOpenClawTaskTerminalStatus(task.status) || isOpenClawTaskTerminalStatus(task.storedStatus)) {
         return jsonResponse({
           ok: true,
-          remote: Boolean(task.remoteTaskId),
+          remote: Boolean(openClawRemoteTaskId(task)),
           cancelled: false,
           terminal: true,
           task
         });
       }
-      if (!task.remoteTaskId) {
+      const remoteTaskId = openClawRemoteTaskId(task);
+      if (!remoteTaskId) {
         const localTask = await markOpenClawTaskCancelRequested(env, task, "Cancel requested locally. This task has no remote_task_id.");
         return jsonResponse({
           ok: true,
@@ -722,7 +1020,7 @@ async function handleOpenClawTasksRequest(request, env, url) {
           task: localTask
         });
       }
-      const remoteResult = await cancelOpenClawTask(env, task.remoteTaskId);
+      const remoteResult = await cancelOpenClawTask(env, remoteTaskId, task);
       if (!remoteResult.ok) {
         const localTask = await markOpenClawTaskCancelRequested(env, task, remoteResult.error || "Cancel requested locally. Remote cancel is unavailable.");
         return jsonResponse({
@@ -774,7 +1072,11 @@ async function handleOpenClawTasksRequest(request, env, url) {
         "User stopped waiting locally. Remote task may still be running.",
         id
       ).run();
-      return jsonResponse({ ok: true, id, status: "aborted", updatedAt: now });
+      let task = await readOpenClawTaskById(env, id);
+      if (openClawRemoteTaskId(task) && (task.storedStatus === "aborted" || task.status === "aborted")) {
+        task = await runOpenClawTerminalRemoteSync(env, ctx, task, "aborted") || task;
+      }
+      return jsonResponse({ ok: true, id, status: "aborted", updatedAt: now, task });
     } catch (err) {
       return jsonResponse({
         ok: false,
@@ -2254,10 +2556,26 @@ function findOpenClawRemoteTaskId(value) {
     : "";
 }
 
-function extractOpenClawRemoteTaskIdFromText(text) {
+function openClawRemoteTaskDetail(value) {
+  const taskId = findOpenClawRemoteTaskId(value);
+  if (!taskId) {
+    return null;
+  }
+  const source = value?.data && typeof value.data === "object"
+    ? { ...value, ...value.data }
+    : value;
+  return {
+    taskId,
+    status: source.status || "running",
+    progress: source.progress ?? 0,
+    message: source.message || "Remote task started"
+  };
+}
+
+function extractOpenClawRemoteTaskFromText(text) {
   const raw = String(text || "");
   if (!raw.trim()) {
-    return "";
+    return null;
   }
   const candidates = [];
   for (const line of raw.split("\n")) {
@@ -2277,15 +2595,24 @@ function extractOpenClawRemoteTaskIdFromText(text) {
   for (const candidate of candidates) {
     try {
       const parsed = JSON.parse(candidate);
-      const id = findOpenClawRemoteTaskId(parsed);
-      if (id) {
-        return id;
+      const detail = openClawRemoteTaskDetail(parsed);
+      if (detail) {
+        return detail;
       }
     } catch (err) {
       // Ignore non-JSON stream chunks.
     }
   }
-  return "";
+  if (url.pathname.startsWith("/api/openclaw/tasks")) {
+    return jsonResponse({
+      ok: false,
+      error: "OpenClaw task route not found",
+      method: request.method,
+      pathname: url.pathname
+    }, 404);
+  }
+
+  return null;
 }
 
 function appendReplyFromSseBuffer(bufferState, replyState) {
@@ -2332,6 +2659,7 @@ function appendToolContext(modelMessages, executedToolCall) {
 
 function streamChatWithToolStatus({
   env,
+  ctx,
   conversationId,
   model,
   provider,
@@ -2496,9 +2824,9 @@ function streamChatWithToolStatus({
           if (activeOpenClawTask && !activeOpenClawTask.remoteTaskId && remoteTaskIdScanBytes < 65536) {
             remoteTaskIdScanBytes += chunkText.length;
             remoteTaskIdScanText = (remoteTaskIdScanText + chunkText).slice(-65536);
-            const remoteTaskId = extractOpenClawRemoteTaskIdFromText(remoteTaskIdScanText);
-            if (remoteTaskId) {
-              activeOpenClawTask = await updateOpenClawTaskRemoteStart(env, activeOpenClawTask, remoteTaskId);
+            const remoteTask = extractOpenClawRemoteTaskFromText(remoteTaskIdScanText);
+            if (remoteTask) {
+              activeOpenClawTask = await updateOpenClawTaskRemoteStart(env, activeOpenClawTask, remoteTask);
               enqueueOpenClawTask(activeOpenClawTask);
             }
           }
@@ -2530,6 +2858,12 @@ function streamChatWithToolStatus({
             latencyMs,
             assistantMessageId: assistantMessage?.id || ""
           };
+          activeOpenClawTask = await runOpenClawTerminalRemoteSync(
+            env,
+            ctx,
+            activeOpenClawTask,
+            "completed"
+          ) || activeOpenClawTask;
           enqueueOpenClawTask(activeOpenClawTask);
         }
 
@@ -2557,7 +2891,7 @@ function streamChatWithToolStatus({
         });
 
         if (openClawTask) {
-          const failedTask = await updateOpenClawTask(env, openClawTask, {
+          let failedTask = await updateOpenClawTask(env, openClawTask, {
             status: "failed",
             error: providerError.message || String(err),
             latencyMs: 0
@@ -2567,6 +2901,12 @@ function streamChatWithToolStatus({
             error: providerError.message || String(err),
             latencyMs: 0
           };
+          failedTask = await runOpenClawTerminalRemoteSync(
+            env,
+            ctx,
+            failedTask,
+            "failed"
+          ) || failedTask;
           enqueueOpenClawTask(failedTask);
         }
 
@@ -2674,9 +3014,9 @@ async function prepareConversation(env, conversationId, userContent) {
   );
 }
 
-export async function handleChat(request, env) {
+export async function handleChat(request, env, ctx) {
   const url = new URL(request.url);
-  const openClawTasksResponse = await handleOpenClawTasksRequest(request, env, url);
+  const openClawTasksResponse = await handleOpenClawTasksRequest(request, env, url, ctx);
 
   if (openClawTasksResponse) {
     return openClawTasksResponse;
@@ -2910,6 +3250,7 @@ export async function handleChat(request, env) {
 
   return new Response(streamChatWithToolStatus({
     env,
+    ctx,
     conversationId: conversation.id,
     model,
     provider,

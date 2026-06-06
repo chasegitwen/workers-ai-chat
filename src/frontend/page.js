@@ -2443,6 +2443,7 @@ let openClawTaskHistoryView = "recent";
 let openClawReconnectTask = null;
 let openClawReconnectPollingTimer = null;
 let openClawReconnectPollingTaskId = "";
+let openClawCompletedRemoteSyncAttempts = new Map();
 const OPENCLAW_RECONNECT_POLL_MS = 4000;
 
 const imageBtn = document.getElementById("imageBtn");
@@ -6828,6 +6829,27 @@ function openClawTaskRemoteMessage(task){
   return task?.remote_message || task?.remoteMessage || "";
 }
 
+function isOpenClawRemoteTaskTerminal(task){
+  const status = String(openClawTaskRemoteStatus(task) || "").toLowerCase();
+  return ["completed", "complete", "done", "success", "succeeded", "failed", "failure", "error", "cancelled", "canceled"].includes(status)
+    || openClawTaskRemoteProgress(task) === 100;
+}
+
+function shouldContinuePollingCompletedOpenClawTask(task){
+  if(task?.status !== "completed" || !(task.remoteTaskId || task.remote_task_id)){
+    return false;
+  }
+  if(isOpenClawRemoteTaskTerminal(task)){
+    return false;
+  }
+  const attempts = openClawCompletedRemoteSyncAttempts.get(task.id) || 0;
+  if(attempts >= 2){
+    return false;
+  }
+  openClawCompletedRemoteSyncAttempts.set(task.id, attempts + 1);
+  return true;
+}
+
 function openClawTaskHasRemoteState(task){
   return Boolean(openClawTaskRemoteStatus(task)
     || openClawTaskRemoteProgress(task) !== null
@@ -6976,6 +6998,20 @@ function progressQuestionLooksLikeLocalTaskStatus(message){
   return /进展|怎么样|如何了|完成了吗|结束了吗|还在运行|状态|进度|status|progress|done|finished|running/i.test(text);
 }
 
+function openClawTaskHasRemoteId(task){
+  return Boolean(task?.remoteTaskId || task?.remote_task_id);
+}
+
+function openClawTaskBannerTitle(task){
+  return openClawTaskHasRemoteId(task) ? "OpenClaw 远端任务" : "OpenClaw 本地任务记录";
+}
+
+function openClawTaskBannerDisclaimer(task){
+  return openClawTaskHasRemoteId(task)
+    ? "这是 OpenClaw 远端任务记录；Worker 会轮询远端状态，但不能恢复远端 stream。"
+    : "这是 Worker 本地记录，不能确认 VPS 端真实进度，也不能恢复远端 stream。";
+}
+
 function renderOpenClawTaskBanner(){
   const task = currentPendingOpenClawTask() || activeOpenClawTask;
   if(!task || ignoredOpenClawTaskIds.has(task.id)){
@@ -7006,14 +7042,14 @@ function renderOpenClawTaskBanner(){
   const started = formatOpenClawTaskTime(task.startedAt);
   const modelLabel = [task.provider, task.upstreamModelName || task.model].filter(Boolean).join(" / ");
   openClawTaskBanner.innerHTML = [
-    "<strong>OpenClaw 本地任务记录</strong>",
+    "<strong>" + escapeHtml(openClawTaskBannerTitle(task)) + "</strong>",
     "<div class='openClawTaskMeta'>",
     escapeHtml(status),
     progress !== null ? "<br />progress: " + progress + "%" : "",
     remoteMessage ? "<br />" + escapeHtml(remoteMessage) : "",
     modelLabel ? "<br />模型：" + escapeHtml(modelLabel) : "",
     started ? "<br />开始：" + escapeHtml(started) : "",
-    "<br />这是 Worker 本地记录，不能确认 VPS 端真实进度，也不能恢复远端 stream。",
+    "<br />" + escapeHtml(openClawTaskBannerDisclaimer(task)),
     "</div>",
     "<div class='openClawTaskActions'>",
     "<button type='button' data-openclaw-task-action='view'>查看记录</button>",
@@ -7038,7 +7074,9 @@ async function loadOpenClawTasksForConversation(conversationId){
     return [];
   }
   try{
-    const res = await fetch("/api/openclaw/tasks?conversation_id=" + encodeURIComponent(conversationId));
+    const res = await fetch("/api/openclaw/tasks?conversation_id=" + encodeURIComponent(conversationId), {
+      credentials:"include"
+    });
     const data = await res.json();
     if(res.ok && data.ok){
       openClawTasks = Array.isArray(data.tasks) ? data.tasks : [];
@@ -7061,7 +7099,9 @@ async function checkOpenClawActiveTask(conversationId){
     return false;
   }
   try{
-    const res = await fetch("/api/openclaw/tasks/active?conversation_id=" + encodeURIComponent(id));
+    const res = await fetch("/api/openclaw/tasks/active?conversation_id=" + encodeURIComponent(id), {
+      credentials:"include"
+    });
     const data = await res.json();
     if(!res.ok || !data.ok || !data.active || !data.task?.id){
       if(openClawReconnectTask && (openClawReconnectTask.conversation_id || openClawReconnectTask.conversationId) === id){
@@ -7087,11 +7127,16 @@ function stopOpenClawReconnectPolling(){
     clearInterval(openClawReconnectPollingTimer);
     openClawReconnectPollingTimer = null;
   }
+  if(openClawReconnectPollingTaskId){
+    openClawCompletedRemoteSyncAttempts.delete(openClawReconnectPollingTaskId);
+  }
   openClawReconnectPollingTaskId = "";
 }
 
 async function fetchOpenClawTaskStatus(taskId){
-  const res = await fetch("/api/openclaw/tasks/" + encodeURIComponent(taskId) + "/status");
+  const res = await fetch("/api/openclaw/tasks/" + encodeURIComponent(taskId) + "/status", {
+    credentials:"include"
+  });
   const data = await res.json();
   if(!res.ok || !data.ok){
     throw new Error(data.error || "OpenClaw task status failed");
@@ -7106,7 +7151,9 @@ async function fetchOpenClawTaskFromList(taskId){
     offset:"0",
     sort:"created_desc"
   });
-  const res = await fetch("/api/openclaw/tasks?" + params.toString());
+  const res = await fetch("/api/openclaw/tasks?" + params.toString(), {
+    credentials:"include"
+  });
   const data = await res.json();
   if(!res.ok || !data.ok){
     throw new Error(data.error || "OpenClaw task polling failed");
@@ -7127,13 +7174,20 @@ async function pollOpenClawReconnectTask(taskId){
     if(openClawTaskHistoryPanel && !openClawTaskHistoryPanel.hidden){
       loadOpenClawTaskHistory(openClawTaskHistoryView);
     }
+    if(task.status === "completed" && shouldContinuePollingCompletedOpenClawTask(task)){
+      setContextStatus("OpenClaw task completed locally. Syncing remote status...");
+      renderOpenClawTaskBanner();
+      return;
+    }
     if(task.status === "completed"){
+      openClawCompletedRemoteSyncAttempts.delete(task.id);
       stopOpenClawReconnectPolling();
       setContextStatus("OpenClaw task completed.");
       await loadConversationMessages(currentConversationId);
       return;
     }
     if(task.status === "failed" || task.status === "aborted" || task.status === "cancelled"){
+      openClawCompletedRemoteSyncAttempts.delete(task.id);
       stopOpenClawReconnectPolling();
       setContextStatus(task.status === "failed" ? "OpenClaw task failed." : "OpenClaw task cancelled.");
       renderOpenClawTaskBanner();
@@ -7172,7 +7226,8 @@ async function cancelOpenClawTask(task){
   }
   try{
     const res = await fetch("/api/openclaw/tasks/" + encodeURIComponent(task.id) + "/cancel", {
-      method:"POST"
+      method:"POST",
+      credentials:"include"
     });
     const data = await res.json();
     if(!res.ok || !data.ok){
@@ -7208,9 +7263,10 @@ function showOpenClawProgressIntercept(){
 
 function showOpenClawTaskRecord(task){
   const lines = [
-    "OpenClaw 本地任务记录",
+    openClawTaskBannerTitle(task),
     "",
     "task id: " + (task.id || ""),
+    openClawTaskHasRemoteId(task) ? "remote_task_id: " + (task.remoteTaskId || task.remote_task_id || "") : "",
     "status: " + (task.status || ""),
     "provider: " + (task.provider || ""),
     "model: " + (task.model || ""),
@@ -7219,7 +7275,7 @@ function showOpenClawTaskRecord(task){
     "updatedAt: " + (task.updatedAt ? new Date(Number(task.updatedAt)).toLocaleString() : ""),
     task.error ? "error: " + task.error : "",
     "",
-    "这是 Worker 本地记录，不能确认 VPS 端真实进度，也不能恢复远端 stream。"
+    openClawTaskBannerDisclaimer(task)
   ].filter(line => line !== "").join(String.fromCharCode(10));
   alert(lines);
 }
@@ -7316,7 +7372,9 @@ async function loadOpenClawTaskHistory(view = openClawTaskHistoryView){
   }
   openClawTaskHistoryList.innerHTML = "<div class='openClawTaskHistoryItem'>正在加载...</div>";
   try{
-    const res = await fetch("/api/openclaw/tasks?" + params.toString());
+    const res = await fetch("/api/openclaw/tasks?" + params.toString(), {
+      credentials:"include"
+    });
     const data = await res.json();
     if(!res.ok || !data.ok){
       throw new Error(data.error || "OpenClaw task history failed");
@@ -7337,7 +7395,8 @@ async function markOpenClawTaskAborted(taskId){
   }
   try{
     const res = await fetch("/api/openclaw/tasks/" + encodeURIComponent(taskId) + "/mark-aborted", {
-      method:"POST"
+      method:"POST",
+      credentials:"include"
     });
     const data = await res.json().catch(() => null);
     if(res.ok && data?.ok){

@@ -1086,6 +1086,15 @@ async function handleOpenClawTasksRequest(request, env, url, ctx) {
     }
   }
 
+  if (url.pathname.startsWith("/api/openclaw/tasks")) {
+    return jsonResponse({
+      ok: false,
+      error: "OpenClaw task route not found",
+      method: request.method,
+      pathname: url.pathname
+    }, 404);
+  }
+
   return null;
 }
 
@@ -2603,15 +2612,6 @@ function extractOpenClawRemoteTaskFromText(text) {
       // Ignore non-JSON stream chunks.
     }
   }
-  if (url.pathname.startsWith("/api/openclaw/tasks")) {
-    return jsonResponse({
-      ok: false,
-      error: "OpenClaw task route not found",
-      method: request.method,
-      pathname: url.pathname
-    }, 404);
-  }
-
   return null;
 }
 

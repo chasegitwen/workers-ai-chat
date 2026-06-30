@@ -7265,6 +7265,23 @@ async function fetchOpenClawTaskStatus(taskId){
   return data.task || null;
 }
 
+async function finalizeOpenClawTaskResult(taskId){
+  if(!taskId){
+    return null;
+  }
+  const res = await fetch("/api/openclaw/tasks/" + encodeURIComponent(taskId) + "/result", {
+    credentials:"include"
+  });
+  const data = await res.json();
+  if(!res.ok || !data.ok){
+    throw new Error(data.error || "OpenClaw task result failed");
+  }
+  if(data.task){
+    mergeOpenClawTask(data.task);
+  }
+  return data.task || null;
+}
+
 async function fetchOpenClawTaskFromList(taskId){
   const params = new URLSearchParams({
     conversation_id:currentConversationId,
@@ -7304,6 +7321,16 @@ async function pollOpenClawReconnectTask(taskId){
       openClawCompletedRemoteSyncAttempts.delete(task.id);
       stopOpenClawReconnectPolling();
       setContextStatus("OpenClaw task completed.");
+      if(!task.assistantMessageId){
+        try{
+          await finalizeOpenClawTaskResult(task.id);
+        }catch(err){
+          console.warn("finalize OpenClaw task result failed", err);
+          setContextStatus("OpenClaw task completed, but result fetch failed: " + (err.message || String(err)));
+          renderOpenClawTaskBanner();
+          return;
+        }
+      }
       await loadConversationMessages(currentConversationId);
       return;
     }
@@ -8916,6 +8943,8 @@ async function sendMessage(){
       "<span class='loading'>正在基于 " + lastRelevantChunkCount + " 个相关片段回答...</span>";
   }
 
+  let openClawAsyncHandled = false;
+
   try{
     const fallbackModel = modelSettingsState?.fallbackModels?.[0] || "";
     const selectedModelConfig = getModelConfigForRequest(modelSelect.value);
@@ -8980,22 +9009,54 @@ async function sendMessage(){
       setActiveConversation();
     }
 
-    aiDiv.innerHTML = "";
-
-    const streamResult = await streamAIResponse(res, aiDiv, isOpenClawRequest);
-    const reply = streamResult.reply || "";
-
-    if(!reply && !streamResult.openClawAutoResume?.handled){
-      renderAssistantMarkdown(aiDiv, "没有返回内容");
+    const responseContentType = res.headers.get("Content-Type") || "";
+    if(isOpenClawRequest && responseContentType.includes("application/json")){
+      const data = await res.json();
+      if(data.async){
+        if(!data.ok){
+          throw new Error(data.error || "OpenClaw async task submit failed");
+        }
+        openClawAsyncHandled = true;
+        if(data.conversationId){
+          currentConversationId = data.conversationId;
+          setActiveConversation();
+        }
+        if(data.task){
+          mergeOpenClawTask(data.task);
+          activeOpenClawTask = data.task;
+        }
+        if(data.completed){
+          setContextStatus("OpenClaw task completed.");
+          await loadConversationMessages(currentConversationId);
+        }else{
+          renderAssistantMarkdown(aiDiv, "OpenClaw 任务已提交，正在后台执行。");
+          setContextStatus("OpenClaw task submitted. Waiting for remote result...");
+          if(data.taskId){
+            openClawReconnectTask = data.task || activeOpenClawTask;
+            startOpenClawReconnectPolling(data.taskId);
+          }
+        }
+      }
     }
 
-    if(!streamResult.openClawAutoResume?.handled){
-      conversation.push({
-        role:"assistant",
-        content:reply || "",
-        sources:streamResult.sources || [],
-        toolSources:streamResult.toolSources || []
-      });
+    if(!openClawAsyncHandled){
+      aiDiv.innerHTML = "";
+
+      const streamResult = await streamAIResponse(res, aiDiv, isOpenClawRequest);
+      const reply = streamResult.reply || "";
+
+      if(!reply && !streamResult.openClawAutoResume?.handled){
+        renderAssistantMarkdown(aiDiv, "没有返回内容");
+      }
+
+      if(!streamResult.openClawAutoResume?.handled){
+        conversation.push({
+          role:"assistant",
+          content:reply || "",
+          sources:streamResult.sources || [],
+          toolSources:streamResult.toolSources || []
+        });
+      }
     }
     webSearchContext = "";
     webSearchSources = [];
@@ -9012,7 +9073,9 @@ async function sendMessage(){
 
     const currentContextStatus = getCurrentContextStatus();
 
-    if(currentContextStatus){
+    if(openClawAsyncHandled){
+      // Keep async task status visible while polling continues.
+    }else if(currentContextStatus){
       setContextStatus(currentContextStatus);
     }else if(!networkTextForAI){
       setContextStatus("");

@@ -2444,7 +2444,9 @@ let openClawReconnectTask = null;
 let openClawReconnectPollingTimer = null;
 let openClawReconnectPollingTaskId = "";
 let openClawCompletedRemoteSyncAttempts = new Map();
+let openClawAutoResumeAttempts = new Set();
 const OPENCLAW_RECONNECT_POLL_MS = 4000;
+const OPENCLAW_AUTO_RESUME_MESSAGE = "连接中断，正在尝试恢复远端任务……";
 
 const imageBtn = document.getElementById("imageBtn");
 const imageInput = document.getElementById("imageInput");
@@ -6796,8 +6798,38 @@ function isOpenClawProviderError(error){
   });
 }
 
+function isOpenClawNetworkLost(error){
+  const message = String(error?.message || error?.error || error?.detail || error || "");
+  const code = String(error?.code || "").toLowerCase();
+  return /Network connection lost/i.test(message)
+    || (code === "error" && /network connection lost/i.test(message));
+}
+
 function isOpenClawTaskPending(task){
   return ["running", "pending", "disconnected", "expired", "cancel_requested"].includes(String(task?.status || ""));
+}
+
+function isOpenClawAutoResumeRunningTask(task){
+  const status = String(task?.status || "").toLowerCase();
+  const remoteStatus = String(openClawTaskRemoteStatus(task) || "").toLowerCase();
+  const runningStatuses = ["queued", "started", "running", "active", "in_progress"];
+  return runningStatuses.includes(status) || runningStatuses.includes(remoteStatus);
+}
+
+function isOpenClawAutoResumeCompletedTask(task){
+  const status = String(task?.status || "").toLowerCase();
+  const remoteStatus = String(openClawTaskRemoteStatus(task) || "").toLowerCase();
+  return status === "completed"
+    || ["completed", "complete", "done", "success", "succeeded"].includes(remoteStatus)
+    || openClawTaskRemoteProgress(task) === 100;
+}
+
+function openClawTaskConversationId(task){
+  return task?.conversation_id || task?.conversationId || "";
+}
+
+function openClawAutoResumeAttemptKey(conversationId, taskId){
+  return String(conversationId || "none") + ":" + String(taskId || "none");
 }
 
 function openClawTaskStatusLabel(status){
@@ -7064,6 +7096,101 @@ function renderOpenClawTaskBanner(){
   openClawTaskBanner.classList.add("open");
 }
 
+async function fetchOpenClawTasksForConversation(conversationId, options = {}){
+  const id = String(conversationId || "").trim();
+  if(!id){
+    return [];
+  }
+  const params = new URLSearchParams({
+    conversation_id:id,
+    limit:String(options.limit || 20),
+    offset:String(options.offset || 0),
+    sort:options.sort || "created_desc"
+  });
+  if(options.status){
+    params.set("status", options.status);
+  }
+  const res = await fetch("/api/openclaw/tasks?" + params.toString(), {
+    credentials:"include"
+  });
+  const data = await res.json();
+  if(!res.ok || !data.ok){
+    throw new Error(data.error || "OpenClaw task history failed");
+  }
+  return Array.isArray(data.tasks) ? data.tasks : [];
+}
+
+function findOpenClawAutoResumeTask(tasks, conversationId){
+  const items = (Array.isArray(tasks) ? tasks : [])
+    .filter(task => task?.id && openClawTaskConversationId(task) === conversationId);
+  return items.find(isOpenClawAutoResumeRunningTask)
+    || items.find(isOpenClawAutoResumeCompletedTask)
+    || null;
+}
+
+async function tryAutoResumeOpenClawTask({ element, state } = {}){
+  const conversationId = String(currentConversationId || "").trim();
+  if(!conversationId){
+    return { handled:false, reason:"missing_conversation" };
+  }
+
+  if(element){
+    renderAssistantMarkdown(element, OPENCLAW_AUTO_RESUME_MESSAGE);
+  }
+  setContextStatus(OPENCLAW_AUTO_RESUME_MESSAGE);
+
+  const tasks = await fetchOpenClawTasksForConversation(conversationId, {
+    limit:20,
+    sort:"created_desc"
+  });
+  openClawTasks = tasks;
+  const task = findOpenClawAutoResumeTask(tasks, conversationId);
+  if(!task?.id){
+    renderOpenClawTaskBanner();
+    return { handled:false, reason:"task_not_found" };
+  }
+
+  const attemptKey = openClawAutoResumeAttemptKey(conversationId, task.id);
+  if(openClawAutoResumeAttempts.has(attemptKey)){
+    mergeOpenClawTask(task);
+    return { handled:false, reason:"already_attempted", task };
+  }
+  openClawAutoResumeAttempts.add(attemptKey);
+
+  let latestTask = task;
+  try{
+    latestTask = await fetchOpenClawTaskStatus(task.id) || task;
+  }catch(err){
+    console.warn("OpenClaw auto resume reconnect failed", err);
+    return { handled:false, reason:"reconnect_failed", task };
+  }
+  mergeOpenClawTask(latestTask);
+
+  if(isOpenClawAutoResumeRunningTask(latestTask)){
+    activeOpenClawTask = latestTask;
+    openClawReconnectTask = latestTask;
+    startOpenClawReconnectPolling(latestTask.id);
+    if(state){
+      state.reply = OPENCLAW_AUTO_RESUME_MESSAGE;
+      state.openClawAutoResume = { handled:true, mode:"running", taskId:latestTask.id };
+    }
+    return { handled:true, mode:"running", task:latestTask };
+  }
+
+  if(isOpenClawAutoResumeCompletedTask(latestTask)){
+    stopOpenClawReconnectPolling();
+    if(state){
+      state.reply = "";
+      state.openClawAutoResume = { handled:true, mode:"completed", taskId:latestTask.id };
+    }
+    setContextStatus("OpenClaw task completed.");
+    await loadConversationMessages(conversationId);
+    return { handled:true, mode:"completed", task:latestTask };
+  }
+
+  return { handled:false, reason:"not_resumable", task:latestTask };
+}
+
 async function loadOpenClawTasksForConversation(conversationId){
   stopOpenClawReconnectPolling();
   openClawReconnectTask = null;
@@ -7074,19 +7201,13 @@ async function loadOpenClawTasksForConversation(conversationId){
     return [];
   }
   try{
-    const res = await fetch("/api/openclaw/tasks?conversation_id=" + encodeURIComponent(conversationId), {
-      credentials:"include"
-    });
-    const data = await res.json();
-    if(res.ok && data.ok){
-      openClawTasks = Array.isArray(data.tasks) ? data.tasks : [];
-      activeOpenClawTask = openClawTasks[0] || null;
-      if(await checkOpenClawActiveTask(conversationId)){
-        return openClawTasks;
-      }
-      renderOpenClawTaskBanner();
+    openClawTasks = await fetchOpenClawTasksForConversation(conversationId);
+    activeOpenClawTask = openClawTasks[0] || null;
+    if(await checkOpenClawActiveTask(conversationId)){
       return openClawTasks;
     }
+    renderOpenClawTaskBanner();
+    return openClawTasks;
   }catch(err){
     console.warn("load OpenClaw tasks failed", err);
   }
@@ -8440,7 +8561,7 @@ function parseSseEvent(event){
   return parsed;
 }
 
-function handleStreamEvent(eventText, state, element){
+async function handleStreamEvent(eventText, state, element){
   const event = parseSseEvent(eventText);
 
   if(event.type === "sources"){
@@ -8557,7 +8678,20 @@ function handleStreamEvent(eventText, state, element){
   if(event.type === "provider_error"){
     try{
       state.diagnostics.providerError = JSON.parse(event.data || "{}");
-      if(isOpenClawProviderError(state.diagnostics.providerError)){
+      if(state.isOpenClawRequest
+        && isOpenClawNetworkLost(state.diagnostics.providerError)
+        && (isOpenClawProviderError(state.diagnostics.providerError) || !state.diagnostics.providerError.provider)){
+        try{
+          const resumeResult = await tryAutoResumeOpenClawTask({ element, state });
+          if(resumeResult.handled){
+            return true;
+          }
+        }catch(resumeErr){
+          console.warn("OpenClaw auto resume failed", resumeErr);
+        }
+      }
+      if(isOpenClawProviderError(state.diagnostics.providerError)
+        || (state.isOpenClawRequest && isOpenClawNetworkLost(state.diagnostics.providerError))){
         state.reply = openClawFriendlyError(new Error(state.diagnostics.providerError.message || "Network connection lost"));
         state.openClawFriendlyError = true;
         setContextStatus(state.reply);
@@ -8620,7 +8754,8 @@ async function streamAIResponse(response, element, isOpenClawRequest = false){
     },
     openClawFriendlyError:false,
     isOpenClawRequest:Boolean(isOpenClawRequest),
-    openClawTask:null
+    openClawTask:null,
+    openClawAutoResume:null
   };
 
   while(true){
@@ -8636,14 +8771,14 @@ async function streamAIResponse(response, element, isOpenClawRequest = false){
     buffer = events.pop() || "";
 
     for(const event of events){
-      if(handleStreamEvent(event, state, element)){
+      if(await handleStreamEvent(event, state, element)){
         return state;
       }
     }
   }
 
   if(buffer.trim()){
-    handleStreamEvent(buffer, state, element);
+    await handleStreamEvent(buffer, state, element);
   }
 
   return state;
@@ -8850,16 +8985,18 @@ async function sendMessage(){
     const streamResult = await streamAIResponse(res, aiDiv, isOpenClawRequest);
     const reply = streamResult.reply || "";
 
-    if(!reply){
+    if(!reply && !streamResult.openClawAutoResume?.handled){
       renderAssistantMarkdown(aiDiv, "没有返回内容");
     }
 
-    conversation.push({
-      role:"assistant",
-      content:reply || "",
-      sources:streamResult.sources || [],
-      toolSources:streamResult.toolSources || []
-    });
+    if(!streamResult.openClawAutoResume?.handled){
+      conversation.push({
+        role:"assistant",
+        content:reply || "",
+        sources:streamResult.sources || [],
+        toolSources:streamResult.toolSources || []
+      });
+    }
     webSearchContext = "";
     webSearchSources = [];
     await loadConversations();
@@ -8882,7 +9019,17 @@ async function sendMessage(){
     }
 
   }catch(err){
-    if(isOpenClawRequest && activeOpenClawTask?.id && err?.name !== "AbortError"){
+    let openClawAutoResumeHandled = false;
+    if(isOpenClawRequest && err?.name !== "AbortError" && isOpenClawNetworkLost(err)){
+      try{
+        const resumeResult = await tryAutoResumeOpenClawTask({ element:aiDiv });
+        openClawAutoResumeHandled = Boolean(resumeResult.handled);
+      }catch(resumeErr){
+        console.warn("OpenClaw auto resume failed", resumeErr);
+      }
+    }
+
+    if(!openClawAutoResumeHandled && isOpenClawRequest && activeOpenClawTask?.id && err?.name !== "AbortError"){
       mergeOpenClawTask({
         ...activeOpenClawTask,
         status:"disconnected",
@@ -8891,22 +9038,24 @@ async function sendMessage(){
       });
     }
 
-    aiDiv.innerHTML =
-      isOpenClawRequest ? openClawFriendlyError(err) : "请求失败：" + err.message;
+    if(!openClawAutoResumeHandled){
+      aiDiv.innerHTML =
+        isOpenClawRequest ? openClawFriendlyError(err) : "请求失败：" + err.message;
+    }
 
-    if(isOpenClawRequest){
+    if(isOpenClawRequest && !openClawAutoResumeHandled){
       setContextStatus(openClawFriendlyError(err));
     }
 
-    if(imageToSend){
+    if(imageToSend && !openClawAutoResumeHandled){
       setContextStatus("\u56fe\u7247\u53d1\u9001\u5931\u8d25\uff0c\u53ef\u91cd\u8bd5");
     }
 
-    if(attachmentsToSend.length){
+    if(attachmentsToSend.length && !openClawAutoResumeHandled){
       setContextStatus("\u56fe\u7247\u53d1\u9001\u5931\u8d25\uff0c\u53ef\u91cd\u8bd5");
     }
 
-    if(fileToSend){
+    if(fileToSend && !openClawAutoResumeHandled){
       setContextStatus("\u6587\u4ef6\u95ee\u7b54\u5931\u8d25\uff0c\u53ef\u91cd\u8bd5\uff1a" + fileToSend.name);
     }
   }

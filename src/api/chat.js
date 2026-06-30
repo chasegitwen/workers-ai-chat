@@ -2686,11 +2686,13 @@ function encodeSseEvent(event, data) {
   );
 }
 
-function findOpenClawRemoteTaskId(value) {
+function findOpenClawRemoteTaskId(value, options = {}) {
   if (!value || typeof value !== "object") {
     return "";
   }
-  if (Array.isArray(value.choices) || String(value.object || "").includes("chat.completion")) {
+  const allowCompletionId = Boolean(options.allowCompletionId);
+  const isCompletionChunk = Array.isArray(value.choices) || String(value.object || "").includes("chat.completion");
+  if (isCompletionChunk && !allowCompletionId) {
     return "";
   }
   const direct = value.task_id
@@ -2711,15 +2713,15 @@ function findOpenClawRemoteTaskId(value) {
     || value.data?.task?.taskId
     || value.data?.task?.remote_task_id
     || value.data?.task?.remoteTaskId
-    || (value.id && !Array.isArray(value.choices) ? value.id : "")
+    || (value.id && (!isCompletionChunk || allowCompletionId) ? value.id : "")
     || (value.data?.id && !Array.isArray(value.data?.choices) && !String(value.data?.object || "").includes("chat.completion") ? value.data.id : "");
   return typeof direct === "string" || typeof direct === "number"
     ? String(direct).trim()
     : "";
 }
 
-function openClawRemoteTaskDetail(value) {
-  const taskId = findOpenClawRemoteTaskId(value);
+function openClawRemoteTaskDetail(value, options = {}) {
+  const taskId = findOpenClawRemoteTaskId(value, options);
   if (!taskId) {
     return null;
   }
@@ -2734,7 +2736,7 @@ function openClawRemoteTaskDetail(value) {
   };
 }
 
-function extractOpenClawRemoteTaskFromText(text) {
+function extractOpenClawRemoteTaskFromText(text, options = {}) {
   const raw = String(text || "");
   if (!raw.trim()) {
     return null;
@@ -2757,7 +2759,7 @@ function extractOpenClawRemoteTaskFromText(text) {
   for (const candidate of candidates) {
     try {
       const parsed = JSON.parse(candidate);
-      const detail = openClawRemoteTaskDetail(parsed);
+      const detail = openClawRemoteTaskDetail(parsed, options);
       if (detail) {
         return detail;
       }
@@ -2898,7 +2900,9 @@ async function submitOpenClawAsyncTask({
       const chunkText = decoder.decode(chunk.value, { stream: true });
       scannedBytes += chunkText.length;
       scanText = (scanText + chunkText).slice(-OPENCLAW_ASYNC_SUBMIT_SCAN_BYTES);
-      const remoteTask = extractOpenClawRemoteTaskFromText(scanText);
+      const remoteTask = extractOpenClawRemoteTaskFromText(scanText, {
+        allowCompletionId: true
+      });
       if (remoteTask) {
         task = await updateOpenClawTaskRemoteStart(env, task, remoteTask) || task;
         logOpenClawAsync("remote-task-id-extracted", {

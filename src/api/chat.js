@@ -108,6 +108,10 @@ function isOpenClawAsyncModeEnabled(env) {
   return String(env.OPENCLAW_ASYNC_MODE || "").trim().toLowerCase() === "true";
 }
 
+function logOpenClawAsync(event, detail = {}) {
+  console.warn("[openclaw-async]", event, detail);
+}
+
 function taskStatus(row) {
   if (!row) {
     return "";
@@ -971,6 +975,14 @@ async function handleOpenClawTasksRequest(request, env, url, ctx) {
     return jsonResponse({
       ok: true,
       route: "openclaw-tasks"
+    });
+  }
+
+  if (url.pathname === "/api/openclaw/tasks/debug-env" && request.method === "GET") {
+    return jsonResponse({
+      ok: true,
+      openClawAsyncModePresent: typeof env.OPENCLAW_ASYNC_MODE !== "undefined",
+      openClawAsyncModeEnabled: isOpenClawAsyncModeEnabled(env)
     });
   }
 
@@ -2743,6 +2755,16 @@ function extractOpenClawRemoteTaskFromText(text) {
       // Ignore non-JSON stream chunks.
     }
   }
+  const textMatch = raw.match(/(?:remote[_\s-]*task[_\s-]*id|task[_\s-]*id|taskId)\s*[:=]\s*["']?([A-Za-z0-9._:-]{6,})/i)
+    || raw.match(/\/tasks\/([A-Za-z0-9._:-]{6,})(?:[/?#\s"']|$)/i);
+  if (textMatch?.[1]) {
+    return {
+      taskId: textMatch[1],
+      status: "running",
+      progress: 0,
+      message: "Remote task started"
+    };
+  }
   return null;
 }
 
@@ -2829,6 +2851,12 @@ async function submitOpenClawAsyncTask({
   let streamDone = false;
 
   try {
+    logOpenClawAsync("submit-start", {
+      localTaskId: task.id,
+      conversationId,
+      provider,
+      model
+    });
     result = await callSelectedModel({
       env,
       model: model || DEFAULT_TEXT_MODEL,
@@ -2854,6 +2882,11 @@ async function submitOpenClawAsyncTask({
       const remoteTask = extractOpenClawRemoteTaskFromText(scanText);
       if (remoteTask) {
         task = await updateOpenClawTaskRemoteStart(env, task, remoteTask) || task;
+        logOpenClawAsync("remote-task-id-extracted", {
+          localTaskId: task.id,
+          remoteTaskId: remoteTask.taskId,
+          scannedBytes
+        });
         await reader.cancel("OpenClaw async task id captured").catch(() => {});
         return {
           ok: true,
@@ -2903,8 +2936,15 @@ async function submitOpenClawAsyncTask({
     if (reader && !streamDone) {
       await reader.cancel("OpenClaw async submit ended without task id").catch(() => {});
     }
+    logOpenClawAsync("remote-task-id-missing", {
+      localTaskId: task.id,
+      conversationId,
+      scannedBytes,
+      streamDone,
+      partialReplyChars: replyState.value.length
+    });
     task = await updateOpenClawTask(env, task, {
-      status: "failed",
+      status: "disconnected",
       error: "OpenClaw async submit did not return a task_id",
       latencyMs: 0
     }) || task;
@@ -2914,6 +2954,11 @@ async function submitOpenClawAsyncTask({
       task
     };
   } catch (err) {
+    logOpenClawAsync("submit-failed", {
+      localTaskId: task.id,
+      conversationId,
+      error: err?.message || String(err)
+    });
     task = await updateOpenClawTask(env, task, {
       status: "failed",
       error: err?.message || String(err),
@@ -3518,7 +3563,24 @@ export async function handleChat(request, env, ctx) {
     });
   }
 
+  if (isOpenClawRequest) {
+    logOpenClawAsync("mode-check", {
+      enabled: isOpenClawAsyncModeEnabled(env),
+      provider,
+      model: model || DEFAULT_TEXT_MODEL,
+      localTaskId: openClawTask?.id || "",
+      conversationId: conversation.id
+    });
+  }
+
   if (isOpenClawRequest && isOpenClawAsyncModeEnabled(env)) {
+    logOpenClawAsync("branch-entered", {
+      provider,
+      model: model || DEFAULT_TEXT_MODEL,
+      localTaskId: openClawTask?.id || "",
+      conversationId: conversation.id,
+      responseContentType: "application/json; charset=utf-8"
+    });
     const finalMessages = [...modelMessages];
     appendToolContext(finalMessages, null);
     finalMessages.push(...historyMessages);

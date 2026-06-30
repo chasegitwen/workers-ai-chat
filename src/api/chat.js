@@ -2789,6 +2789,96 @@ function previewOpenClawSubmitText(text) {
     .slice(0, 600);
 }
 
+async function continueOpenClawAsyncStreamToCompletion({
+  env,
+  task,
+  reader,
+  initialText = ""
+}) {
+  const decoder = new TextDecoder();
+  const bufferState = { value: "" };
+  const replyState = { value: "" };
+  let latestTask = task;
+  let completed = false;
+
+  try {
+    if (initialText) {
+      bufferState.value += initialText;
+      appendReplyFromSseBuffer(bufferState, replyState);
+    }
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        completed = true;
+        break;
+      }
+      const chunkText = decoder.decode(value, { stream: true });
+      bufferState.value += chunkText;
+      appendReplyFromSseBuffer(bufferState, replyState);
+    }
+
+    if (bufferState.value.trim()) {
+      appendReplyFromSseBuffer({ value: bufferState.value + "\n\n" }, replyState);
+    }
+
+    const reply = replyState.value.trim();
+    if (!reply) {
+      logOpenClawAsync("background-stream-empty", {
+        localTaskId: latestTask?.id || "",
+        remoteTaskId: openClawRemoteTaskId(latestTask),
+        completed
+      });
+      latestTask = await updateOpenClawTask(env, latestTask, {
+        status: "disconnected",
+        error: "OpenClaw async background stream completed without result",
+        latencyMs: 0
+      }) || latestTask;
+      return latestTask;
+    }
+
+    const refreshedTask = await readOpenClawTaskById(env, latestTask.id) || latestTask;
+    if (refreshedTask.assistantMessageId) {
+      return refreshedTask;
+    }
+
+    const assistantMessage = env.DB
+      ? await saveMessage(env.DB, refreshedTask.conversationId || refreshedTask.conversation_id, "assistant", reply)
+      : null;
+    if (env.DB) {
+      await maybeUpdateConversationSummary(env, refreshedTask.conversationId || refreshedTask.conversation_id);
+    }
+    latestTask = await updateOpenClawTask(env, refreshedTask, {
+      status: "completed",
+      assistantMessageId: assistantMessage?.id || refreshedTask.assistantMessageId || "",
+      latencyMs: 0
+    }) || {
+      ...refreshedTask,
+      status: "completed",
+      assistantMessageId: assistantMessage?.id || refreshedTask.assistantMessageId || ""
+    };
+    logOpenClawAsync("background-stream-completed", {
+      localTaskId: latestTask?.id || "",
+      remoteTaskId: openClawRemoteTaskId(latestTask),
+      assistantMessageId: latestTask?.assistantMessageId || "",
+      replyChars: reply.length
+    });
+    return latestTask;
+  } catch (err) {
+    logOpenClawAsync("background-stream-failed", {
+      localTaskId: latestTask?.id || "",
+      remoteTaskId: openClawRemoteTaskId(latestTask),
+      error: err?.message || String(err)
+    });
+    latestTask = await updateOpenClawTask(env, latestTask, {
+      status: "disconnected",
+      error: err?.message || String(err),
+      latencyMs: 0
+    }) || latestTask;
+    return latestTask;
+  }
+}
+
 function appendReplyFromSseBuffer(bufferState, replyState) {
   const events = bufferState.value.split("\n\n");
   bufferState.value = events.pop() || "";
@@ -2910,7 +3000,18 @@ async function submitOpenClawAsyncTask({
           remoteTaskId: remoteTask.taskId,
           scannedBytes
         });
-        await reader.cancel("OpenClaw async task id captured").catch(() => {});
+        if (ctx?.waitUntil) {
+          ctx.waitUntil(continueOpenClawAsyncStreamToCompletion({
+            env,
+            task,
+            reader,
+            initialText: scanText
+          }).catch(err => {
+            console.warn("[openclaw-async] background stream waitUntil failed", err?.message || String(err));
+          }));
+        } else {
+          await reader.cancel("OpenClaw async task id captured").catch(() => {});
+        }
         return {
           ok: true,
           mode: "async",

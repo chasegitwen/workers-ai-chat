@@ -105,7 +105,7 @@ function openClawTaskMetadata(extra = {}) {
 }
 
 function isOpenClawAsyncModeEnabled(env) {
-  return String(env.OPENCLAW_ASYNC_MODE || "").trim().toLowerCase() === "true";
+  return String(env.OPENCLAW_ASYNC_MODE || "").trim().toLowerCase() === "native";
 }
 
 function logOpenClawAsync(event, detail = {}) {

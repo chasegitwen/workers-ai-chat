@@ -2879,6 +2879,130 @@ async function continueOpenClawAsyncStreamToCompletion({
   }
 }
 
+async function runOpenClawAsyncTaskInBackground({
+  env,
+  task,
+  model,
+  provider,
+  providerCatalog,
+  finalMessages
+}) {
+  const decoder = new TextDecoder();
+  const bufferState = { value: "" };
+  const replyState = { value: "" };
+  let latestTask = task;
+  let scannedBytes = 0;
+  let scanText = "";
+  let remoteTaskCaptured = Boolean(openClawRemoteTaskId(latestTask));
+
+  try {
+    logOpenClawAsync("background-submit-start", {
+      localTaskId: latestTask?.id || "",
+      conversationId: latestTask?.conversationId || latestTask?.conversation_id || "",
+      provider,
+      model
+    });
+
+    const result = await callSelectedModel({
+      env,
+      model: model || DEFAULT_TEXT_MODEL,
+      provider,
+      messages: finalMessages,
+      stream: true,
+      providerCatalog
+    });
+
+    const reader = result.response.getReader();
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      const chunkText = decoder.decode(value, { stream: true });
+      if (!remoteTaskCaptured && scannedBytes < OPENCLAW_ASYNC_SUBMIT_SCAN_BYTES) {
+        scannedBytes += chunkText.length;
+        scanText = (scanText + chunkText).slice(-OPENCLAW_ASYNC_SUBMIT_SCAN_BYTES);
+        const remoteTask = extractOpenClawRemoteTaskFromText(scanText, {
+          allowCompletionId: true
+        });
+        if (remoteTask) {
+          latestTask = await updateOpenClawTaskRemoteStart(env, latestTask, remoteTask) || latestTask;
+          remoteTaskCaptured = true;
+          logOpenClawAsync("remote-task-id-extracted", {
+            localTaskId: latestTask.id,
+            remoteTaskId: remoteTask.taskId,
+            scannedBytes
+          });
+        }
+      }
+
+      bufferState.value += chunkText;
+      appendReplyFromSseBuffer(bufferState, replyState);
+    }
+
+    if (bufferState.value.trim()) {
+      appendReplyFromSseBuffer({ value: bufferState.value + "\n\n" }, replyState);
+    }
+
+    const reply = replyState.value.trim();
+    if (!reply) {
+      logOpenClawAsync("background-stream-empty", {
+        localTaskId: latestTask?.id || "",
+        remoteTaskId: openClawRemoteTaskId(latestTask),
+        scannedBytes,
+        preview: previewOpenClawSubmitText(scanText)
+      });
+      latestTask = await updateOpenClawTask(env, latestTask, {
+        status: "disconnected",
+        error: "OpenClaw async background stream completed without result",
+        latencyMs: 0
+      }) || latestTask;
+      return latestTask;
+    }
+
+    const refreshedTask = await readOpenClawTaskById(env, latestTask.id) || latestTask;
+    if (refreshedTask.assistantMessageId) {
+      return refreshedTask;
+    }
+
+    const assistantMessage = env.DB
+      ? await saveMessage(env.DB, refreshedTask.conversationId || refreshedTask.conversation_id, "assistant", reply)
+      : null;
+    if (env.DB) {
+      await maybeUpdateConversationSummary(env, refreshedTask.conversationId || refreshedTask.conversation_id);
+    }
+    latestTask = await updateOpenClawTask(env, refreshedTask, {
+      status: "completed",
+      assistantMessageId: assistantMessage?.id || refreshedTask.assistantMessageId || "",
+      latencyMs: 0
+    }) || {
+      ...refreshedTask,
+      status: "completed",
+      assistantMessageId: assistantMessage?.id || refreshedTask.assistantMessageId || ""
+    };
+    logOpenClawAsync("background-stream-completed", {
+      localTaskId: latestTask?.id || "",
+      remoteTaskId: openClawRemoteTaskId(latestTask),
+      assistantMessageId: latestTask?.assistantMessageId || "",
+      replyChars: reply.length
+    });
+    return latestTask;
+  } catch (err) {
+    logOpenClawAsync("background-stream-failed", {
+      localTaskId: latestTask?.id || "",
+      remoteTaskId: openClawRemoteTaskId(latestTask),
+      error: err?.message || String(err)
+    });
+    latestTask = await updateOpenClawTask(env, latestTask, {
+      status: "disconnected",
+      error: err?.message || String(err),
+      latencyMs: 0
+    }) || latestTask;
+    return latestTask;
+  }
+}
+
 function appendReplyFromSseBuffer(bufferState, replyState) {
   const events = bufferState.value.split("\n\n");
   bufferState.value = events.pop() || "";
@@ -2950,6 +3074,30 @@ async function submitOpenClawAsyncTask({
 }) {
   if (!openClawTask) {
     return { ok: false, error: "OpenClaw local task was not created", task: null };
+  }
+  if (ctx?.waitUntil) {
+    logOpenClawAsync("submit-background-scheduled", {
+      localTaskId: openClawTask.id,
+      conversationId,
+      provider,
+      model
+    });
+    ctx.waitUntil(runOpenClawAsyncTaskInBackground({
+      env,
+      task: openClawTask,
+      model,
+      provider,
+      providerCatalog,
+      finalMessages
+    }).catch(err => {
+      console.warn("[openclaw-async] background task failed", err?.message || String(err));
+    }));
+    return {
+      ok: true,
+      mode: "async",
+      submitted: true,
+      task: openClawTask
+    };
   }
   const decoder = new TextDecoder();
   const bufferState = { value: "" };

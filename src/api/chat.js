@@ -2697,10 +2697,20 @@ function findOpenClawRemoteTaskId(value) {
     || value.taskId
     || value.remote_task_id
     || value.remoteTaskId
+    || value.task?.id
+    || value.task?.task_id
+    || value.task?.taskId
+    || value.task?.remote_task_id
+    || value.task?.remoteTaskId
     || value.data?.task_id
     || value.data?.taskId
     || value.data?.remote_task_id
     || value.data?.remoteTaskId
+    || value.data?.task?.id
+    || value.data?.task?.task_id
+    || value.data?.task?.taskId
+    || value.data?.task?.remote_task_id
+    || value.data?.task?.remoteTaskId
     || (value.id && !Array.isArray(value.choices) ? value.id : "")
     || (value.data?.id && !Array.isArray(value.data?.choices) && !String(value.data?.object || "").includes("chat.completion") ? value.data.id : "");
   return typeof direct === "string" || typeof direct === "number"
@@ -2766,6 +2776,15 @@ function extractOpenClawRemoteTaskFromText(text) {
     };
   }
   return null;
+}
+
+function previewOpenClawSubmitText(text) {
+  return String(text || "")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+/gi, "Bearer [redacted]")
+    .replace(/"?((?:api[_-]?key|token|authorization))"?\s*[:=]\s*"[^"]+"/gi, "\"$1\":\"[redacted]\"")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 600);
 }
 
 function appendReplyFromSseBuffer(bufferState, replyState) {
@@ -2941,7 +2960,8 @@ async function submitOpenClawAsyncTask({
       conversationId,
       scannedBytes,
       streamDone,
-      partialReplyChars: replyState.value.length
+      partialReplyChars: replyState.value.length,
+      preview: previewOpenClawSubmitText(scanText)
     });
     task = await updateOpenClawTask(env, task, {
       status: "disconnected",

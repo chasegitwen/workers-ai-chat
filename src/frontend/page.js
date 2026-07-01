@@ -1599,6 +1599,43 @@ body.dark .toolErrorNotice{
   min-height:38px;
 }
 
+.openclawExecutionModeField{
+  align-items:stretch;
+  gap:10px;
+}
+
+.openclawExecutionModeTitle{
+  color:var(--muted);
+  font-size:13px;
+}
+
+.openclawExecutionModeOption{
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr);
+  column-gap:8px;
+  row-gap:2px;
+  align-items:start;
+  color:var(--text);
+  cursor:pointer;
+}
+
+.openclawExecutionModeOption input{
+  width:auto;
+  margin:2px 0 0;
+}
+
+.openclawExecutionModeLabel{
+  font-size:13px;
+  line-height:1.35;
+}
+
+.openclawExecutionModeHelp{
+  grid-column:2;
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.45;
+}
+
 .settingsGrid > label:has(#providerLabelInput),
 .settingsGrid > label:has(#providerIdInput),
 .settingsGrid > label:has(#providerTypeSelect),
@@ -5421,11 +5458,17 @@ function isOpenClawProviderConfig(provider){
 function openClawExecutionModeMarkup(prefix){
   return [
     "<div id='" + prefix + "OpenClawExecutionModeField' class='settingsField full openclawExecutionModeField' hidden>",
-    "<span>OpenClaw execution mode</span>",
-    "<label class='settingsCheck'><input name='" + prefix + "OpenClawExecutionMode' value='legacy' type='radio' checked /> Legacy SSE</label>",
-    "<div class='settingsHint'>Compatible with all existing OpenClaw deployments.</div>",
-    "<label class='settingsCheck'><input name='" + prefix + "OpenClawExecutionMode' value='bridge' type='radio' /> Native Bridge</label>",
-    "<div class='settingsHint'>Uses the native OpenClaw Bridge runtime.</div>",
+    "<span class='openclawExecutionModeTitle'>OpenClaw execution mode</span>",
+    "<label class='openclawExecutionModeOption'>",
+    "<input name='" + prefix + "OpenClawExecutionMode' value='legacy' type='radio' checked />",
+    "<span class='openclawExecutionModeLabel'>Legacy SSE</span>",
+    "<span class='openclawExecutionModeHelp'>Compatible with all existing OpenClaw deployments.</span>",
+    "</label>",
+    "<label class='openclawExecutionModeOption'>",
+    "<input name='" + prefix + "OpenClawExecutionMode' value='bridge' type='radio' />",
+    "<span class='openclawExecutionModeLabel'>Native Bridge</span>",
+    "<span class='openclawExecutionModeHelp'>Uses the native OpenClaw Bridge runtime.</span>",
+    "</label>",
     "</div>"
   ].join("");
 }

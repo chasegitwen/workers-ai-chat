@@ -17,6 +17,10 @@ import { callWorkersAI } from "../providers/workersai.js";
 import { normalizeProviderError, ProviderError } from "../providers/errors.js";
 import { filterEmptySystemMessages } from "../providers/messages.js";
 import { runTool } from "../tools/registry.js";
+import {
+  isOpenClawBridgeModeEnabled,
+  openclawBridgeClient
+} from "./openclawBridgeClient.js";
 
 const defaultSystemMessage = {
   role: "system",
@@ -173,6 +177,20 @@ function serializeOpenClawTask(row) {
     remote_message: row.remote_message || "",
     cancelledAt: row.cancelled_at || "",
     cancelled_at: row.cancelled_at || "",
+    bridgeTaskId: row.bridge_task_id || "",
+    bridge_task_id: row.bridge_task_id || "",
+    bridgeRunId: row.bridge_run_id || "",
+    bridge_run_id: row.bridge_run_id || "",
+    bridgeSessionKey: row.bridge_session_key || "",
+    bridge_session_key: row.bridge_session_key || "",
+    bridgeSessionId: row.bridge_session_id || "",
+    bridge_session_id: row.bridge_session_id || "",
+    bridgeAgentId: row.bridge_agent_id || "",
+    bridge_agent_id: row.bridge_agent_id || "",
+    bridgeResultHash: row.bridge_result_hash || "",
+    bridge_result_hash: row.bridge_result_hash || "",
+    bridgeModeEnabled: Boolean(row.bridge_mode_enabled),
+    bridge_mode_enabled: Boolean(row.bridge_mode_enabled),
     metadata,
     canReconnect: Boolean(metadata.canReconnect),
     canQueryRemoteStatus: Boolean(metadata.canQueryRemoteStatus),
@@ -358,6 +376,117 @@ async function updateOpenClawTaskRemoteStart(env, task, remoteTask) {
   }
 }
 
+function isOpenClawBridgeTask(task) {
+  return Boolean(task?.bridgeModeEnabled || task?.bridge_mode_enabled || task?.bridgeTaskId || task?.bridge_task_id);
+}
+
+function openClawBridgeTaskId(task) {
+  return String(task?.bridgeTaskId || task?.bridge_task_id || "").trim();
+}
+
+async function hashOpenClawBridgeResult(text) {
+  const bytes = new TextEncoder().encode(String(text || ""));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map(byte => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function updateOpenClawBridgeTaskStart(env, task, bridgeTask) {
+  if (!env.DB || !task?.id) {
+    return task;
+  }
+  const bridgeTaskId = String(bridgeTask?.taskId || bridgeTask?.task_id || bridgeTask?.id || "").trim();
+  const bridgeRunId = String(bridgeTask?.runId || bridgeTask?.run_id || "").trim();
+  const bridgeSessionKey = String(bridgeTask?.sessionKey || bridgeTask?.session_key || "").trim();
+  const bridgeSessionId = String(bridgeTask?.sessionId || bridgeTask?.session_id || "").trim();
+  const bridgeAgentId = String(bridgeTask?.agentId || bridgeTask?.agent_id || "").trim();
+  const remoteStatus = String(bridgeTask?.status || "running");
+  const now = Date.now();
+  try {
+    await env.DB.prepare(
+      `UPDATE openclaw_tasks
+        SET status = ?,
+          updated_at = ?,
+          remote_task_id = ?,
+          remote_status = ?,
+          remote_progress = ?,
+          remote_message = ?,
+          bridge_task_id = ?,
+          bridge_run_id = ?,
+          bridge_session_key = ?,
+          bridge_session_id = ?,
+          bridge_agent_id = ?,
+          bridge_mode_enabled = ?,
+          metadata = ?
+        WHERE id = ?`
+    ).bind(
+      localStatusFromRemoteStatus(remoteStatus, "running"),
+      now,
+      bridgeTaskId,
+      remoteStatus,
+      localStatusFromRemoteStatus(remoteStatus, "running") === "completed" ? 100 : 0,
+      bridgeTask?.message || "OpenClaw Bridge task submitted",
+      bridgeTaskId,
+      bridgeRunId,
+      bridgeSessionKey,
+      bridgeSessionId,
+      bridgeAgentId,
+      1,
+      openClawTaskMetadata({
+        source: "openclaw-bridge",
+        canReconnect: true,
+        canQueryRemoteStatus: true,
+        abortStopsRemote: true
+      }),
+      task.id
+    ).run();
+    return await readOpenClawTaskById(env, task.id);
+  } catch (err) {
+    console.warn("[openclaw-bridge] failed to store bridge task", err?.message || String(err));
+    return task;
+  }
+}
+
+async function markOpenClawBridgeTaskFailed(env, task, message) {
+  if (!task?.id) {
+    return task;
+  }
+  const failed = await updateOpenClawTask(env, task, {
+    status: "failed",
+    error: message || "OpenClaw Bridge unavailable",
+    latencyMs: 0
+  }) || task;
+  if (!env.DB) {
+    return failed;
+  }
+  try {
+    await env.DB.prepare(
+      `UPDATE openclaw_tasks
+        SET bridge_mode_enabled = ?,
+          remote_status = ?,
+          remote_message = ?,
+          metadata = ?
+        WHERE id = ?`
+    ).bind(
+      1,
+      "failed",
+      message || "OpenClaw Bridge unavailable",
+      openClawTaskMetadata({
+        source: "openclaw-bridge",
+        canReconnect: true,
+        canQueryRemoteStatus: true,
+        abortStopsRemote: true
+      }),
+      task.id
+    ).run();
+    return await readOpenClawTaskById(env, task.id) || failed;
+  } catch (err) {
+    console.warn("[openclaw-bridge] failed to mark bridge task failed", err?.message || String(err));
+    return failed;
+  }
+}
+
 async function readOpenClawTasks(env, options = {}) {
   if (!env.DB) {
     return [];
@@ -416,7 +545,7 @@ async function readActiveOpenClawTask(env, conversationId) {
 }
 
 function isOpenClawTaskActive(task) {
-  return ["running", "disconnected", "expired"].includes(String(task?.status || ""));
+  return ["running", "recovering", "disconnected", "expired"].includes(String(task?.status || ""));
 }
 
 function isOpenClawTaskTerminalStatus(status) {
@@ -606,14 +735,35 @@ async function callOpenClawRemoteTask(env, remoteTaskId, action, task = null) {
 }
 
 async function getOpenClawTaskStatus(env, remoteTaskId, task = null) {
+  if (isOpenClawBridgeTask(task)) {
+    const bridgeTaskId = openClawBridgeTaskId(task);
+    if (!bridgeTaskId) {
+      return { ok: false, unavailable: true, error: "OpenClaw Bridge task id is missing" };
+    }
+    return openclawBridgeClient(env).getTaskStatus(bridgeTaskId);
+  }
   return callOpenClawRemoteTask(env, remoteTaskId, "status", task);
 }
 
 async function cancelOpenClawTask(env, remoteTaskId, task = null) {
+  if (isOpenClawBridgeTask(task)) {
+    const bridgeTaskId = openClawBridgeTaskId(task);
+    if (!bridgeTaskId) {
+      return { ok: false, unavailable: true, error: "OpenClaw Bridge task id is missing" };
+    }
+    return openclawBridgeClient(env).cancelTask(bridgeTaskId);
+  }
   return callOpenClawRemoteTask(env, remoteTaskId, "cancel", task);
 }
 
 async function getOpenClawTaskResult(env, remoteTaskId, task = null) {
+  if (isOpenClawBridgeTask(task)) {
+    const bridgeTaskId = openClawBridgeTaskId(task);
+    if (!bridgeTaskId) {
+      return { ok: false, unavailable: true, error: "OpenClaw Bridge task id is missing" };
+    }
+    return openclawBridgeClient(env).getTaskResult(bridgeTaskId);
+  }
   return callOpenClawRemoteTask(env, remoteTaskId, "result", task);
 }
 
@@ -675,7 +825,7 @@ function localStatusFromRemoteStatus(remoteStatus, fallback = "") {
   if (["cancel_requested", "cancelling", "canceling"].includes(status)) {
     return "cancel_requested";
   }
-  if (["running", "pending", "queued", "in_progress", "processing"].includes(status)) {
+  if (["running", "recovering", "pending", "queued", "started", "active", "in_progress", "processing"].includes(status)) {
     return "running";
   }
   return fallback || "";
@@ -907,9 +1057,18 @@ async function finalizeOpenClawTaskResult(env, task) {
   if (!reply) {
     return { ok: false, error: "OpenClaw remote task result is empty", task: latestTask };
   }
+  const bridgeResultHash = isOpenClawBridgeTask(latestTask)
+    ? await hashOpenClawBridgeResult(reply)
+    : "";
+  if (bridgeResultHash && latestTask.bridgeResultHash === bridgeResultHash) {
+    return { ok: true, saved: false, duplicate: true, task: latestTask, result: reply };
+  }
   const refreshedTask = await readOpenClawTaskById(env, latestTask.id) || latestTask;
   if (refreshedTask.assistantMessageId) {
     return { ok: true, saved: false, duplicate: true, task: refreshedTask };
+  }
+  if (bridgeResultHash && refreshedTask.bridgeResultHash === bridgeResultHash) {
+    return { ok: true, saved: false, duplicate: true, task: refreshedTask, result: reply };
   }
   const assistantMessage = env.DB
     ? await saveMessage(env.DB, refreshedTask.conversationId || refreshedTask.conversation_id, "assistant", reply)
@@ -926,11 +1085,24 @@ async function finalizeOpenClawTaskResult(env, task) {
     status: "completed",
     assistantMessageId: assistantMessage?.id || refreshedTask.assistantMessageId || ""
   };
+  if (bridgeResultHash && env.DB) {
+    await env.DB.prepare(
+      `UPDATE openclaw_tasks
+        SET bridge_result_hash = ?
+        WHERE id = ?`
+    ).bind(
+      bridgeResultHash,
+      refreshedTask.id
+    ).run();
+  }
+  const finalTask = bridgeResultHash
+    ? await readOpenClawTaskById(env, refreshedTask.id) || savedTask
+    : savedTask;
   return {
     ok: true,
     saved: Boolean(assistantMessage?.id),
     duplicate: false,
-    task: savedTask,
+    task: finalTask,
     result: reply
   };
 }
@@ -982,7 +1154,11 @@ async function handleOpenClawTasksRequest(request, env, url, ctx) {
     return jsonResponse({
       ok: true,
       openClawAsyncModePresent: typeof env.OPENCLAW_ASYNC_MODE !== "undefined",
-      openClawAsyncModeEnabled: isOpenClawAsyncModeEnabled(env)
+      openClawAsyncModeEnabled: isOpenClawAsyncModeEnabled(env),
+      openClawBridgeModePresent: typeof env.OPENCLAW_BRIDGE_MODE !== "undefined",
+      openClawBridgeModeEnabled: isOpenClawBridgeModeEnabled(env),
+      openClawBridgeBaseUrlPresent: Boolean(String(env.OPENCLAW_BRIDGE_BASE_URL || "").trim()),
+      openClawBridgeTokenPresent: Boolean(String(env.OPENCLAW_BRIDGE_TOKEN || "").trim())
     });
   }
 
@@ -3245,6 +3421,62 @@ async function submitOpenClawAsyncTask({
   }
 }
 
+async function submitOpenClawBridgeTask({
+  env,
+  conversationId,
+  openClawTask,
+  userContent,
+  attachments = []
+}) {
+  if (!openClawTask?.id) {
+    return {
+      ok: false,
+      error: "OpenClaw local task was not created",
+      task: null
+    };
+  }
+
+  const bridge = openclawBridgeClient(env);
+  const result = await bridge.createTask({
+    conversationId,
+    message: userContent,
+    sessionKey: "default",
+    sessionId: "",
+    agentId: "",
+    attachments,
+    idempotencyKey: openClawTask.id
+  });
+
+  if (!result.ok) {
+    const error = result.error || "OpenClaw Bridge unavailable";
+    const failedTask = await markOpenClawBridgeTaskFailed(env, openClawTask, error);
+    return {
+      ok: false,
+      error,
+      task: failedTask
+    };
+  }
+
+  const bridgeTask = result.task || {};
+  if (!bridgeTask.taskId) {
+    const error = "OpenClaw Bridge unavailable: task id missing";
+    const failedTask = await markOpenClawBridgeTaskFailed(env, openClawTask, error);
+    return {
+      ok: false,
+      error,
+      task: failedTask
+    };
+  }
+
+  const task = await updateOpenClawBridgeTaskStart(env, openClawTask, bridgeTask) || openClawTask;
+  return {
+    ok: true,
+    bridge: true,
+    submitted: true,
+    task
+  };
+}
+
 function streamChatWithToolStatus({
   env,
   ctx,
@@ -3294,9 +3526,15 @@ function streamChatWithToolStatus({
             remoteStatus: task.remoteStatus || "",
             remoteProgress: task.remoteProgress ?? null,
             remoteMessage: task.remoteMessage || "",
-            canReconnect: false,
-            canQueryRemoteStatus: false,
-            abortStopsRemote: false
+            bridgeTaskId: task.bridgeTaskId || "",
+            bridgeRunId: task.bridgeRunId || "",
+            bridgeSessionKey: task.bridgeSessionKey || "",
+            bridgeSessionId: task.bridgeSessionId || "",
+            bridgeAgentId: task.bridgeAgentId || "",
+            bridgeModeEnabled: Boolean(task.bridgeModeEnabled),
+            canReconnect: Boolean(task.canReconnect),
+            canQueryRemoteStatus: Boolean(task.canQueryRemoteStatus),
+            abortStopsRemote: Boolean(task.abortStopsRemote)
           }));
         }
       };
@@ -3839,10 +4077,41 @@ export async function handleChat(request, env, ctx) {
   if (isOpenClawRequest) {
     logOpenClawAsync("mode-check", {
       enabled: isOpenClawAsyncModeEnabled(env),
+      bridgeEnabled: isOpenClawBridgeModeEnabled(env),
       provider,
       model: model || DEFAULT_TEXT_MODEL,
       localTaskId: openClawTask?.id || "",
       conversationId: conversation.id
+    });
+  }
+
+  if (isOpenClawRequest && isOpenClawBridgeModeEnabled(env)) {
+    const bridgeResult = await submitOpenClawBridgeTask({
+      env,
+      conversationId: conversation.id,
+      openClawTask,
+      userContent,
+      attachments: allImageAttachments
+    });
+    return new Response(JSON.stringify({
+      ok: Boolean(bridgeResult.ok),
+      async: true,
+      bridge: true,
+      conversationId: conversation.id,
+      task: bridgeResult.task,
+      taskId: bridgeResult.task?.id || "",
+      remoteTaskId: bridgeResult.task?.remoteTaskId || bridgeResult.task?.remote_task_id || "",
+      bridgeTaskId: bridgeResult.task?.bridgeTaskId || bridgeResult.task?.bridge_task_id || "",
+      submitted: Boolean(bridgeResult.submitted),
+      completed: false,
+      error: bridgeResult.error || ""
+    }), {
+      status: bridgeResult.ok ? 202 : 502,
+      headers: {
+        ...corsHeaders(),
+        "X-Conversation-Id": conversation.id,
+        "Content-Type": "application/json; charset=utf-8"
+      }
     });
   }
 

@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   isOpenClawBridgeModeEnabled,
   normalizeOpenClawBridgeBaseUrl,
-  openclawBridgeClient
+  openclawBridgeClient,
+  shouldUseOpenClawBridge
 } from "../src/api/openclawBridgeClient.js";
 
 const env = {
@@ -20,6 +21,20 @@ describe("openclawBridgeClient", () => {
     expect(isOpenClawBridgeModeEnabled(env)).toBe(true);
     expect(isOpenClawBridgeModeEnabled({ OPENCLAW_BRIDGE_MODE: "false" })).toBe(false);
     expect(normalizeOpenClawBridgeBaseUrl("https://bridge.example.test///")).toBe("https://bridge.example.test");
+  });
+
+  it("selects bridge mode from OpenClaw provider settings before env fallback", () => {
+    expect(shouldUseOpenClawBridge({ type: "openclaw", openclawExecutionMode: "bridge" }, {
+      OPENCLAW_BRIDGE_MODE: "false"
+    })).toBe(true);
+    expect(shouldUseOpenClawBridge({ type: "openclaw", openclawExecutionMode: "legacy" }, env)).toBe(false);
+    expect(shouldUseOpenClawBridge({ type: "openclaw" }, env)).toBe(true);
+    expect(shouldUseOpenClawBridge({ type: "openclaw" }, {})).toBe(false);
+  });
+
+  it("never enables bridge mode for non-OpenClaw providers", () => {
+    expect(shouldUseOpenClawBridge({ type: "openai", openclawExecutionMode: "bridge" }, env)).toBe(false);
+    expect(shouldUseOpenClawBridge({ type: "workers-ai" }, env)).toBe(false);
   });
 
   it("creates a bridge task through the bridge API", async () => {

@@ -5392,6 +5392,7 @@ function normalizeManagedProvider(provider, categoryType){
     providerId,
     baseUrl,
     apiKeyEnv:String(provider.apiKeyEnv || ""),
+    openclawExecutionMode:provider.openclawExecutionMode === "bridge" ? "bridge" : provider.openclawExecutionMode === "legacy" ? "legacy" : undefined,
     enabled:provider.enabled !== false,
     builtin:Boolean(provider.builtin),
     editable:provider.editable !== false,
@@ -5401,6 +5402,49 @@ function normalizeManagedProvider(provider, categoryType){
     .map(model => normalizeManagedModel(model, normalized, categoryType))
     .filter(Boolean);
   return normalized;
+}
+
+function isOpenClawProviderConfig(provider){
+  const values = [
+    provider?.type,
+    provider?.provider,
+    provider?.providerId,
+    provider?.id,
+    provider?.providerName,
+    provider?.label,
+    provider?.baseUrl,
+    provider?.apiBase
+  ].map(value => String(value || "").trim().toLowerCase()).filter(Boolean);
+  return values.some(value => value === "openclaw" || value.startsWith("openclaw-") || value.includes("openclaw"));
+}
+
+function openClawExecutionModeMarkup(prefix){
+  return [
+    "<div id='" + prefix + "OpenClawExecutionModeField' class='settingsField full openclawExecutionModeField' hidden>",
+    "<span>OpenClaw execution mode</span>",
+    "<label class='settingsCheck'><input name='" + prefix + "OpenClawExecutionMode' value='legacy' type='radio' checked /> Legacy SSE</label>",
+    "<div class='settingsHint'>Compatible with all existing OpenClaw deployments.</div>",
+    "<label class='settingsCheck'><input name='" + prefix + "OpenClawExecutionMode' value='bridge' type='radio' /> Native Bridge</label>",
+    "<div class='settingsHint'>Uses the native OpenClaw Bridge runtime.</div>",
+    "</div>"
+  ].join("");
+}
+
+function updateOpenClawExecutionModeVisibility(container, prefix, provider){
+  const field = container.querySelector("#" + prefix + "OpenClawExecutionModeField");
+  if(!field){
+    return;
+  }
+  field.hidden = !isOpenClawProviderConfig(provider);
+}
+
+function getOpenClawExecutionModeValue(container, prefix, provider){
+  if(!isOpenClawProviderConfig(provider)){
+    return undefined;
+  }
+  return container.querySelector("input[name='" + prefix + "OpenClawExecutionMode']:checked")?.value === "bridge"
+    ? "bridge"
+    : "legacy";
 }
 
 function emptyModelCategories(){
@@ -5508,6 +5552,7 @@ function categoriesToProviders(categories){
         apiBase:provider.baseUrl || "",
         baseUrl:provider.baseUrl || "",
         apiKeyEnv:provider.apiKeyEnv || "",
+        openclawExecutionMode:provider.openclawExecutionMode === "bridge" ? "bridge" : provider.openclawExecutionMode === "legacy" ? "legacy" : undefined,
         builtin:Boolean(provider.builtin),
         editable:provider.editable !== false,
         enabled:provider.enabled !== false,
@@ -5885,6 +5930,7 @@ function editProvider(providerId){
     "<label class='settingsField'>type<select id='editProviderType'><option value='claude-compatible'>Claude 兼容</option><option value='openai-compatible'>OpenAI 兼容</option></select></label>",
     "<label class='settingsField'>baseUrl<input id='editProviderBaseUrl' /></label>",
     "<label class='settingsField'>apiKeyEnv<input id='editProviderApiKeyEnv' /></label>",
+    openClawExecutionModeMarkup("editProvider"),
     "<label class='settingsCheck'><input id='editProviderEnabled' type='checkbox' /> enabled</label>"
   ].join("");
   dialog.body.querySelector("#editProviderLabel").value = provider.providerName || provider.providerId;
@@ -5892,7 +5938,17 @@ function editProvider(providerId){
   dialog.body.querySelector("#editProviderType").value = found.category.type;
   dialog.body.querySelector("#editProviderBaseUrl").value = provider.baseUrl || "";
   dialog.body.querySelector("#editProviderApiKeyEnv").value = provider.apiKeyEnv || "";
+  dialog.body.querySelector("input[name='editProviderOpenClawExecutionMode'][value='" + (provider.openclawExecutionMode === "bridge" ? "bridge" : "legacy") + "']").checked = true;
   dialog.body.querySelector("#editProviderEnabled").checked = provider.enabled !== false;
+  const refreshOpenClawModeVisibility = () => updateOpenClawExecutionModeVisibility(dialog.body, "editProvider", {
+    providerId:dialog.body.querySelector("#editProviderId").value,
+    providerName:dialog.body.querySelector("#editProviderLabel").value,
+    baseUrl:dialog.body.querySelector("#editProviderBaseUrl").value
+  });
+  ["#editProviderLabel", "#editProviderId", "#editProviderBaseUrl"].forEach(selector => {
+    dialog.body.querySelector(selector).addEventListener("input", refreshOpenClawModeVisibility);
+  });
+  refreshOpenClawModeVisibility();
   dialog.deleteBtn.style.display = "inline-block";
   dialog.saveBtn.onclick = () => saveProviderDialog(providerId);
   dialog.deleteBtn.onclick = () => removeProvider(providerId, true);
@@ -5911,6 +5967,11 @@ function saveProviderDialog(originalId){
   const baseUrl = dialog.body.querySelector("#editProviderBaseUrl").value.trim();
   const apiKeyEnv = dialog.body.querySelector("#editProviderApiKeyEnv").value.trim();
   const enabled = dialog.body.querySelector("#editProviderEnabled").checked;
+  const openclawExecutionMode = getOpenClawExecutionModeValue(dialog.body, "editProvider", {
+    providerId,
+    providerName,
+    baseUrl
+  });
   if(!providerName || !providerId){
     settingsSyncStatus.textContent = "provider id 和 name 不能为空";
     return;
@@ -5926,6 +5987,7 @@ function saveProviderDialog(originalId){
     providerId,
     baseUrl,
     apiKeyEnv,
+    openclawExecutionMode,
     enabled
   };
   getCategory(providerType).providers.push(nextProvider);
@@ -6254,8 +6316,18 @@ function openAddProviderDialog(categoryType){
     "<label class='settingsField'>providerId<input id='newProviderId' placeholder='my-provider' /></label>",
     "<label class='settingsField full'>baseUrl<input id='newProviderBaseUrl' placeholder='https://api.example.com/v1' /></label>",
     "<label class='settingsField'>apiKeyEnv<input id='newProviderApiKeyEnv' placeholder='MY_PROVIDER_API_KEY' /></label>",
+    openClawExecutionModeMarkup("newProvider"),
     "<label class='settingsCheck'><input id='newProviderEnabled' type='checkbox' checked /> enabled</label>"
   ].join("");
+  const refreshOpenClawModeVisibility = () => updateOpenClawExecutionModeVisibility(dialog.body, "newProvider", {
+    providerId:dialog.body.querySelector("#newProviderId").value,
+    providerName:dialog.body.querySelector("#newProviderLabel").value,
+    baseUrl:dialog.body.querySelector("#newProviderBaseUrl").value
+  });
+  ["#newProviderLabel", "#newProviderId", "#newProviderBaseUrl"].forEach(selector => {
+    dialog.body.querySelector(selector).addEventListener("input", refreshOpenClawModeVisibility);
+  });
+  refreshOpenClawModeVisibility();
   dialog.deleteBtn.style.display = "none";
   dialog.saveBtn.onclick = () => saveNewProviderDialog(categoryType);
   dialog.overlay.classList.add("open");
@@ -6271,6 +6343,11 @@ function saveNewProviderDialog(categoryType){
   const baseUrl = dialog.body.querySelector("#newProviderBaseUrl").value.trim();
   const apiKeyEnv = dialog.body.querySelector("#newProviderApiKeyEnv").value.trim();
   const enabled = dialog.body.querySelector("#newProviderEnabled").checked;
+  const openclawExecutionMode = getOpenClawExecutionModeValue(dialog.body, "newProvider", {
+    providerId,
+    providerName,
+    baseUrl
+  });
   if(!providerName || !providerId){
     settingsSyncStatus.textContent = "provider id 和名称不能为空";
     return;
@@ -6284,6 +6361,7 @@ function saveNewProviderDialog(categoryType){
     providerId,
     baseUrl,
     apiKeyEnv,
+    openclawExecutionMode,
     enabled,
     builtin:false,
     editable:true,

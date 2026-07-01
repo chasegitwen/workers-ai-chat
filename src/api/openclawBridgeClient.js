@@ -28,6 +28,40 @@ export function normalizeOpenClawBridgeBaseUrl(value) {
   return String(value || "").trim().replace(/\/+$/g, "");
 }
 
+function normalizeProgressValue(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.min(100, number)) : null;
+}
+
+function isOpenClawBridgeSuccessStatus(status) {
+  return ["completed", "complete", "done", "success", "succeeded"].includes(String(status || "").trim().toLowerCase());
+}
+
+function isOpenClawBridgeFailedStatus(status) {
+  return ["failed", "failure", "error"].includes(String(status || "").trim().toLowerCase());
+}
+
+export function normalizeOpenClawBridgeTaskProgress(status, remoteProgress, existingProgress = null) {
+  if (isOpenClawBridgeSuccessStatus(status)) {
+    return 100;
+  }
+
+  const remote = normalizeProgressValue(remoteProgress);
+  if (remote !== null) {
+    return remote;
+  }
+
+  const existing = normalizeProgressValue(existingProgress);
+  if (existing !== null) {
+    return existing;
+  }
+
+  return isOpenClawBridgeFailedStatus(status) ? 0 : null;
+}
+
 function bridgeConfig(env) {
   return {
     baseUrl: normalizeOpenClawBridgeBaseUrl(env?.OPENCLAW_BRIDGE_BASE_URL),
@@ -47,13 +81,18 @@ function bridgeHeaders(token) {
 
 function normalizeBridgeTask(data) {
   const source = data?.task && typeof data.task === "object" ? data.task : data || {};
+  const status = String(source.status || data?.status || "");
+  const progressValue = source.progress ?? source.remote_progress ?? data?.progress ?? data?.remote_progress;
   return {
     taskId: String(source.task_id || source.taskId || source.id || data?.task_id || data?.taskId || data?.id || ""),
     runId: String(source.run_id || source.runId || data?.run_id || data?.runId || ""),
     sessionKey: String(source.sessionKey || source.session_key || data?.sessionKey || data?.session_key || ""),
     sessionId: String(source.sessionId || source.session_id || data?.sessionId || data?.session_id || ""),
     agentId: String(source.agentId || source.agent_id || data?.agentId || data?.agent_id || ""),
-    status: String(source.status || data?.status || ""),
+    status,
+    progress: isOpenClawBridgeSuccessStatus(status)
+      ? 100
+      : normalizeProgressValue(progressValue),
     message: source.message || data?.message || "",
     result: source.result ?? data?.result ?? null,
     raw: data || {}

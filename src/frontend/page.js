@@ -6972,10 +6972,27 @@ function openClawTaskRemoteStatus(task){
   return task?.remote_status || task?.remoteStatus || "";
 }
 
+function isOpenClawBridgeTaskRecord(task){
+  return Boolean(task?.bridgeModeEnabled || task?.bridge_mode_enabled || task?.bridgeTaskId || task?.bridge_task_id);
+}
+
 function openClawTaskRemoteProgress(task){
   const value = task?.remote_progress ?? task?.remoteProgress;
-  const number = Number(value);
-  return Number.isFinite(number) ? Math.max(0, Math.min(100, number)) : null;
+  const number = value === null || value === undefined || value === "" ? NaN : Number(value);
+  const progress = Number.isFinite(number) ? Math.max(0, Math.min(100, number)) : null;
+  if(!isOpenClawBridgeTaskRecord(task)){
+    return progress;
+  }
+
+  const remoteStatus = String(openClawTaskRemoteStatus(task) || "").toLowerCase();
+  const localStatus = String(task?.status || "").toLowerCase();
+  if(["completed", "complete", "done", "success", "succeeded"].includes(remoteStatus) || localStatus === "completed"){
+    return 100;
+  }
+  if(["failed", "failure", "error"].includes(remoteStatus) || localStatus === "failed"){
+    return progress !== null ? progress : 0;
+  }
+  return progress;
 }
 
 function openClawTaskRemoteMessage(task){

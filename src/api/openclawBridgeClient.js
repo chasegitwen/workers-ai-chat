@@ -1,7 +1,27 @@
 const BRIDGE_TIMEOUT_MS = 30000;
 
+function normalizeOpenClawExecutionMode(value) {
+  const mode = String(value || "").trim().toLowerCase();
+  if (mode === "bridge" || mode === "true") {
+    return "bridge";
+  }
+  return "legacy";
+}
+
 export function isOpenClawBridgeModeEnabled(env) {
-  return String(env?.OPENCLAW_BRIDGE_MODE || "").trim().toLowerCase() === "true";
+  return shouldUseOpenClawBridge({ type: "openclaw" }, env);
+}
+
+export function shouldUseOpenClawBridge(provider, env) {
+  const providerType = String(provider?.type || provider?.provider || provider?.id || "").trim().toLowerCase();
+  if (providerType !== "openclaw") {
+    return false;
+  }
+
+  const mode = provider?.openclawExecutionMode === undefined
+    ? normalizeOpenClawExecutionMode(env?.OPENCLAW_BRIDGE_MODE)
+    : normalizeOpenClawExecutionMode(provider.openclawExecutionMode);
+  return mode === "bridge";
 }
 
 export function normalizeOpenClawBridgeBaseUrl(value) {

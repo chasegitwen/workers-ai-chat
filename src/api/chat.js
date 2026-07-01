@@ -18,7 +18,7 @@ import { normalizeProviderError, ProviderError } from "../providers/errors.js";
 import { filterEmptySystemMessages } from "../providers/messages.js";
 import { runTool } from "../tools/registry.js";
 import {
-  isOpenClawBridgeModeEnabled,
+  shouldUseOpenClawBridge,
   openclawBridgeClient
 } from "./openclawBridgeClient.js";
 
@@ -110,6 +110,16 @@ function openClawTaskMetadata(extra = {}) {
 
 function isOpenClawAsyncModeEnabled(env) {
   return String(env.OPENCLAW_ASYNC_MODE || "").trim().toLowerCase() === "native";
+}
+
+function openClawBridgeProviderConfig(provider) {
+  if (!provider) {
+    return null;
+  }
+  return {
+    ...provider,
+    type: "openclaw"
+  };
 }
 
 function logOpenClawAsync(event, detail = {}) {
@@ -1156,7 +1166,7 @@ async function handleOpenClawTasksRequest(request, env, url, ctx) {
       openClawAsyncModePresent: typeof env.OPENCLAW_ASYNC_MODE !== "undefined",
       openClawAsyncModeEnabled: isOpenClawAsyncModeEnabled(env),
       openClawBridgeModePresent: typeof env.OPENCLAW_BRIDGE_MODE !== "undefined",
-      openClawBridgeModeEnabled: isOpenClawBridgeModeEnabled(env),
+      openClawBridgeModeEnabled: shouldUseOpenClawBridge({ type: "openclaw" }, env),
       openClawBridgeBaseUrlPresent: Boolean(String(env.OPENCLAW_BRIDGE_BASE_URL || "").trim()),
       openClawBridgeTokenPresent: Boolean(String(env.OPENCLAW_BRIDGE_TOKEN || "").trim())
     });
@@ -2043,6 +2053,9 @@ function normalizeProvider(provider) {
     providerType: String(provider.providerType || provider.type || provider.category || id || "workers-ai"),
     apiBase: String(provider.apiBase || provider.baseUrl || ""),
     apiKeyEnv: String(provider.apiKeyEnv || ""),
+    openclawExecutionMode: provider.openclawExecutionMode === "bridge"
+      ? "bridge"
+      : provider.openclawExecutionMode === "legacy" ? "legacy" : undefined,
     builtin: Boolean(provider.builtin),
     enabled: provider.enabled !== false,
     models: Array.isArray(provider.models)
@@ -2153,6 +2166,9 @@ function providersFromCategories(categories) {
           providerType: type,
           apiBase: provider.baseUrl || provider.apiBase || "",
           apiKeyEnv: provider.apiKeyEnv || "",
+          openclawExecutionMode: provider.openclawExecutionMode === "bridge"
+            ? "bridge"
+            : provider.openclawExecutionMode === "legacy" ? "legacy" : undefined,
           builtin: Boolean(provider.builtin),
           enabled: provider.enabled !== false,
           models: (provider.models || []).map(model => ({
@@ -4075,44 +4091,46 @@ export async function handleChat(request, env, ctx) {
   }
 
   if (isOpenClawRequest) {
+    const openClawBridgeProvider = openClawBridgeProviderConfig(openClawTarget?.provider);
+    const openClawBridgeEnabled = shouldUseOpenClawBridge(openClawBridgeProvider, env);
     logOpenClawAsync("mode-check", {
       enabled: isOpenClawAsyncModeEnabled(env),
-      bridgeEnabled: isOpenClawBridgeModeEnabled(env),
+      bridgeEnabled: openClawBridgeEnabled,
       provider,
       model: model || DEFAULT_TEXT_MODEL,
       localTaskId: openClawTask?.id || "",
       conversationId: conversation.id
     });
-  }
 
-  if (isOpenClawRequest && isOpenClawBridgeModeEnabled(env)) {
-    const bridgeResult = await submitOpenClawBridgeTask({
-      env,
-      conversationId: conversation.id,
-      openClawTask,
-      userContent,
-      attachments: allImageAttachments
-    });
-    return new Response(JSON.stringify({
-      ok: Boolean(bridgeResult.ok),
-      async: true,
-      bridge: true,
-      conversationId: conversation.id,
-      task: bridgeResult.task,
-      taskId: bridgeResult.task?.id || "",
-      remoteTaskId: bridgeResult.task?.remoteTaskId || bridgeResult.task?.remote_task_id || "",
-      bridgeTaskId: bridgeResult.task?.bridgeTaskId || bridgeResult.task?.bridge_task_id || "",
-      submitted: Boolean(bridgeResult.submitted),
-      completed: false,
-      error: bridgeResult.error || ""
-    }), {
-      status: bridgeResult.ok ? 202 : 502,
-      headers: {
-        ...corsHeaders(),
-        "X-Conversation-Id": conversation.id,
-        "Content-Type": "application/json; charset=utf-8"
-      }
-    });
+    if (openClawBridgeEnabled) {
+      const bridgeResult = await submitOpenClawBridgeTask({
+        env,
+        conversationId: conversation.id,
+        openClawTask,
+        userContent,
+        attachments: allImageAttachments
+      });
+      return new Response(JSON.stringify({
+        ok: Boolean(bridgeResult.ok),
+        async: true,
+        bridge: true,
+        conversationId: conversation.id,
+        task: bridgeResult.task,
+        taskId: bridgeResult.task?.id || "",
+        remoteTaskId: bridgeResult.task?.remoteTaskId || bridgeResult.task?.remote_task_id || "",
+        bridgeTaskId: bridgeResult.task?.bridgeTaskId || bridgeResult.task?.bridge_task_id || "",
+        submitted: Boolean(bridgeResult.submitted),
+        completed: false,
+        error: bridgeResult.error || ""
+      }), {
+        status: bridgeResult.ok ? 202 : 502,
+        headers: {
+          ...corsHeaders(),
+          "X-Conversation-Id": conversation.id,
+          "Content-Type": "application/json; charset=utf-8"
+        }
+      });
+    }
   }
 
   if (isOpenClawRequest && isOpenClawAsyncModeEnabled(env)) {

@@ -149,6 +149,9 @@ function providersFromCategories(categories) {
           providerType: type,
           apiBase: provider.baseUrl || provider.apiBase || "",
           apiKeyEnv: provider.apiKeyEnv || "",
+          openclawExecutionMode: provider.openclawExecutionMode === "bridge"
+            ? "bridge"
+            : provider.openclawExecutionMode === "legacy" ? "legacy" : undefined,
           builtin: Boolean(provider.builtin),
           enabled: provider.enabled !== false,
           models: (provider.models || []).map(model => ({
@@ -173,6 +176,9 @@ function providerToCategoryProvider(provider) {
     providerName: provider.providerName || provider.label || provider.providerId || provider.id,
     baseUrl: provider.baseUrl || provider.apiBase || "",
     apiKeyEnv: provider.apiKeyEnv || "",
+    openclawExecutionMode: provider.openclawExecutionMode === "bridge"
+      ? "bridge"
+      : provider.openclawExecutionMode === "legacy" ? "legacy" : undefined,
     builtin: Boolean(provider.builtin),
     enabled: provider.enabled !== false,
     models: (provider.models || []).map(model => ({

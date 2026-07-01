@@ -18,6 +18,7 @@ import { normalizeProviderError, ProviderError } from "../providers/errors.js";
 import { filterEmptySystemMessages } from "../providers/messages.js";
 import { runTool } from "../tools/registry.js";
 import {
+  normalizeOpenClawBridgeTaskProgress,
   shouldUseOpenClawBridge,
   openclawBridgeClient
 } from "./openclawBridgeClient.js";
@@ -412,6 +413,11 @@ async function updateOpenClawBridgeTaskStart(env, task, bridgeTask) {
   const bridgeSessionId = String(bridgeTask?.sessionId || bridgeTask?.session_id || "").trim();
   const bridgeAgentId = String(bridgeTask?.agentId || bridgeTask?.agent_id || "").trim();
   const remoteStatus = String(bridgeTask?.status || "running");
+  const remoteProgress = normalizeOpenClawBridgeTaskProgress(
+    remoteStatus,
+    bridgeTask?.progress ?? bridgeTask?.remote_progress,
+    task?.remoteProgress ?? task?.remote_progress
+  );
   const now = Date.now();
   try {
     await env.DB.prepare(
@@ -435,7 +441,7 @@ async function updateOpenClawBridgeTaskStart(env, task, bridgeTask) {
       now,
       bridgeTaskId,
       remoteStatus,
-      localStatusFromRemoteStatus(remoteStatus, "running") === "completed" ? 100 : 0,
+      remoteProgress,
       bridgeTask?.message || "OpenClaw Bridge task submitted",
       bridgeTaskId,
       bridgeRunId,
@@ -871,9 +877,12 @@ async function syncOpenClawRemoteTask(env, localTask, remoteResult, patch = {}) 
     ? new Date(now).toISOString()
     : null;
   const nextRemoteStatus = remote.status || localTask.remoteStatus || localTask.remote_status || "unknown";
-  const nextRemoteProgress = remote.progress !== null
+  const existingRemoteProgress = localTask.remoteProgress ?? localTask.remote_progress ?? null;
+  const nextRemoteProgress = isOpenClawBridgeTask(localTask)
+    ? normalizeOpenClawBridgeTaskProgress(nextRemoteStatus, remote.progress, existingRemoteProgress)
+    : remote.progress !== null
     ? remote.progress
-    : localTask.remoteProgress ?? localTask.remote_progress ?? null;
+    : existingRemoteProgress;
   const nextRemoteMessage = remote.message || localTask.remoteMessage || localTask.remote_message || "";
   try {
     await env.DB.prepare(

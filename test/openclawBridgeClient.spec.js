@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   isOpenClawBridgeModeEnabled,
   normalizeOpenClawBridgeBaseUrl,
+  normalizeOpenClawBridgeTaskProgress,
   openclawBridgeClient,
   shouldUseOpenClawBridge
 } from "../src/api/openclawBridgeClient.js";
@@ -35,6 +36,17 @@ describe("openclawBridgeClient", () => {
   it("never enables bridge mode for non-OpenClaw providers", () => {
     expect(shouldUseOpenClawBridge({ type: "openai", openclawExecutionMode: "bridge" }, env)).toBe(false);
     expect(shouldUseOpenClawBridge({ type: "workers-ai" }, env)).toBe(false);
+  });
+
+  it("normalizes bridge task progress by terminal status", () => {
+    expect(normalizeOpenClawBridgeTaskProgress("completed", 0, 20)).toBe(100);
+    expect(normalizeOpenClawBridgeTaskProgress("done", null, 20)).toBe(100);
+    expect(normalizeOpenClawBridgeTaskProgress("success", undefined, null)).toBe(100);
+    expect(normalizeOpenClawBridgeTaskProgress("failed", null, 35)).toBe(35);
+    expect(normalizeOpenClawBridgeTaskProgress("error", undefined, null)).toBe(0);
+    expect(normalizeOpenClawBridgeTaskProgress("running", 42, 10)).toBe(42);
+    expect(normalizeOpenClawBridgeTaskProgress("queued", null, 10)).toBe(10);
+    expect(normalizeOpenClawBridgeTaskProgress("queued", null, null)).toBe(null);
   });
 
   it("creates a bridge task through the bridge API", async () => {
@@ -112,5 +124,30 @@ describe("openclawBridgeClient", () => {
       ["GET", "https://bridge.example.test/v1/openclaw/tasks/bridge-task-1/result"],
       ["POST", "https://bridge.example.test/v1/openclaw/tasks/bridge-task-1/cancel"]
     ]);
+  });
+
+  it("reports completed bridge task status with 100 progress", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      task: {
+        task_id: "bridge-task-1",
+        status: "completed",
+        progress: 0,
+        result: "done"
+      }
+    }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json"
+      }
+    })));
+
+    const result = await openclawBridgeClient(env).getTaskStatus("bridge-task-1");
+
+    expect(result.ok).toBe(true);
+    expect(result.task).toMatchObject({
+      taskId: "bridge-task-1",
+      status: "completed",
+      progress: 100
+    });
   });
 });

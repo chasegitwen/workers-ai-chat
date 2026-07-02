@@ -2046,7 +2046,7 @@ function providersFromModels(models) {
   return Array.from(providers.values());
 }
 
-function normalizeProvider(provider) {
+function normalizeProvider(provider, { defaultOpenClawExecutionMode = true } = {}) {
   if (!isPlainObject(provider)) {
     return null;
   }
@@ -2071,11 +2071,13 @@ function normalizeProvider(provider) {
         .filter(Boolean)
       : []
   };
-  normalized.openclawExecutionMode = normalizeProviderOpenClawExecutionMode(normalized, provider);
+  normalized.openclawExecutionMode = normalizeProviderOpenClawExecutionMode(normalized, provider, {
+    defaultMissing: defaultOpenClawExecutionMode
+  });
   return normalized;
 }
 
-function normalizeProviderOpenClawExecutionMode(normalizedProvider, sourceProvider = normalizedProvider) {
+function normalizeProviderOpenClawExecutionMode(normalizedProvider, sourceProvider = normalizedProvider, { defaultMissing = true } = {}) {
   const values = [
     sourceProvider?.type,
     sourceProvider?.provider,
@@ -2095,7 +2097,13 @@ function normalizeProviderOpenClawExecutionMode(normalizedProvider, sourceProvid
     return undefined;
   }
 
-  return sourceProvider?.openclawExecutionMode === "bridge" ? "bridge" : "legacy";
+  if (sourceProvider?.openclawExecutionMode === "bridge") {
+    return "bridge";
+  }
+  if (sourceProvider?.openclawExecutionMode === "legacy") {
+    return "legacy";
+  }
+  return defaultMissing ? "legacy" : undefined;
 }
 
 function normalizeProviderModel(model, provider) {
@@ -2122,11 +2130,16 @@ function normalizeProviderModel(model, provider) {
   };
 }
 
-function mergeProviders(baseProviders, nextProviders) {
+function mergeProviders(baseProviders, nextProviders, {
+  defaultBaseOpenClawExecutionMode = true,
+  defaultIncomingOpenClawExecutionMode = false
+} = {}) {
   const merged = new Map();
 
   (baseProviders || []).forEach(provider => {
-    const normalized = normalizeProvider(provider);
+    const normalized = normalizeProvider(provider, {
+      defaultOpenClawExecutionMode: defaultBaseOpenClawExecutionMode
+    });
 
     if (normalized) {
       merged.set(normalized.id, normalized);
@@ -2134,7 +2147,9 @@ function mergeProviders(baseProviders, nextProviders) {
   });
 
   (nextProviders || []).forEach(provider => {
-    const normalized = normalizeProvider(provider);
+    const normalized = normalizeProvider(provider, {
+      defaultOpenClawExecutionMode: defaultIncomingOpenClawExecutionMode
+    });
 
     if (!normalized) {
       return;
@@ -2153,11 +2168,15 @@ function mergeProviders(baseProviders, nextProviders) {
       ...model
     }));
 
-    merged.set(normalized.id, {
+    const mergedProvider = {
       ...existing,
       ...normalized,
       models: Array.from(models.values())
-    });
+    };
+    if (normalized.openclawExecutionMode === undefined) {
+      mergedProvider.openclawExecutionMode = existing.openclawExecutionMode;
+    }
+    merged.set(normalized.id, mergedProvider);
   });
 
   return Array.from(merged.values());
@@ -2263,6 +2282,9 @@ function customConfigToProvider(config) {
     providerType: String(config.providerType || "openai-compatible"),
     apiBase: String(config.apiBase || config.baseUrl || ""),
     apiKeyEnv: String(config.apiKeyEnv || ""),
+    openclawExecutionMode: config.openclawExecutionMode === "bridge"
+      ? "bridge"
+      : config.openclawExecutionMode === "legacy" ? "legacy" : undefined,
     models: [{
       id,
       label: String(config.label || id),
@@ -2286,7 +2308,10 @@ export async function buildModelProviderCatalog(env, requestProviders, customMod
 
   return mergeProviders(
     mergeProviders(defaultProviders, savedProviders),
-    mergeProviders(requestProviders || [], customProviders)
+    mergeProviders(requestProviders || [], customProviders, {
+      defaultBaseOpenClawExecutionMode: false,
+      defaultIncomingOpenClawExecutionMode: false
+    })
   );
 }
 

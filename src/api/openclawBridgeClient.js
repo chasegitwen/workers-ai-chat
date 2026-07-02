@@ -24,6 +24,40 @@ export function shouldUseOpenClawBridge(provider, env) {
   return mode === "bridge";
 }
 
+export function normalizeOpenClawAgentId(modelLike) {
+  const values = typeof modelLike === "object" && modelLike !== null
+    ? [
+      modelLike.modelName,
+      modelLike.upstreamModelName,
+      modelLike.model,
+      modelLike.id,
+      modelLike.modelId
+    ]
+    : [modelLike];
+  const knownAgents = new Set(["main", "glm51", "kimi-for-coding", "glm5-2"]);
+
+  for (const value of values) {
+    let text = String(value || "").trim();
+    if (!text) {
+      continue;
+    }
+
+    const normalized = text.toLowerCase();
+    if (normalized.startsWith("openclaw/")) {
+      text = text.slice("openclaw/".length);
+    } else if (knownAgents.has(normalized)) {
+      return normalized;
+    }
+
+    const agent = text.trim().toLowerCase();
+    if (knownAgents.has(agent)) {
+      return agent;
+    }
+  }
+
+  return "main";
+}
+
 export function normalizeOpenClawBridgeBaseUrl(value) {
   return String(value || "").trim().replace(/\/+$/g, "");
 }

@@ -57,8 +57,22 @@ describe("openclawBridgeClient", () => {
     expect(normalizeOpenClawAgentId("openclaw/glm5-2")).toBe("glm5-2");
     expect(normalizeOpenClawAgentId("main")).toBe("main");
     expect(normalizeOpenClawAgentId("glm51")).toBe("glm51");
+    expect(normalizeOpenClawAgentId("glm-5.1")).toBe("glm51");
+    expect(normalizeOpenClawAgentId("zai/glm-5.1")).toBe("glm51");
     expect(normalizeOpenClawAgentId("kimi-for-coding")).toBe("kimi-for-coding");
     expect(normalizeOpenClawAgentId("glm5-2")).toBe("glm5-2");
+    expect(normalizeOpenClawAgentId("glm-5.2")).toBe("glm5-2");
+    expect(normalizeOpenClawAgentId("zai/glm-5.2")).toBe("glm5-2");
+    expect(normalizeOpenClawAgentId({
+      modelName: "openclaw",
+      upstreamModelName: "",
+      id: "glm-5.1"
+    })).toBe("glm51");
+    expect(normalizeOpenClawAgentId({
+      modelName: "",
+      upstreamModelName: "zai/glm-5.1",
+      id: "openclaw-hillsboro-glm51"
+    })).toBe("glm51");
   });
 
   it.each([

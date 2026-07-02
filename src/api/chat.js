@@ -4122,11 +4122,7 @@ export async function handleChat(request, env, ctx) {
     });
 
     if (openClawBridgeEnabled) {
-      const openClawAgentId = normalizeOpenClawAgentId(
-        openClawTarget?.model?.modelName
-          || openClawTarget?.model?.upstreamModelName
-          || openClawTarget?.model?.id
-      );
+      const openClawAgentId = normalizeOpenClawAgentId(openClawTarget?.model);
       const openClawSessionKey = "agent:" + openClawAgentId + ":" + conversation.id;
       const bridgeResult = await submitOpenClawBridgeTask({
         env,

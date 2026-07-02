@@ -34,7 +34,24 @@ export function normalizeOpenClawAgentId(modelLike) {
       modelLike.modelId
     ]
     : [modelLike];
-  const knownAgents = new Set(["main", "glm51", "kimi-for-coding", "glm5-2"]);
+  const agentAliases = new Map([
+    ["main", "main"],
+    ["glm51", "glm51"],
+    ["glm-5.1", "glm51"],
+    ["glm-5-1", "glm51"],
+    ["glm5.1", "glm51"],
+    ["glm 5.1", "glm51"],
+    ["zai/glm-5.1", "glm51"],
+    ["glm5-2", "glm5-2"],
+    ["glm52", "glm5-2"],
+    ["glm-5.2", "glm5-2"],
+    ["glm-5-2", "glm5-2"],
+    ["glm5.2", "glm5-2"],
+    ["glm 5.2", "glm5-2"],
+    ["zai/glm-5.2", "glm5-2"],
+    ["kimi-for-coding", "kimi-for-coding"],
+    ["kimi/kimi-for-coding", "kimi-for-coding"]
+  ]);
 
   for (const value of values) {
     let text = String(value || "").trim();
@@ -45,13 +62,23 @@ export function normalizeOpenClawAgentId(modelLike) {
     const normalized = text.toLowerCase();
     if (normalized.startsWith("openclaw/")) {
       text = text.slice("openclaw/".length);
-    } else if (knownAgents.has(normalized)) {
-      return normalized;
+    } else if (agentAliases.has(normalized)) {
+      return agentAliases.get(normalized);
     }
 
     const agent = text.trim().toLowerCase();
-    if (knownAgents.has(agent)) {
-      return agent;
+    if (agentAliases.has(agent)) {
+      return agentAliases.get(agent);
+    }
+
+    if (agent.includes("kimi-for-coding")) {
+      return "kimi-for-coding";
+    }
+    if (agent.includes("glm-5.1") || agent.includes("glm-5-1") || agent.includes("glm51")) {
+      return "glm51";
+    }
+    if (agent.includes("glm-5.2") || agent.includes("glm-5-2") || agent.includes("glm5-2") || agent.includes("glm52")) {
+      return "glm5-2";
     }
   }
 

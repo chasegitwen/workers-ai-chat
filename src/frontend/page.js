@@ -5429,12 +5429,14 @@ function normalizeManagedProvider(provider, categoryType){
     providerId,
     baseUrl,
     apiKeyEnv:String(provider.apiKeyEnv || ""),
-    openclawExecutionMode:provider.openclawExecutionMode === "bridge" ? "bridge" : provider.openclawExecutionMode === "legacy" ? "legacy" : undefined,
     enabled:provider.enabled !== false,
     builtin:Boolean(provider.builtin),
     editable:provider.editable !== false,
     models:[]
   };
+  normalized.openclawExecutionMode = isOpenClawProviderConfig(normalized)
+    ? (provider.openclawExecutionMode === "bridge" ? "bridge" : "legacy")
+    : undefined;
   normalized.models = (provider.models || [])
     .map(model => normalizeManagedModel(model, normalized, categoryType))
     .filter(Boolean);
@@ -5595,7 +5597,7 @@ function categoriesToProviders(categories){
         apiBase:provider.baseUrl || "",
         baseUrl:provider.baseUrl || "",
         apiKeyEnv:provider.apiKeyEnv || "",
-        openclawExecutionMode:provider.openclawExecutionMode === "bridge" ? "bridge" : provider.openclawExecutionMode === "legacy" ? "legacy" : undefined,
+        openclawExecutionMode:isOpenClawProviderConfig(provider) ? (provider.openclawExecutionMode === "bridge" ? "bridge" : "legacy") : undefined,
         builtin:Boolean(provider.builtin),
         editable:provider.editable !== false,
         enabled:provider.enabled !== false,

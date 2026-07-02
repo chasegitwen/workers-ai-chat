@@ -117,6 +117,9 @@ describe("openclawBridgeClient", () => {
       agentId,
       sessionKey,
       sessionId: sessionKey,
+      agent_id: agentId,
+      session_key: sessionKey,
+      session_id: sessionKey,
       idempotencyKey: "local-task-1"
     });
   });
@@ -159,7 +162,10 @@ describe("openclawBridgeClient", () => {
     expect(body).toMatchObject({
       sessionKey: "agent:main:conversation-1",
       sessionId: "agent:main:conversation-1",
-      agentId: "main"
+      agentId: "main",
+      session_key: "agent:main:conversation-1",
+      session_id: "agent:main:conversation-1",
+      agent_id: "main"
     });
     expect(fetchMock.mock.calls[0][0]).toBe("https://bridge.example.test/v1/openclaw/tasks");
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer secret-token");

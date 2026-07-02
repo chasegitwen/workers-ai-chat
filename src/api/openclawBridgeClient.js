@@ -233,6 +233,9 @@ export function openclawBridgeClient(env) {
           sessionKey,
           sessionId,
           agentId,
+          session_key: sessionKey,
+          session_id: sessionId,
+          agent_id: agentId,
           attachments: Array.isArray(attachments) ? attachments : [],
           idempotencyKey
         }

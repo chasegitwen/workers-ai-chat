@@ -30,6 +30,27 @@ function normalizeModelId(model) {
   return String(model?.id || model?.modelId || "").trim();
 }
 
+function isOpenClawProvider(provider) {
+  const values = [
+    provider?.type,
+    provider?.provider,
+    provider?.providerId,
+    provider?.id,
+    provider?.providerName,
+    provider?.label,
+    provider?.baseUrl,
+    provider?.apiBase
+  ].map(value => String(value || "").trim().toLowerCase()).filter(Boolean);
+  return values.some(value => value === "openclaw" || value.startsWith("openclaw-") || value.includes("openclaw"));
+}
+
+function normalizeOpenClawExecutionMode(provider) {
+  if (!isOpenClawProvider(provider)) {
+    return undefined;
+  }
+  return provider?.openclawExecutionMode === "bridge" ? "bridge" : "legacy";
+}
+
 function mergeProviderLists(currentProviders, incomingProviders, preserveMissing) {
   if (!Array.isArray(currentProviders) && !Array.isArray(incomingProviders)) {
     return undefined;
@@ -48,7 +69,8 @@ function mergeProviderLists(currentProviders, incomingProviders, preserveMissing
       order.push(id);
       merged.set(id, {
         ...provider,
-        id: provider.id || provider.providerId || id
+        id: provider.id || provider.providerId || id,
+        openclawExecutionMode: normalizeOpenClawExecutionMode(provider)
       });
       return;
     }
@@ -89,6 +111,11 @@ function mergeProviderLists(currentProviders, incomingProviders, preserveMissing
       ...existing,
       ...provider,
       id: provider.id || provider.providerId || existing.id || existing.providerId || id,
+      openclawExecutionMode: normalizeOpenClawExecutionMode({
+        ...existing,
+        ...provider,
+        id: provider.id || provider.providerId || existing.id || existing.providerId || id
+      }),
       models: modelOrder.map(modelId => models.get(modelId))
     });
   }
@@ -149,9 +176,7 @@ function providersFromCategories(categories) {
           providerType: type,
           apiBase: provider.baseUrl || provider.apiBase || "",
           apiKeyEnv: provider.apiKeyEnv || "",
-          openclawExecutionMode: provider.openclawExecutionMode === "bridge"
-            ? "bridge"
-            : provider.openclawExecutionMode === "legacy" ? "legacy" : undefined,
+          openclawExecutionMode: normalizeOpenClawExecutionMode(provider),
           builtin: Boolean(provider.builtin),
           enabled: provider.enabled !== false,
           models: (provider.models || []).map(model => ({
@@ -176,9 +201,7 @@ function providerToCategoryProvider(provider) {
     providerName: provider.providerName || provider.label || provider.providerId || provider.id,
     baseUrl: provider.baseUrl || provider.apiBase || "",
     apiKeyEnv: provider.apiKeyEnv || "",
-    openclawExecutionMode: provider.openclawExecutionMode === "bridge"
-      ? "bridge"
-      : provider.openclawExecutionMode === "legacy" ? "legacy" : undefined,
+    openclawExecutionMode: normalizeOpenClawExecutionMode(provider),
     builtin: Boolean(provider.builtin),
     enabled: provider.enabled !== false,
     models: (provider.models || []).map(model => ({
@@ -242,7 +265,10 @@ function providersToCategories(providers, baseCategories) {
 
 function sourceProviders(settings) {
   if (Array.isArray(settings?.providers) && settings.providers.length) {
-    return settings.providers;
+    return settings.providers.map(provider => ({
+      ...provider,
+      openclawExecutionMode: normalizeOpenClawExecutionMode(provider)
+    }));
   }
   if (Array.isArray(settings?.categories) || Array.isArray(settings?.modelCategories)) {
     return providersFromCategories(settings.categories || settings.modelCategories);
@@ -250,7 +276,23 @@ function sourceProviders(settings) {
   return [];
 }
 
-function mergeModelSettings(currentSettings, incomingSettings, rowUpdatedAt, saveTime) {
+export function normalizeModelSettings(settings) {
+  if (!isObject(settings)) {
+    return settings;
+  }
+  const normalized = { ...settings };
+  const providers = sourceProviders(normalized);
+
+  if (providers.length) {
+    normalized.providers = providers;
+    normalized.categories = providersToCategories(providers, normalized.categories || normalized.modelCategories);
+    normalized.modelCategories = normalized.categories;
+  }
+
+  return normalized;
+}
+
+export function mergeModelSettings(currentSettings, incomingSettings, rowUpdatedAt, saveTime) {
   const current = isObject(currentSettings) ? currentSettings : {};
   const incoming = isObject(incomingSettings) ? incomingSettings : {};
   const currentVersion = settingVersion(current, rowUpdatedAt);
@@ -281,7 +323,7 @@ function mergeModelSettings(currentSettings, incomingSettings, rowUpdatedAt, sav
     incomingVersion: incomingVersion || null
   };
 
-  return merged;
+  return normalizeModelSettings(merged);
 }
 
 export async function handleSettings(request, env, url) {
@@ -310,7 +352,7 @@ export async function handleSettings(request, env, url) {
       }
 
       try {
-        const settings = JSON.parse(row.value || "null");
+        const settings = normalizeModelSettings(JSON.parse(row.value || "null"));
         if (isObject(settings)) {
           settings.updatedAt = settingVersion(settings, row.updated_at);
           settings.version = settingVersion(settings, row.updated_at);

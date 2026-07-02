@@ -2057,15 +2057,12 @@ function normalizeProvider(provider) {
     return null;
   }
 
-  return {
+  const normalized = {
     id,
     label: String(provider.providerName || provider.label || id),
     providerType: String(provider.providerType || provider.type || provider.category || id || "workers-ai"),
     apiBase: String(provider.apiBase || provider.baseUrl || ""),
     apiKeyEnv: String(provider.apiKeyEnv || ""),
-    openclawExecutionMode: provider.openclawExecutionMode === "bridge"
-      ? "bridge"
-      : provider.openclawExecutionMode === "legacy" ? "legacy" : undefined,
     builtin: Boolean(provider.builtin),
     enabled: provider.enabled !== false,
     models: Array.isArray(provider.models)
@@ -2074,6 +2071,31 @@ function normalizeProvider(provider) {
         .filter(Boolean)
       : []
   };
+  normalized.openclawExecutionMode = normalizeProviderOpenClawExecutionMode(normalized, provider);
+  return normalized;
+}
+
+function normalizeProviderOpenClawExecutionMode(normalizedProvider, sourceProvider = normalizedProvider) {
+  const values = [
+    sourceProvider?.type,
+    sourceProvider?.provider,
+    sourceProvider?.providerId,
+    sourceProvider?.id,
+    sourceProvider?.providerName,
+    sourceProvider?.label,
+    sourceProvider?.baseUrl,
+    sourceProvider?.apiBase,
+    normalizedProvider?.id,
+    normalizedProvider?.label,
+    normalizedProvider?.apiBase
+  ].map(value => String(value || "").trim().toLowerCase()).filter(Boolean);
+  const isOpenClawProvider = values.some(value => value === "openclaw" || value.startsWith("openclaw-") || value.includes("openclaw"));
+
+  if (!isOpenClawProvider) {
+    return undefined;
+  }
+
+  return sourceProvider?.openclawExecutionMode === "bridge" ? "bridge" : "legacy";
 }
 
 function normalizeProviderModel(model, provider) {
@@ -2176,9 +2198,7 @@ function providersFromCategories(categories) {
           providerType: type,
           apiBase: provider.baseUrl || provider.apiBase || "",
           apiKeyEnv: provider.apiKeyEnv || "",
-          openclawExecutionMode: provider.openclawExecutionMode === "bridge"
-            ? "bridge"
-            : provider.openclawExecutionMode === "legacy" ? "legacy" : undefined,
+          openclawExecutionMode: normalizeProviderOpenClawExecutionMode(null, provider),
           builtin: Boolean(provider.builtin),
           enabled: provider.enabled !== false,
           models: (provider.models || []).map(model => ({
@@ -2213,7 +2233,7 @@ async function readSavedProviders(env) {
 
     const settings = JSON.parse(row.value);
     if (Array.isArray(settings?.providers) && settings.providers.length) {
-      return settings.providers;
+      return settings.providers.map(provider => normalizeProvider(provider)).filter(Boolean);
     }
     if (Array.isArray(settings?.categories) || Array.isArray(settings?.modelCategories)) {
       return providersFromCategories(settings.categories || settings.modelCategories);

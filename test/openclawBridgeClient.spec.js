@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   isOpenClawBridgeModeEnabled,
+  normalizeOpenClawAgentId,
   normalizeOpenClawBridgeBaseUrl,
   normalizeOpenClawBridgeTaskProgress,
   openclawBridgeClient,
@@ -49,11 +50,70 @@ describe("openclawBridgeClient", () => {
     expect(normalizeOpenClawBridgeTaskProgress("queued", null, null)).toBe(null);
   });
 
+  it("normalizes OpenClaw model ids to canonical bridge agent ids", () => {
+    expect(normalizeOpenClawAgentId("openclaw/main")).toBe("main");
+    expect(normalizeOpenClawAgentId("openclaw/glm51")).toBe("glm51");
+    expect(normalizeOpenClawAgentId("openclaw/kimi-for-coding")).toBe("kimi-for-coding");
+    expect(normalizeOpenClawAgentId("openclaw/glm5-2")).toBe("glm5-2");
+    expect(normalizeOpenClawAgentId("main")).toBe("main");
+    expect(normalizeOpenClawAgentId("glm51")).toBe("glm51");
+    expect(normalizeOpenClawAgentId("kimi-for-coding")).toBe("kimi-for-coding");
+    expect(normalizeOpenClawAgentId("glm5-2")).toBe("glm5-2");
+  });
+
+  it.each([
+    ["openclaw/main", "main"],
+    ["openclaw/glm51", "glm51"],
+    ["openclaw/kimi-for-coding", "kimi-for-coding"],
+    ["openclaw/glm5-2", "glm5-2"]
+  ])("submits %s as bridge agent %s", async (modelName, agentId) => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      task_id: "bridge-task-1",
+      run_id: "run-1",
+      sessionKey: "agent:" + agentId + ":conversation-1",
+      sessionId: "agent:" + agentId + ":conversation-1",
+      agentId,
+      status: "running"
+    }), {
+      status: 202,
+      headers: {
+        "Content-Type": "application/json"
+      }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const sessionKey = "agent:" + agentId + ":conversation-1";
+    const result = await openclawBridgeClient(env).createTask({
+      conversationId: "conversation-1",
+      message: "hello",
+      sessionKey,
+      sessionId: sessionKey,
+      agentId: normalizeOpenClawAgentId(modelName),
+      idempotencyKey: "local-task-1"
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    expect(result.task).toMatchObject({
+      agentId,
+      sessionKey,
+      sessionId: sessionKey
+    });
+    expect(body).toMatchObject({
+      conversation_id: "conversation-1",
+      agentId,
+      sessionKey,
+      sessionId: sessionKey,
+      idempotencyKey: "local-task-1"
+    });
+  });
+
   it("creates a bridge task through the bridge API", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       task_id: "bridge-task-1",
       run_id: "run-1",
-      sessionKey: "default",
+      sessionKey: "agent:main:conversation-1",
+      sessionId: "agent:main:conversation-1",
+      agentId: "main",
       status: "running"
     }), {
       status: 202,
@@ -66,16 +126,26 @@ describe("openclawBridgeClient", () => {
     const result = await openclawBridgeClient(env).createTask({
       conversationId: "conversation-1",
       message: "hello",
-      sessionKey: "default",
+      sessionKey: "agent:main:conversation-1",
+      sessionId: "agent:main:conversation-1",
+      agentId: "main",
       idempotencyKey: "local-task-1"
     });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
 
     expect(result.ok).toBe(true);
     expect(result.task).toMatchObject({
       taskId: "bridge-task-1",
       runId: "run-1",
-      sessionKey: "default",
+      sessionKey: "agent:main:conversation-1",
+      sessionId: "agent:main:conversation-1",
+      agentId: "main",
       status: "running"
+    });
+    expect(body).toMatchObject({
+      sessionKey: "agent:main:conversation-1",
+      sessionId: "agent:main:conversation-1",
+      agentId: "main"
     });
     expect(fetchMock.mock.calls[0][0]).toBe("https://bridge.example.test/v1/openclaw/tasks");
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer secret-token");

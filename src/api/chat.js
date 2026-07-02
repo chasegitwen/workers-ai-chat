@@ -19,6 +19,7 @@ import { filterEmptySystemMessages } from "../providers/messages.js";
 import { runTool } from "../tools/registry.js";
 import {
   normalizeOpenClawBridgeTaskProgress,
+  normalizeOpenClawAgentId,
   shouldUseOpenClawBridge,
   openclawBridgeClient
 } from "./openclawBridgeClient.js";
@@ -3451,6 +3452,9 @@ async function submitOpenClawBridgeTask({
   conversationId,
   openClawTask,
   userContent,
+  agentId,
+  sessionKey,
+  sessionId,
   attachments = []
 }) {
   if (!openClawTask?.id) {
@@ -3462,12 +3466,18 @@ async function submitOpenClawBridgeTask({
   }
 
   const bridge = openclawBridgeClient(env);
+  logOpenClawAsync("bridge-submit", {
+    localTaskId: openClawTask.id,
+    conversationId,
+    agentId,
+    sessionKey
+  });
   const result = await bridge.createTask({
     conversationId,
     message: userContent,
-    sessionKey: "default",
-    sessionId: "",
-    agentId: "",
+    sessionKey,
+    sessionId,
+    agentId,
     attachments,
     idempotencyKey: openClawTask.id
   });
@@ -4112,11 +4122,20 @@ export async function handleChat(request, env, ctx) {
     });
 
     if (openClawBridgeEnabled) {
+      const openClawAgentId = normalizeOpenClawAgentId(
+        openClawTarget?.model?.modelName
+          || openClawTarget?.model?.upstreamModelName
+          || openClawTarget?.model?.id
+      );
+      const openClawSessionKey = "agent:" + openClawAgentId + ":" + conversation.id;
       const bridgeResult = await submitOpenClawBridgeTask({
         env,
         conversationId: conversation.id,
         openClawTask,
         userContent,
+        agentId: openClawAgentId,
+        sessionKey: openClawSessionKey,
+        sessionId: openClawSessionKey,
         attachments: allImageAttachments
       });
       return new Response(JSON.stringify({

@@ -1,4 +1,5 @@
 const BRIDGE_TIMEOUT_MS = 30000;
+export const OPENCLAW_BRIDGE_EMPTY_REPLY_PLACEHOLDER = "The agent run failed before producing a reply.";
 
 function normalizeOpenClawExecutionMode(value) {
   const mode = String(value || "").trim().toLowerCase();
@@ -103,6 +104,233 @@ function isOpenClawBridgeSuccessStatus(status) {
 
 function isOpenClawBridgeFailedStatus(status) {
   return ["failed", "failure", "error"].includes(String(status || "").trim().toLowerCase());
+}
+
+export function shouldRecoverOpenClawBridgeCompletedStatus(localStatus, remoteStatus) {
+  const local = String(localStatus || "").trim().toLowerCase();
+  return ["failed", "failure", "error", "aborted"].includes(local)
+    && isOpenClawBridgeSuccessStatus(remoteStatus);
+}
+
+export function isOpenClawBridgeEmptyReplyPlaceholder(value) {
+  return String(value || "").trim() === OPENCLAW_BRIDGE_EMPTY_REPLY_PLACEHOLDER;
+}
+
+function bridgeCandidateText(value) {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map(item => {
+        if (typeof item === "string") {
+          return item;
+        }
+        if (item && typeof item === "object") {
+          return item.text || item.content || "";
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .join("")
+      .trim();
+  }
+  if (value && typeof value === "object") {
+    return bridgeCandidateText(
+      value.final_answer
+      ?? value.finalAnswer
+      ?? value.output
+      ?? value.response
+      ?? value.message
+      ?? value.text
+      ?? value.content
+      ?? ""
+    );
+  }
+  return "";
+}
+
+function bridgeCandidateNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number)) {
+      return number;
+    }
+  }
+  return null;
+}
+
+function bridgeCandidateTime(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") {
+      continue;
+    }
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+    const parsed = Date.parse(String(value));
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function isBridgeAssistantCandidate(item) {
+  const role = String(item?.role || item?.author?.role || item?.speaker || "").trim().toLowerCase();
+  const type = String(item?.type || item?.event || item?.kind || item?.name || "").trim().toLowerCase();
+  return role === "assistant"
+    || role === "ai"
+    || type === "assistant"
+    || type === "assistant_message"
+    || type === "message"
+    || type === "final_answer"
+    || type === "output";
+}
+
+function isBridgeSuccessfulCandidate(item) {
+  const status = String(item?.status || item?.state || item?.stopReason || item?.stop_reason || item?.reason || "").trim().toLowerCase();
+  if (["failed", "failure", "error", "errored", "cancelled", "canceled"].includes(status)) {
+    return false;
+  }
+  if (item?.error) {
+    return false;
+  }
+  return true;
+}
+
+function collectBridgeFinalAnswerCandidates(source, candidates, state, options = {}) {
+  if (!source) {
+    return;
+  }
+  if (Array.isArray(source)) {
+    source.forEach(item => collectBridgeFinalAnswerCandidates(item, candidates, state, {
+      ...options,
+      fromList: true
+    }));
+    return;
+  }
+  if (typeof source !== "object") {
+    const text = bridgeCandidateText(source);
+    if (text) {
+      candidates.push({
+        text,
+        placeholder: isOpenClawBridgeEmptyReplyPlaceholder(text),
+        successful: options.successful !== false,
+        seq: options.seq ?? null,
+        timestamp: options.timestamp ?? null,
+        order: state.order++,
+        priority: options.priority ?? 0
+      });
+    }
+    return;
+  }
+
+  const seq = bridgeCandidateNumber(source.seq, source.sequence, source.index, source.offset, options.seq);
+  const timestamp = bridgeCandidateTime(source.timestamp, source.created_at, source.createdAt, source.time, source.updated_at, source.updatedAt, options.timestamp);
+  const successful = options.successful !== false && isBridgeSuccessfulCandidate(source);
+  const assistant = !options.fromList || isBridgeAssistantCandidate(source);
+  const fields = [
+    ["final_answer", 60],
+    ["finalAnswer", 60],
+    ["output", 50],
+    ["response", 50],
+    ["message", 40],
+    ["text", 35],
+    ["content", 35],
+    ["result", 30]
+  ];
+
+  if (assistant) {
+    for (const [field, priority] of fields) {
+      if (source[field] === undefined || source[field] === null) {
+        continue;
+      }
+      const text = bridgeCandidateText(source[field]);
+      if (text) {
+        candidates.push({
+          text,
+          placeholder: isOpenClawBridgeEmptyReplyPlaceholder(text),
+          successful,
+          seq,
+          timestamp,
+          order: state.order++,
+          priority
+        });
+      }
+    }
+  }
+
+  const containers = [
+    source.messages,
+    source.events,
+    source.history,
+    source.chat?.history,
+    source.chat_history,
+    source.chatHistory
+  ];
+  containers.forEach(container => collectBridgeFinalAnswerCandidates(container, candidates, state, {
+    successful,
+    seq,
+    timestamp,
+    fromList: true
+  }));
+}
+
+function compareBridgeFinalAnswerCandidates(a, b) {
+  const aSeq = a.seq ?? -Infinity;
+  const bSeq = b.seq ?? -Infinity;
+  if (aSeq !== bSeq) {
+    return aSeq - bSeq;
+  }
+  const aTimestamp = a.timestamp ?? -Infinity;
+  const bTimestamp = b.timestamp ?? -Infinity;
+  if (aTimestamp !== bTimestamp) {
+    return aTimestamp - bTimestamp;
+  }
+  if (a.priority !== b.priority) {
+    return a.priority - b.priority;
+  }
+  return a.order - b.order;
+}
+
+export function extractOpenClawBridgeFinalAnswer(payload) {
+  const source = payload?.data && typeof payload.data === "object" ? payload.data : payload;
+  const candidates = [];
+  collectBridgeFinalAnswerCandidates(source?.task && typeof source.task === "object" ? source.task : source, candidates, { order: 0 });
+  collectBridgeFinalAnswerCandidates(source?.result, candidates, { order: candidates.length }, { priority: 30 });
+
+  const successful = candidates
+    .filter(candidate => candidate.successful && !candidate.placeholder && candidate.text)
+    .sort(compareBridgeFinalAnswerCandidates);
+  if (successful.length) {
+    return {
+      text: successful[successful.length - 1].text,
+      placeholderOnly: false,
+      candidates
+    };
+  }
+
+  const placeholders = candidates
+    .filter(candidate => candidate.placeholder)
+    .sort(compareBridgeFinalAnswerCandidates);
+  if (placeholders.length) {
+    return {
+      text: placeholders[placeholders.length - 1].text,
+      placeholderOnly: true,
+      candidates
+    };
+  }
+
+  const fallback = candidates
+    .filter(candidate => candidate.text)
+    .sort(compareBridgeFinalAnswerCandidates);
+  return {
+    text: fallback.length ? fallback[fallback.length - 1].text : "",
+    placeholderOnly: false,
+    candidates
+  };
 }
 
 export function normalizeOpenClawBridgeTaskProgress(status, remoteProgress, existingProgress = null) {

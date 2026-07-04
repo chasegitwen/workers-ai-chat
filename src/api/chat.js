@@ -21,7 +21,10 @@ import {
   normalizeOpenClawBridgeTaskProgress,
   normalizeOpenClawAgentId,
   shouldUseOpenClawBridge,
-  openclawBridgeClient
+  openclawBridgeClient,
+  extractOpenClawBridgeFinalAnswer,
+  isOpenClawBridgeEmptyReplyPlaceholder,
+  shouldRecoverOpenClawBridgeCompletedStatus
 } from "./openclawBridgeClient.js";
 
 const defaultSystemMessage = {
@@ -804,6 +807,10 @@ function remoteResultText(remote) {
   return "";
 }
 
+function bridgeFinalAnswer(remoteResult) {
+  return extractOpenClawBridgeFinalAnswer(remoteResult?.data ?? remoteResult);
+}
+
 function normalizeRemoteTaskPayload(result) {
   const data = result?.data && typeof result.data === "object" ? result.data : {};
   const task = data.task && typeof data.task === "object"
@@ -867,8 +874,14 @@ async function syncOpenClawRemoteTask(env, localTask, remoteResult, patch = {}) 
   const remote = normalizeRemoteTaskPayload(remoteResult);
   const now = Date.now();
   const currentLocalStatus = localTask.storedStatus || localTask.status || "running";
+  const remoteLocalStatus = localStatusFromRemoteStatus(remote.status, "");
+  const bridgeCompletionCanRecover = isOpenClawBridgeTask(localTask)
+    && (remoteLocalStatus === "completed"
+      || shouldRecoverOpenClawBridgeCompletedStatus(currentLocalStatus, remote.status));
   const nextStatus = patch.status
-    || (isOpenClawTaskTerminalStatus(currentLocalStatus)
+    || (bridgeCompletionCanRecover
+      ? "completed"
+      : isOpenClawTaskTerminalStatus(currentLocalStatus)
       ? currentLocalStatus
       : localStatusFromRemoteStatus(remote.status, currentLocalStatus));
   const completedAt = nextStatus === "completed" || nextStatus === "failed"
@@ -901,7 +914,11 @@ async function syncOpenClawRemoteTask(env, localTask, remoteResult, patch = {}) 
       nextStatus,
       now,
       completedAt,
-      nextStatus === "failed" ? (remote.message || localTask.error || "") : (localTask.error || ""),
+      nextStatus === "failed"
+        ? (remote.message || localTask.error || "")
+        : nextStatus === "completed" && isOpenClawBridgeTask(localTask)
+          ? ""
+          : (localTask.error || ""),
       nextRemoteStatus,
       nextRemoteProgress,
       nextRemoteMessage,
@@ -922,6 +939,43 @@ async function syncOpenClawRemoteTask(env, localTask, remoteResult, patch = {}) 
     console.warn("[openclaw-task] failed to sync remote task", err?.message || String(err));
     return localTask;
   }
+}
+
+async function readAssistantMessageById(env, messageId) {
+  if (!env.DB || !messageId) {
+    return null;
+  }
+  return env.DB.prepare(
+    `SELECT id, conversation_id, role, content, created_at
+      FROM messages
+      WHERE id = ? AND role = 'assistant'
+      LIMIT 1`
+  ).bind(messageId).first();
+}
+
+async function updateAssistantMessageContent(env, messageId, content) {
+  if (!env.DB || !messageId) {
+    return null;
+  }
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE messages
+        SET content = ?
+        WHERE id = ? AND role = 'assistant'`
+    ).bind(content || "", messageId),
+    env.DB.prepare(
+      `UPDATE conversations
+        SET updated_at = ?
+        WHERE id = (
+          SELECT conversation_id
+          FROM messages
+          WHERE id = ?
+          LIMIT 1
+        )`
+    ).bind(now, messageId)
+  ]);
+  return readAssistantMessageById(env, messageId);
 }
 
 async function markOpenClawRemoteStatusUnavailable(env, task, message = "Remote status unavailable after local completion") {
@@ -1037,11 +1091,20 @@ async function finalizeOpenClawTaskResult(env, task) {
     return { ok: false, error: "OpenClaw task not found", task: null };
   }
   let latestTask = await readOpenClawTaskById(env, task.id) || task;
-  if (latestTask.assistantMessageId) {
+  const bridgeTask = isOpenClawBridgeTask(latestTask);
+  let placeholderAssistantMessage = null;
+  if (latestTask.assistantMessageId && !bridgeTask) {
     return { ok: true, saved: false, duplicate: true, task: latestTask };
   }
   const localStatus = String(latestTask.storedStatus || latestTask.status || "").toLowerCase();
-  if (["failed", "aborted", "cancelled", "canceled", "cancel_requested"].includes(localStatus)) {
+  if (latestTask.assistantMessageId && bridgeTask) {
+    const existingAssistantMessage = await readAssistantMessageById(env, latestTask.assistantMessageId);
+    if (!isOpenClawBridgeEmptyReplyPlaceholder(existingAssistantMessage?.content)) {
+      return { ok: true, saved: false, duplicate: true, task: latestTask };
+    }
+    placeholderAssistantMessage = existingAssistantMessage;
+  }
+  if (!bridgeTask && ["failed", "aborted", "cancelled", "canceled", "cancel_requested"].includes(localStatus)) {
     return { ok: false, error: "OpenClaw task is not completed", task: latestTask };
   }
   const remoteTaskId = openClawRemoteTaskId(latestTask);
@@ -1073,36 +1136,57 @@ async function finalizeOpenClawTaskResult(env, task) {
   latestTask = await syncOpenClawRemoteTask(env, latestTask, remoteResult, {
     status: "completed"
   }) || latestTask;
-  const reply = remoteResultText(remote);
+  const bridgeAnswer = bridgeTask ? bridgeFinalAnswer(remoteResult) : null;
+  const reply = bridgeTask ? String(bridgeAnswer?.text || "").trim() : remoteResultText(remote);
   if (!reply) {
     return { ok: false, error: "OpenClaw remote task result is empty", task: latestTask };
+  }
+  if (bridgeTask && bridgeAnswer?.placeholderOnly) {
+    return {
+      ok: false,
+      recoverable: true,
+      incomplete: true,
+      error: "OpenClaw Bridge completed, but only the empty-reply placeholder was available. Final answer recovery is still incomplete.",
+      task: latestTask
+    };
   }
   const bridgeResultHash = isOpenClawBridgeTask(latestTask)
     ? await hashOpenClawBridgeResult(reply)
     : "";
-  if (bridgeResultHash && latestTask.bridgeResultHash === bridgeResultHash) {
+  if (!placeholderAssistantMessage && bridgeResultHash && latestTask.bridgeResultHash === bridgeResultHash) {
     return { ok: true, saved: false, duplicate: true, task: latestTask, result: reply };
   }
   const refreshedTask = await readOpenClawTaskById(env, latestTask.id) || latestTask;
-  if (refreshedTask.assistantMessageId) {
-    return { ok: true, saved: false, duplicate: true, task: refreshedTask };
+  if (refreshedTask.assistantMessageId && !placeholderAssistantMessage) {
+    if (!bridgeTask) {
+      return { ok: true, saved: false, duplicate: true, task: refreshedTask };
+    }
+    const existingAssistantMessage = await readAssistantMessageById(env, refreshedTask.assistantMessageId);
+    if (!isOpenClawBridgeEmptyReplyPlaceholder(existingAssistantMessage?.content)) {
+      return { ok: true, saved: false, duplicate: true, task: refreshedTask };
+    }
+    placeholderAssistantMessage = existingAssistantMessage;
   }
-  if (bridgeResultHash && refreshedTask.bridgeResultHash === bridgeResultHash) {
+  if (!placeholderAssistantMessage && bridgeResultHash && refreshedTask.bridgeResultHash === bridgeResultHash) {
     return { ok: true, saved: false, duplicate: true, task: refreshedTask, result: reply };
   }
-  const assistantMessage = env.DB
-    ? await saveMessage(env.DB, refreshedTask.conversationId || refreshedTask.conversation_id, "assistant", reply)
-    : null;
+  const assistantMessage = placeholderAssistantMessage?.id
+    ? await updateAssistantMessageContent(env, placeholderAssistantMessage.id, reply)
+    : env.DB
+      ? await saveMessage(env.DB, refreshedTask.conversationId || refreshedTask.conversation_id, "assistant", reply)
+      : null;
   if (env.DB) {
     await maybeUpdateConversationSummary(env, refreshedTask.conversationId || refreshedTask.conversation_id);
   }
   const savedTask = await updateOpenClawTask(env, refreshedTask, {
     status: "completed",
     assistantMessageId: assistantMessage?.id || refreshedTask.assistantMessageId || "",
+    error: "",
     latencyMs: refreshedTask.latencyMs ?? null
   }) || {
     ...refreshedTask,
     status: "completed",
+    error: "",
     assistantMessageId: assistantMessage?.id || refreshedTask.assistantMessageId || ""
   };
   if (bridgeResultHash && env.DB) {
@@ -1312,6 +1396,8 @@ async function handleOpenClawTasksRequest(request, env, url, ctx) {
       if (!finalized.ok) {
         return jsonResponse({
           ok: false,
+          recoverable: Boolean(finalized.recoverable),
+          incomplete: Boolean(finalized.incomplete),
           error: finalized.error || "OpenClaw task result failed",
           task: finalized.task || task
         }, 502);

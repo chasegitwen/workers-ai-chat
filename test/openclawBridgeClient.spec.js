@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  OPENCLAW_BRIDGE_EMPTY_REPLY_PLACEHOLDER,
+  extractOpenClawBridgeFinalAnswer,
   isOpenClawBridgeModeEnabled,
+  isOpenClawBridgeEmptyReplyPlaceholder,
   normalizeOpenClawAgentId,
   normalizeOpenClawBridgeBaseUrl,
   normalizeOpenClawBridgeTaskProgress,
   openclawBridgeClient,
+  shouldRecoverOpenClawBridgeCompletedStatus,
   shouldUseOpenClawBridge
 } from "../src/api/openclawBridgeClient.js";
 
@@ -239,5 +243,72 @@ describe("openclawBridgeClient", () => {
       status: "completed",
       progress: 100
     });
+  });
+
+  it("extracts the latest successful bridge assistant answer after an error placeholder", () => {
+    const result = extractOpenClawBridgeFinalAnswer({
+      status: "completed",
+      events: [
+        {
+          seq: 33,
+          role: "assistant",
+          stopReason: "error",
+          content: OPENCLAW_BRIDGE_EMPTY_REPLY_PLACEHOLDER
+        },
+        {
+          seq: 34,
+          role: "assistant",
+          status: "completed",
+          content: "intermediate success"
+        },
+        {
+          seq: 37,
+          role: "assistant",
+          status: "completed",
+          content: "final recovered answer"
+        }
+      ]
+    });
+
+    expect(result).toMatchObject({
+      text: "final recovered answer",
+      placeholderOnly: false
+    });
+  });
+
+  it("marks completed bridge placeholder-only results as incomplete instead of final text", () => {
+    const result = extractOpenClawBridgeFinalAnswer({
+      status: "completed",
+      result: {
+        messages: [
+          {
+            seq: 33,
+            role: "assistant",
+            content: OPENCLAW_BRIDGE_EMPTY_REPLY_PLACEHOLDER
+          }
+        ]
+      }
+    });
+
+    expect(result.text).toBe(OPENCLAW_BRIDGE_EMPTY_REPLY_PLACEHOLDER);
+    expect(result.placeholderOnly).toBe(true);
+    expect(isOpenClawBridgeEmptyReplyPlaceholder(result.text)).toBe(true);
+  });
+
+  it("keeps failed bridge placeholder-only results recognizable as failure placeholders", () => {
+    const result = extractOpenClawBridgeFinalAnswer({
+      status: "failed",
+      message: OPENCLAW_BRIDGE_EMPTY_REPLY_PLACEHOLDER
+    });
+
+    expect(result.text).toBe(OPENCLAW_BRIDGE_EMPTY_REPLY_PLACEHOLDER);
+    expect(result.placeholderOnly).toBe(true);
+  });
+
+  it("allows bridge local failure to recover when remote status later completes", () => {
+    expect(shouldRecoverOpenClawBridgeCompletedStatus("failed", "completed")).toBe(true);
+    expect(shouldRecoverOpenClawBridgeCompletedStatus("failed", "success")).toBe(true);
+    expect(shouldRecoverOpenClawBridgeCompletedStatus("failed", "error")).toBe(false);
+    expect(shouldRecoverOpenClawBridgeCompletedStatus("running", "completed")).toBe(false);
   });
 });

@@ -7324,6 +7324,14 @@ async function tryAutoResumeOpenClawTask({ element, state } = {}){
       state.openClawAutoResume = { handled:true, mode:"completed", taskId:latestTask.id };
     }
     setContextStatus("OpenClaw task completed.");
+    if(isOpenClawBridgeTaskRecord(latestTask) && !latestTask.assistantMessageId && !latestTask.assistant_message_id){
+      try{
+        latestTask = await finalizeOpenClawTaskResult(latestTask.id) || latestTask;
+      }catch(err){
+        console.warn("finalize completed OpenClaw Bridge task failed", err);
+        setContextStatus("OpenClaw task completed, but result recovery is incomplete: " + (err.message || String(err)));
+      }
+    }
     await loadConversationMessages(conversationId);
     return { handled:true, mode:"completed", task:latestTask };
   }

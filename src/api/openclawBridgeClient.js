@@ -129,8 +129,11 @@ export function classifyOpenClawBridgeResultFinality(value) {
     /\u4ee5\u4e0b\u662f/,
     /\u603b\u7ed3/,
     /\u67e5\u5b8c\u4e86/,
+    /\u67e5\u8be2\u7ed3\u679c/,
     /\u7ed3\u679c\u5982\u4e0b/,
     /\u5b8c\u6210\u60c5\u51b5\u5982\u4e0b/,
+    /\u5df2\u5b8c\u6210/,
+    /\u6839\u636e\u67e5\u8be2\u7ed3\u679c/,
     /Here is/i,
     /Summary/i
   ];
@@ -164,6 +167,15 @@ export function classifyOpenClawBridgeResultFinality(value) {
       /\u7ee7\u7eed\u67e5\u4e00\u4e0b/,
       /\u67e5\u4e00\u4e0b\u5404\u81ea/,
       /\u627e\u51fa/,
+      /\u6211\u6765\u4e3a\u60a8\u67e5\u8be2\u4e00\u4e0b/,
+      /\u6211\u6765\u67e5\u8be2\u4e00\u4e0b/,
+      /\u6211\u4e3a\u60a8\u67e5\u8be2\u4e00\u4e0b/,
+      /\u4e3a\u60a8\u67e5\u8be2\u4e00\u4e0b/,
+      /\u67e5\u8be2\u4e00\u4e0b\u76f8\u5173\u4fe1\u606f/,
+      /\u6211\u6765\u5e2e\u60a8\u67e5\u8be2/,
+      /\u6211\u6765\u5e2e\u4f60\u67e5\u8be2/,
+      /\u6211\u5e2e\u60a8\u67e5\u4e00\u4e0b/,
+      /\u6211\u5e2e\u4f60\u67e5\u4e00\u4e0b/,
       /Let me check/i,
       /I'll check/i,
       /I will check/i

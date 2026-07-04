@@ -334,6 +334,15 @@ describe("openclawBridgeClient", () => {
     expect(classifyOpenClawBridgeResultFinality("让我查一下只是过程说明；查完了。总结如下：4 个定时任务最近一次都已完成。")).toBe("final");
   });
 
+  it("classifies short GLM query lead-ins as suspect incomplete", () => {
+    expect(classifyOpenClawBridgeResultFinality("\u6211\u6765\u4e3a\u60a8\u67e5\u8be2\u4e00\u4e0b\u4eca\u5e74\uff082026\u5e74\uff09\u9ad8\u8003\u6570\u5b66\u6ee1\u5206\u7684\u76f8\u5173\u4fe1\u606f\u3002")).toBe("suspect_incomplete");
+  });
+
+  it("keeps completed GLM query answers final", () => {
+    expect(classifyOpenClawBridgeResultFinality("\u4ee5\u4e0b\u662f\u4eca\u5e74\u9ad8\u8003\u6570\u5b66\u6ee1\u5206\u7684\u67e5\u8be2\u7ed3\u679c...")).toBe("final");
+    expect(classifyOpenClawBridgeResultFinality("\u6839\u636e\u67e5\u8be2\u7ed3\u679c\uff0c2026\u5e74...")).toBe("final");
+  });
+
   it("prefers a later final bridge report over an earlier lead-in", () => {
     const result = extractOpenClawBridgeFinalAnswer({
       status: "completed",

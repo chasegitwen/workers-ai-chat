@@ -166,11 +166,13 @@ function bridgeCandidateText(value) {
     return bridgeCandidateText(
       value.final_answer
       ?? value.finalAnswer
+      ?? value.result
+      ?? value.answer
       ?? value.output
       ?? value.response
-      ?? value.message
       ?? value.text
       ?? value.content
+      ?? value.message
       ?? ""
     );
   }
@@ -260,14 +262,15 @@ function collectBridgeFinalAnswerCandidates(source, candidates, state, options =
   const successful = options.successful !== false && isBridgeSuccessfulCandidate(source);
   const assistant = !options.fromList || isBridgeAssistantCandidate(source);
   const fields = [
-    ["final_answer", 60],
-    ["finalAnswer", 60],
-    ["output", 50],
-    ["response", 50],
-    ["message", 40],
-    ["text", 35],
-    ["content", 35],
-    ["result", 30]
+    ["final_answer", 80],
+    ["finalAnswer", 80],
+    ["result", 70],
+    ["answer", 65],
+    ["output", 60],
+    ["response", 55],
+    ["text", 50],
+    ["content", 45],
+    ["message", 40]
   ];
 
   if (assistant) {

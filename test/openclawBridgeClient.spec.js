@@ -246,6 +246,45 @@ describe("openclawBridgeClient", () => {
     });
   });
 
+  it("prefers final_answer over result and text for bridge result compatibility", () => {
+    const result = extractOpenClawBridgeFinalAnswer({
+      status: "completed",
+      final_answer: "final answer value",
+      result: "result value",
+      text: "text value"
+    });
+
+    expect(result).toMatchObject({
+      text: "final answer value",
+      finality: "final"
+    });
+  });
+
+  it("prefers result over text when final_answer is absent", () => {
+    const result = extractOpenClawBridgeFinalAnswer({
+      status: "completed",
+      result: "result value",
+      text: "text value"
+    });
+
+    expect(result).toMatchObject({
+      text: "result value",
+      finality: "final"
+    });
+  });
+
+  it("falls back to text when final_answer and result are absent", () => {
+    const result = extractOpenClawBridgeFinalAnswer({
+      status: "completed",
+      text: "text value"
+    });
+
+    expect(result).toMatchObject({
+      text: "text value",
+      finality: "final"
+    });
+  });
+
   it("extracts the latest successful bridge assistant answer after an error placeholder", () => {
     const result = extractOpenClawBridgeFinalAnswer({
       status: "completed",

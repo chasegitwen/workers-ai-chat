@@ -124,6 +124,19 @@ export function classifyOpenClawBridgeResultFinality(value) {
   if (isOpenClawBridgeEmptyReplyPlaceholder(text)) {
     return "placeholder";
   }
+  const hasCjk = /[\u3400-\u9fff]/.test(text);
+  const completionMarkers = [
+    /\u4ee5\u4e0b\u662f/,
+    /\u603b\u7ed3/,
+    /\u67e5\u5b8c\u4e86/,
+    /\u7ed3\u679c\u5982\u4e0b/,
+    /\u5b8c\u6210\u60c5\u51b5\u5982\u4e0b/,
+    /Here is/i,
+    /Summary/i
+  ];
+  if (completionMarkers.some(pattern => pattern.test(text))) {
+    return "final";
+  }
   if (text.length <= 180) {
     const suspectLeadIn = [
       /^我来(?:先)?(?:检查|查看|确认|分析|获取|提取|通过|继续)/,
@@ -137,6 +150,25 @@ export function classifyOpenClawBridgeResultFinality(value) {
       /^Now let me (?:check|inspect|look|fetch|get|analy[sz]e|continue)/i
     ];
     if (suspectLeadIn.some(pattern => pattern.test(text))) {
+      return "suspect_incomplete";
+    }
+  }
+  const midLeadInShortEnough = hasCjk ? text.length <= 120 : text.length <= 250;
+  if (midLeadInShortEnough) {
+    const suspectMidLeadIn = [
+      /\u8ba9\u6211\u67e5\u4e00\u4e0b/,
+      /\u8ba9\u6211\u68c0\u67e5/,
+      /\u6211\u518d\u67e5/,
+      /\u6211\u5148\u67e5/,
+      /\u73b0\u5728\u67e5\u4e00\u4e0b/,
+      /\u7ee7\u7eed\u67e5\u4e00\u4e0b/,
+      /\u67e5\u4e00\u4e0b\u5404\u81ea/,
+      /\u627e\u51fa/,
+      /Let me check/i,
+      /I'll check/i,
+      /I will check/i
+    ];
+    if (suspectMidLeadIn.some(pattern => pattern.test(text))) {
       return "suspect_incomplete";
     }
   }

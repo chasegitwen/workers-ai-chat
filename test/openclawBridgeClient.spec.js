@@ -325,6 +325,15 @@ describe("openclawBridgeClient", () => {
     expect(classifyOpenClawBridgeResultFinality("I'll check the logs now.")).toBe("suspect_incomplete");
   });
 
+  it("classifies short mid-sentence bridge lead-ins as suspect incomplete", () => {
+    expect(classifyOpenClawBridgeResultFinality("当前有 4 个定时任务，全部状态正常。让我查一下各自最近的执行记录，找出最近一次运行的是哪个。")).toBe("suspect_incomplete");
+  });
+
+  it("keeps completed short bridge reports final even when they mention checking", () => {
+    expect(classifyOpenClawBridgeResultFinality("查完了。以下是 4 个定时任务最近一次执行的情况...")).toBe("final");
+    expect(classifyOpenClawBridgeResultFinality("让我查一下只是过程说明；查完了。总结如下：4 个定时任务最近一次都已完成。")).toBe("final");
+  });
+
   it("prefers a later final bridge report over an earlier lead-in", () => {
     const result = extractOpenClawBridgeFinalAnswer({
       status: "completed",

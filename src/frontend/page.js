@@ -7324,7 +7324,7 @@ async function tryAutoResumeOpenClawTask({ element, state } = {}){
       state.openClawAutoResume = { handled:true, mode:"completed", taskId:latestTask.id };
     }
     setContextStatus("OpenClaw task completed.");
-    if(isOpenClawBridgeTaskRecord(latestTask) && !latestTask.assistantMessageId && !latestTask.assistant_message_id){
+    if(isOpenClawBridgeTaskRecord(latestTask) || (!latestTask.assistantMessageId && !latestTask.assistant_message_id)){
       try{
         latestTask = await finalizeOpenClawTaskResult(latestTask.id) || latestTask;
       }catch(err){
@@ -7469,7 +7469,7 @@ async function pollOpenClawReconnectTask(taskId){
       openClawCompletedRemoteSyncAttempts.delete(task.id);
       stopOpenClawReconnectPolling();
       setContextStatus("OpenClaw task completed.");
-      if(!task.assistantMessageId){
+      if(isOpenClawBridgeTaskRecord(task) || (!task.assistantMessageId && !task.assistant_message_id)){
         try{
           await finalizeOpenClawTaskResult(task.id);
         }catch(err){

@@ -116,6 +116,33 @@ export function isOpenClawBridgeEmptyReplyPlaceholder(value) {
   return String(value || "").trim() === OPENCLAW_BRIDGE_EMPTY_REPLY_PLACEHOLDER;
 }
 
+export function classifyOpenClawBridgeResultFinality(value) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) {
+    return "empty";
+  }
+  if (isOpenClawBridgeEmptyReplyPlaceholder(text)) {
+    return "placeholder";
+  }
+  if (text.length <= 180) {
+    const suspectLeadIn = [
+      /^我来(?:先)?(?:检查|查看|确认|分析|获取|提取|通过|继续)/,
+      /^现在让我(?:先)?(?:检查|查看|确认|分析|获取|提取|通过|继续)/,
+      /^我将(?:先)?(?:检查|查看|确认|分析|获取|提取|通过|继续)/,
+      /^让我(?:先)?(?:检查|查看|确认|分析|获取|提取|通过|继续)/,
+      /^Let me (?:check|inspect|look|fetch|get|analy[sz]e|continue)/i,
+      /^I'll (?:check|inspect|look|fetch|get|analy[sz]e|continue)/i,
+      /^I will (?:check|inspect|look|fetch|get|analy[sz]e|continue)/i,
+      /^I'm going to (?:check|inspect|look|fetch|get|analy[sz]e|continue)/i,
+      /^Now let me (?:check|inspect|look|fetch|get|analy[sz]e|continue)/i
+    ];
+    if (suspectLeadIn.some(pattern => pattern.test(text))) {
+      return "suspect_incomplete";
+    }
+  }
+  return "final";
+}
+
 function bridgeCandidateText(value) {
   if (typeof value === "string") {
     return value.trim();
@@ -217,6 +244,7 @@ function collectBridgeFinalAnswerCandidates(source, candidates, state, options =
       candidates.push({
         text,
         placeholder: isOpenClawBridgeEmptyReplyPlaceholder(text),
+        finality: classifyOpenClawBridgeResultFinality(text),
         successful: options.successful !== false,
         seq: options.seq ?? null,
         timestamp: options.timestamp ?? null,
@@ -252,6 +280,7 @@ function collectBridgeFinalAnswerCandidates(source, candidates, state, options =
         candidates.push({
           text,
           placeholder: isOpenClawBridgeEmptyReplyPlaceholder(text),
+          finality: classifyOpenClawBridgeResultFinality(text),
           successful,
           seq,
           timestamp,
@@ -302,12 +331,25 @@ export function extractOpenClawBridgeFinalAnswer(payload) {
   collectBridgeFinalAnswerCandidates(source?.result, candidates, { order: candidates.length }, { priority: 30 });
 
   const successful = candidates
-    .filter(candidate => candidate.successful && !candidate.placeholder && candidate.text)
+    .filter(candidate => candidate.successful && candidate.finality === "final" && candidate.text)
     .sort(compareBridgeFinalAnswerCandidates);
   if (successful.length) {
     return {
       text: successful[successful.length - 1].text,
       placeholderOnly: false,
+      finality: "final",
+      candidates
+    };
+  }
+
+  const suspect = candidates
+    .filter(candidate => candidate.successful && candidate.finality === "suspect_incomplete" && candidate.text)
+    .sort(compareBridgeFinalAnswerCandidates);
+  if (suspect.length) {
+    return {
+      text: suspect[suspect.length - 1].text,
+      placeholderOnly: false,
+      finality: "suspect_incomplete",
       candidates
     };
   }
@@ -319,6 +361,7 @@ export function extractOpenClawBridgeFinalAnswer(payload) {
     return {
       text: placeholders[placeholders.length - 1].text,
       placeholderOnly: true,
+      finality: "placeholder",
       candidates
     };
   }
@@ -328,6 +371,7 @@ export function extractOpenClawBridgeFinalAnswer(payload) {
     .sort(compareBridgeFinalAnswerCandidates);
   return {
     text: fallback.length ? fallback[fallback.length - 1].text : "",
+    finality: fallback.length ? fallback[fallback.length - 1].finality : "empty",
     placeholderOnly: false,
     candidates
   };

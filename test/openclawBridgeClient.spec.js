@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   OPENCLAW_BRIDGE_EMPTY_REPLY_PLACEHOLDER,
+  classifyOpenClawBridgeResultFinality,
   extractOpenClawBridgeFinalAnswer,
   isOpenClawBridgeModeEnabled,
   isOpenClawBridgeEmptyReplyPlaceholder,
@@ -272,8 +273,64 @@ describe("openclawBridgeClient", () => {
 
     expect(result).toMatchObject({
       text: "final recovered answer",
+      finality: "final",
       placeholderOnly: false
     });
+  });
+
+  it("classifies short bridge lead-ins as suspect incomplete", () => {
+    expect(classifyOpenClawBridgeResultFinality("我来检查一下 VPS 的运行状态和最近的攻击模式。")).toBe("suspect_incomplete");
+    expect(classifyOpenClawBridgeResultFinality("现在让我提取全面的统计数据...")).toBe("suspect_incomplete");
+    expect(classifyOpenClawBridgeResultFinality("我将检查当前服务状态。")).toBe("suspect_incomplete");
+    expect(classifyOpenClawBridgeResultFinality("Let me check the VPS status first.")).toBe("suspect_incomplete");
+    expect(classifyOpenClawBridgeResultFinality("I'll check the logs now.")).toBe("suspect_incomplete");
+  });
+
+  it("prefers a later final bridge report over an earlier lead-in", () => {
+    const result = extractOpenClawBridgeFinalAnswer({
+      status: "completed",
+      messages: [
+        {
+          seq: 1,
+          role: "assistant",
+          content: "我来检查一下 VPS 的运行状态和最近的攻击模式。"
+        },
+        {
+          seq: 2,
+          role: "assistant",
+          content: "现在让我提取全面的统计数据..."
+        },
+        {
+          seq: 3,
+          role: "assistant",
+          content: "以下是完整的 VPS 状态报告：\n\n## 系统状态\n\n服务运行正常，端口攻击统计如下。"
+        }
+      ]
+    });
+
+    expect(result).toMatchObject({
+      text: "以下是完整的 VPS 状态报告：\n\n## 系统状态\n\n服务运行正常，端口攻击统计如下。",
+      finality: "final",
+      placeholderOnly: false
+    });
+  });
+
+  it("marks bridge lead-in-only results as suspect incomplete", () => {
+    const result = extractOpenClawBridgeFinalAnswer({
+      status: "completed",
+      message: "我来检查一下 VPS 的运行状态和最近的攻击模式。"
+    });
+
+    expect(result).toMatchObject({
+      text: "我来检查一下 VPS 的运行状态和最近的攻击模式。",
+      finality: "suspect_incomplete",
+      placeholderOnly: false
+    });
+  });
+
+  it("keeps existing real final bridge answers classified as final", () => {
+    expect(classifyOpenClawBridgeResultFinality("以下是完整的 VPS 状态报告：服务运行正常。")).toBe("final");
+    expect(classifyOpenClawBridgeResultFinality("Final report: the VPS is healthy and blocked 100 probes.")).toBe("final");
   });
 
   it("marks completed bridge placeholder-only results as incomplete instead of final text", () => {
@@ -292,6 +349,7 @@ describe("openclawBridgeClient", () => {
 
     expect(result.text).toBe(OPENCLAW_BRIDGE_EMPTY_REPLY_PLACEHOLDER);
     expect(result.placeholderOnly).toBe(true);
+    expect(result.finality).toBe("placeholder");
     expect(isOpenClawBridgeEmptyReplyPlaceholder(result.text)).toBe(true);
   });
 

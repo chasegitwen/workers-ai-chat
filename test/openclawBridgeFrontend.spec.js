@@ -62,6 +62,27 @@ describe("OpenClaw bridge frontend SSE state", () => {
 
     expect(page).toContain("typeof EventSource === \"undefined\"");
     expect(page).toContain("startOpenClawReconnectPolling(taskId)");
-    expect(page).toContain("/api/openclaw/bridge/events/stream?task_id=");
+    expect(page).toContain("openClawTaskScopeParams");
+    expect(page).toContain("/api/openclaw/bridge/events/stream?\" + params.toString()");
+    expect(page).toContain("params.set(\"project_id\", projectId)");
+    expect(page).toContain("params.set(\"runtime_id\", runtimeId)");
+  });
+
+  it("exposes project selector and scopes conversation requests by project_id", () => {
+    const page = htmlPage();
+
+    expect(page).toContain("id=\"projectSelect\"");
+    expect(page).toContain("fetch(\"/api/projects\"");
+    expect(page).toContain("\"/openclaw-runtimes\"");
+    expect(page).toContain("runtimeCapabilityLabel");
+    expect(page).toContain("renderRuntimeBinding");
+    expect(page).toContain("runtimeCanBeBridgeDefault");
+    expect(page).toContain("data-runtime-default=");
+    expect(page).toContain("data-runtime-agent=");
+    expect(page).toContain("Cannot set disabled, unverified, or Bridge-unsupported runtime as default.");
+    expect(page).toContain("updateProjectRuntimeBinding");
+    expect(page).toContain("project_id:activeProjectId || DEFAULT_PROJECT_ID");
+    expect(page).toContain("fetch(\"/api/conversations?\" + params.toString())");
+    expect(page).toContain("projectSelect.addEventListener(\"change\", () => switchProject(projectSelect.value))");
   });
 });

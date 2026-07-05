@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src";
 import { createSession } from "../src/lib/auth.js";
+import { broadcastOpenClawBridgeEvent } from "../src/api/openclawBridgeEvents.js";
 
 const CALLBACK_SECRET = "test-callback-secret";
 const BRIDGE_ID = "openclaw-test-bridge";
@@ -167,8 +168,15 @@ class FakeD1 {
     const normalized = sql.replace(/\s+/g, " ").trim().toLowerCase();
     if (normalized.includes("from bridge_events")) {
       const ids = new Set(bindings.slice(0, -1).map(value => String(value || "")));
+      const scoped = normalized.includes("coalesce(project_id");
+      const scopedIds = scoped
+        ? new Set(bindings.slice(0, -3).map(value => String(value || "")))
+        : ids;
+      const projectId = scoped ? String(bindings[bindings.length - 3] || "") : "";
+      const runtimeId = scoped ? String(bindings[bindings.length - 2] || "") : "";
       return [...this.bridgeEvents.values()]
-        .filter(event => ids.has(String(event.task_id || "")) && Number(event.applied || 0) === 1)
+        .filter(event => scopedIds.has(String(event.task_id || "")) && Number(event.applied || 0) === 1)
+        .filter(event => !scoped || (String(event.project_id || "") === projectId && String(event.runtime_id || "") === runtimeId))
         .sort((left, right) => {
           const leftSequence = left.sequence === null || left.sequence === undefined ? Number.MAX_SAFE_INTEGER : Number(left.sequence);
           const rightSequence = right.sequence === null || right.sequence === undefined ? Number.MAX_SAFE_INTEGER : Number(right.sequence);
@@ -187,17 +195,19 @@ class FakeD1 {
       this.bridgeEvents.set(bindings[0], {
         event_id: bindings[0],
         task_id: bindings[1],
-        conversation_id: bindings[2],
-        assistant_message_id: bindings[3],
-        event_type: bindings[4],
-        sequence: bindings[5],
-        payload_json: bindings[6],
-        created_at: bindings[7],
-        received_at: bindings[8],
-        bridge_id: bindings[9],
-        applied: bindings[10],
-        duplicate: bindings[11],
-        error: bindings[12]
+        project_id: bindings[2],
+        runtime_id: bindings[3],
+        conversation_id: bindings[4],
+        assistant_message_id: bindings[5],
+        event_type: bindings[6],
+        sequence: bindings[7],
+        payload_json: bindings[8],
+        created_at: bindings[9],
+        received_at: bindings[10],
+        bridge_id: bindings[11],
+        applied: bindings[12],
+        duplicate: bindings[13],
+        error: bindings[14]
       });
       return;
     }
@@ -319,6 +329,9 @@ async function createBridgeTask(overrides = {}) {
     bridge_task_id: overrides.bridge_task_id || "bridge_task_callback",
     bridge_agent_id: "glm5-2",
     bridge_mode_enabled: 1,
+    project_id: overrides.project_id || "",
+    runtime_id: overrides.runtime_id || "",
+    runtime_slug: overrides.runtime_slug || overrides.runtime_id || "",
     bridge_result_hash: "",
     bridge_last_sequence: overrides.bridge_last_sequence ?? -1,
     bridge_last_seen_at: ""
@@ -333,6 +346,10 @@ describe("OpenClaw bridge callback endpoint", () => {
   beforeEach(async () => {
     db = new FakeD1();
     await createBridgeTask();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("accepts a valid bridge.started callback", async () => {
@@ -350,6 +367,131 @@ describe("OpenClaw bridge callback endpoint", () => {
     expect(body).toMatchObject({ ok: true, applied: true, duplicate: false });
     expect(task.status).toBe("running");
     expect(task.remote_message).toBe("started");
+  });
+
+  it("logs diagnostics for legacy callbacks resolved to unscoped tasks", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const response = await postCallback(basePayload({
+      event_id: "evt_legacy_scope_warning",
+      event_type: "bridge.started",
+      sequence: 1
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.applied).toBe(true);
+    expect(warn).toHaveBeenCalledWith(
+      "[openclaw-compat]",
+      "bridge_callback_legacy_unscoped_task",
+      expect.objectContaining({
+        task_id: "local_callback_task",
+        bridge_task_id: "bridge_task_callback",
+        project_id: "",
+        runtime_id: ""
+      })
+    );
+  });
+
+  it("stores bridge_events with task project and runtime scope for new tasks", async () => {
+    db = new FakeD1();
+    await createBridgeTask({
+      project_id: "project-a",
+      runtime_id: "hillsboro-openclaw"
+    });
+    const payload = basePayload({
+      event_id: "evt_scoped_callback",
+      project_id: "project-a",
+      runtime_id: "hillsboro-openclaw",
+      event_type: "bridge.started",
+      sequence: 1
+    });
+
+    const response = await postCallback(payload);
+    const body = await response.json();
+    const event = db.bridgeEvents.get("evt_scoped_callback");
+
+    expect(response.status).toBe(200);
+    expect(body.applied).toBe(true);
+    expect(event).toMatchObject({
+      project_id: "project-a",
+      runtime_id: "hillsboro-openclaw",
+      applied: 1
+    });
+  });
+
+  it("rejects callbacks with the wrong runtime_id for the resolved task", async () => {
+    db = new FakeD1();
+    await createBridgeTask({
+      project_id: "default",
+      runtime_id: "hillsboro-openclaw"
+    });
+
+    const response = await postCallback(basePayload({
+      project_id: "default",
+      runtime_id: "seattle-openclaw"
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body).toEqual({ ok: false, error: "runtime_id_mismatch" });
+    expect(db.bridgeEvents.size).toBe(0);
+  });
+
+  it("rejects callbacks with the wrong project_id for the resolved task", async () => {
+    db = new FakeD1();
+    await createBridgeTask({
+      project_id: "project-b",
+      runtime_id: "hillsboro-openclaw"
+    });
+
+    const response = await postCallback(basePayload({
+      project_id: "project-a",
+      runtime_id: "hillsboro-openclaw"
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body).toEqual({ ok: false, error: "project_id_mismatch" });
+    expect(db.bridgeEvents.size).toBe(0);
+  });
+
+  it("rejects callbacks signed with the wrong runtime HMAC secret", async () => {
+    db = new FakeD1();
+    await createBridgeTask({
+      project_id: "default",
+      runtime_id: "hillsboro-openclaw"
+    });
+
+    const response = await postCallback(basePayload({
+      project_id: "default",
+      runtime_id: "hillsboro-openclaw"
+    }), {
+      secret: "wrong-runtime-secret"
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body).toEqual({ ok: false, error: "invalid_signature" });
+    expect(db.bridgeEvents.size).toBe(0);
+  });
+
+  it("does not let Seattle runtime inherit the legacy Hillsboro callback secret", async () => {
+    db = new FakeD1();
+    await createBridgeTask({
+      project_id: "default",
+      runtime_id: "seattle-openclaw"
+    });
+
+    const response = await postCallback(basePayload({
+      project_id: "default",
+      runtime_id: "seattle-openclaw"
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body).toEqual({ ok: false, error: "callback_secret_not_configured" });
+    expect(db.bridgeEvents.size).toBe(0);
   });
 
   it("updates message activity from bridge.activity", async () => {
@@ -533,6 +675,109 @@ describe("OpenClaw bridge callback endpoint", () => {
     expect(text).toContain("event: bridge_event");
     expect(text).toContain("evt_history_1");
     expect(text).toContain("historical activity");
+  });
+
+  it("logs diagnostics when legacy unscoped SSE replay is used", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await postCallback(basePayload({
+      event_id: "evt_legacy_sse_warning",
+      event_type: "bridge.activity",
+      sequence: 7,
+      content: { text: "legacy replay activity" }
+    }));
+
+    const response = await worker.fetch(new Request("http://example.com/api/openclaw/bridge/events/stream?task_id=local_callback_task", {
+      headers: {
+        Cookie: await authCookie()
+      }
+    }), callbackEnv(), {});
+    const reader = response.body.getReader();
+    await reader.read();
+    await reader.cancel();
+
+    expect(response.status).toBe(200);
+    expect(warn).toHaveBeenCalledWith(
+      "[openclaw-bridge-events-compat]",
+      "legacy_unscoped_sse_subscription",
+      expect.objectContaining({
+        requested_task_id: "local_callback_task",
+        project_id: "",
+        runtime_id: ""
+      })
+    );
+    expect(warn).toHaveBeenCalledWith(
+      "[openclaw-bridge-events-compat]",
+      "legacy_unscoped_sse_replay",
+      expect.objectContaining({
+        task_id: "local_callback_task",
+        bridge_task_id: "bridge_task_callback",
+        runtime_id: ""
+      })
+    );
+  });
+
+  it("keeps Hillsboro events out of a Seattle-scoped live stream", async () => {
+    db = new FakeD1();
+    await createBridgeTask({
+      id: "local_seattle_task",
+      bridge_task_id: "shared_runtime_task",
+      remote_task_id: "shared_runtime_task",
+      project_id: "default",
+      runtime_id: "seattle-openclaw"
+    });
+
+    const response = await worker.fetch(new Request("http://example.com/api/openclaw/bridge/events/stream?task_id=local_seattle_task&project_id=default&runtime_id=seattle-openclaw", {
+      headers: {
+        Cookie: await authCookie()
+      }
+    }), callbackEnv(), {});
+    const reader = response.body.getReader();
+    await reader.read();
+
+    const delivered = broadcastOpenClawBridgeEvent({
+      event_id: "evt_hillsboro_not_seattle",
+      task_id: "local_seattle_task",
+      project_id: "default",
+      runtime_id: "hillsboro-openclaw",
+      event_type: "bridge.activity",
+      content: { text: "wrong runtime" }
+    });
+    await reader.cancel();
+
+    expect(response.status).toBe(200);
+    expect(delivered).toBe(0);
+  });
+
+  it("keeps Project A events out of a Project B live stream", async () => {
+    db = new FakeD1();
+    await createBridgeTask({
+      id: "local_project_b_task",
+      bridge_task_id: "shared_project_task",
+      remote_task_id: "shared_project_task",
+      project_id: "project-b",
+      runtime_id: "hillsboro-openclaw"
+    });
+
+    const response = await worker.fetch(new Request("http://example.com/api/openclaw/bridge/events/stream?task_id=local_project_b_task&project_id=project-b&runtime_id=hillsboro-openclaw", {
+      headers: {
+        Cookie: await authCookie()
+      }
+    }), callbackEnv(), {});
+    const reader = response.body.getReader();
+    await reader.read();
+
+    const delivered = broadcastOpenClawBridgeEvent({
+      event_id: "evt_project_a_not_b",
+      task_id: "local_project_b_task",
+      project_id: "project-a",
+      runtime_id: "hillsboro-openclaw",
+      event_type: "bridge.activity",
+      content: { text: "wrong project" }
+    });
+    await reader.cancel();
+
+    expect(response.status).toBe(200);
+    expect(delivered).toBe(0);
   });
 
   it("broadcasts applied callback events to subscribed stream clients once", async () => {

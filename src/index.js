@@ -4,6 +4,8 @@ import { handleFiles } from "./api/files.js";
 import { handleFetchUrl } from "./api/fetchUrl.js";
 import { handleHistory } from "./api/history.js";
 import { handleModelHealth } from "./api/modelHealth.js";
+import { handleOpenClawRuntimes } from "./api/openclawRuntimes.js";
+import { handleProjects } from "./api/projects.js";
 import { handleSearchAndFetch } from "./api/searchAndFetch.js";
 import { handleSearchWeb } from "./api/searchWeb.js";
 import { handleSettings } from "./api/settings.js";
@@ -117,6 +119,22 @@ export default {
 
       if (historyResponse) {
         return historyResponse;
+      }
+    }
+
+    if (url.pathname.startsWith("/api/openclaw/runtimes") || /^\/api\/projects\/[^/]+\/openclaw-runtimes/.test(url.pathname)) {
+      const runtimesResponse = await handleOpenClawRuntimes(request, env, url);
+
+      if (runtimesResponse) {
+        return runtimesResponse;
+      }
+    }
+
+    if (url.pathname.startsWith("/api/projects")) {
+      const projectsResponse = await handleProjects(request, env, url);
+
+      if (projectsResponse) {
+        return projectsResponse;
       }
     }
 

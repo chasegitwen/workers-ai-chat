@@ -27,6 +27,7 @@ import {
   shouldRecoverOpenClawBridgeCompletedStatus
 } from "./openclawBridgeClient.js";
 import { broadcastOpenClawBridgeEvent } from "./openclawBridgeEvents.js";
+import { resolveOpenClawRuntimeForProject } from "./openclawRuntimes.js";
 
 const defaultSystemMessage = {
   role: "system",
@@ -212,6 +213,20 @@ function serializeOpenClawTask(row) {
     bridge_last_sequence: row.bridge_last_sequence ?? null,
     bridgeLastSeenAt: row.bridge_last_seen_at || "",
     bridge_last_seen_at: row.bridge_last_seen_at || "",
+    projectId: row.project_id || "",
+    project_id: row.project_id || "",
+    runtimeId: row.runtime_id || "",
+    runtime_id: row.runtime_id || "",
+    runtimeSlug: row.runtime_slug || "",
+    runtime_slug: row.runtime_slug || "",
+    selectedAgentId: row.selected_agent_id || "",
+    selected_agent_id: row.selected_agent_id || "",
+    executionMode: row.execution_mode || "",
+    execution_mode: row.execution_mode || "",
+    runtimeResolutionSource: row.runtime_resolution_source || "",
+    runtime_resolution_source: row.runtime_resolution_source || "",
+    runtimeResolutionWarnings: row.runtime_resolution_warnings || "",
+    runtime_resolution_warnings: row.runtime_resolution_warnings || "",
     metadata,
     canReconnect: Boolean(metadata.canReconnect),
     canQueryRemoteStatus: Boolean(metadata.canQueryRemoteStatus),
@@ -227,7 +242,7 @@ function clampInteger(value, fallback, min, max) {
   return Math.min(max, Math.max(min, parsed));
 }
 
-async function createOpenClawTask(env, details) {
+export async function createOpenClawTask(env, details) {
   if (!env.DB) {
     return null;
   }
@@ -247,6 +262,13 @@ async function createOpenClawTask(env, details) {
     latencyMs: null,
     assistantMessageId: "",
     remoteTaskId: "",
+    projectId: details.projectId || "",
+    runtimeId: details.runtimeId || "",
+    runtimeSlug: details.runtimeSlug || "",
+    selectedAgentId: details.agentId || "",
+    executionMode: details.executionMode || "",
+    runtimeResolutionSource: details.runtimeResolutionSource || "",
+    runtimeResolutionWarnings: details.runtimeResolutionWarnings || [],
     metadata: {
       source: "worker-local",
       canReconnect: false,
@@ -254,6 +276,15 @@ async function createOpenClawTask(env, details) {
       abortStopsRemote: false
     }
   };
+  if (!task.projectId || !task.runtimeId) {
+    warnOpenClawCompatibility("openclaw_task_missing_scope", {
+      task_id: task.id,
+      conversation_id: task.conversationId,
+      project_id: task.projectId,
+      runtime_id: task.runtimeId,
+      resolution_source: task.runtimeResolutionSource || ""
+    });
+  }
 
   try {
     await env.DB.prepare(
@@ -267,8 +298,15 @@ async function createOpenClawTask(env, details) {
         status,
         started_at,
         updated_at,
+        project_id,
+        runtime_id,
+        runtime_slug,
+        selected_agent_id,
+        execution_mode,
+        runtime_resolution_source,
+        runtime_resolution_warnings,
         metadata
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       task.id,
       task.conversationId,
@@ -279,6 +317,13 @@ async function createOpenClawTask(env, details) {
       task.status,
       task.startedAt,
       task.updatedAt,
+      task.projectId,
+      task.runtimeId,
+      task.runtimeSlug,
+      task.selectedAgentId,
+      task.executionMode,
+      task.runtimeResolutionSource,
+      JSON.stringify(task.runtimeResolutionWarnings),
       openClawTaskMetadata()
     ).run();
     return task;
@@ -463,6 +508,71 @@ function openClawCallbackAllowedBridgeIds(env) {
     .split(",")
     .map(value => value.trim())
     .filter(Boolean);
+}
+
+function normalizeRuntimeEnvKey(runtimeId) {
+  return String(runtimeId || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function safeParseObjectJson(value) {
+  try {
+    const parsed = JSON.parse(String(value || "{}"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+function openClawCallbackSecretForTask(env, task) {
+  const runtimeId = String(task?.runtimeId || task?.runtime_id || "").trim();
+  const runtimeSlug = String(task?.runtimeSlug || task?.runtime_slug || "").trim();
+  const secrets = safeParseObjectJson(env.OPENCLAW_CALLBACK_SECRETS_JSON);
+  for (const key of [runtimeId, runtimeSlug].filter(Boolean)) {
+    const value = String(secrets[key] || "").trim();
+    if (value) {
+      return value;
+    }
+  }
+  for (const key of [runtimeId, runtimeSlug].map(normalizeRuntimeEnvKey).filter(Boolean)) {
+    const value = String(env["OPENCLAW_CALLBACK_SECRET_" + key] || "").trim();
+    if (value) {
+      return value;
+    }
+  }
+  if (runtimeId || runtimeSlug) {
+    const runtimeKey = runtimeId || runtimeSlug;
+    if (runtimeKey !== "hillsboro-openclaw") {
+      return "";
+    }
+  }
+  return String(env.OPENCLAW_CALLBACK_SECRET || "").trim();
+}
+
+function payloadScopeValue(payload, key) {
+  const metadata = payload?.metadata && typeof payload.metadata === "object" ? payload.metadata : {};
+  return String(payload?.[key] || metadata[key] || "").trim();
+}
+
+function bridgeCallbackScopeMismatch(task, payload) {
+  const payloadProjectId = payloadScopeValue(payload, "project_id");
+  const payloadRuntimeId = payloadScopeValue(payload, "runtime_id");
+  const taskProjectId = String(task?.projectId || task?.project_id || "").trim();
+  const taskRuntimeId = String(task?.runtimeId || task?.runtime_id || "").trim();
+  if (payloadProjectId && taskProjectId && payloadProjectId !== taskProjectId) {
+    return "project_id_mismatch";
+  }
+  if (payloadRuntimeId && taskRuntimeId && payloadRuntimeId !== taskRuntimeId) {
+    return "runtime_id_mismatch";
+  }
+  return "";
+}
+
+function warnOpenClawCompatibility(event, detail = {}) {
+  console.warn("[openclaw-compat]", event, detail);
 }
 
 function bridgeCallbackTextContent(payload) {
@@ -728,9 +838,9 @@ async function applyOpenClawBridgeErrorCallback(env, task, payload) {
   return true;
 }
 
-async function applyOpenClawBridgeCallbackEvent(env, payload) {
+async function applyOpenClawBridgeCallbackEvent(env, payload, resolvedTask = null) {
   const eventType = String(payload?.event_type || "").trim();
-  const task = await readOpenClawBridgeTaskForCallback(env, payload);
+  const task = resolvedTask || await readOpenClawBridgeTaskForCallback(env, payload);
   if (!task) {
     return {
       applied: false,
@@ -811,14 +921,18 @@ async function applyOpenClawBridgeCallbackEvent(env, payload) {
   };
 }
 
-async function storeOpenClawBridgeCallbackEvent(env, payload, bridgeId, applied, duplicate, error) {
+async function storeOpenClawBridgeCallbackEvent(env, payload, task, bridgeId, applied, duplicate, error) {
   if (!env.DB) {
     return;
   }
+  const projectId = String(task?.projectId || task?.project_id || payloadScopeValue(payload, "project_id") || "").trim();
+  const runtimeId = String(task?.runtimeId || task?.runtime_id || payloadScopeValue(payload, "runtime_id") || "").trim();
   await env.DB.prepare(
     `INSERT INTO bridge_events (
       event_id,
       task_id,
+      project_id,
+      runtime_id,
       conversation_id,
       assistant_message_id,
       event_type,
@@ -830,15 +944,21 @@ async function storeOpenClawBridgeCallbackEvent(env, payload, bridgeId, applied,
       applied,
       duplicate,
       error
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     String(payload?.event_id || ""),
     String(payload?.task_id || ""),
-    String(payload?.conversation_id || ""),
-    String(payload?.assistant_message_id || ""),
+    projectId,
+    runtimeId,
+    String(payload?.conversation_id || task?.conversationId || task?.conversation_id || ""),
+    String(payload?.assistant_message_id || task?.assistantMessageId || task?.assistant_message_id || ""),
     String(payload?.event_type || ""),
     bridgeCallbackSequence(payload),
-    JSON.stringify(payload || {}),
+    JSON.stringify({
+      ...(payload || {}),
+      project_id: projectId,
+      runtime_id: runtimeId
+    }),
     String(payload?.created_at || ""),
     new Date().toISOString(),
     bridgeId,
@@ -874,11 +994,6 @@ async function handleOpenClawBridgeCallbackRequest(request, env) {
   if (!env.DB) {
     return bridgeCallbackErrorResponse("d1_not_configured", 500);
   }
-  const secret = String(env.OPENCLAW_CALLBACK_SECRET || "").trim();
-  if (!secret) {
-    return bridgeCallbackErrorResponse("callback_secret_not_configured", 500);
-  }
-
   const bridgeId = String(request.headers.get("X-OpenClaw-Bridge-Id") || "").trim();
   const timestamp = String(request.headers.get("X-OpenClaw-Timestamp") || "").trim();
   const signature = String(request.headers.get("X-OpenClaw-Signature") || "").trim();
@@ -905,11 +1020,6 @@ async function handleOpenClawBridgeCallbackRequest(request, env) {
   }
 
   const rawBody = await request.text();
-  const expectedSignature = await signOpenClawCallback(secret, timestamp, rawBody);
-  if (!timingSafeEqualText(signature.toLowerCase(), expectedSignature)) {
-    return bridgeCallbackErrorResponse("invalid_signature", 401);
-  }
-
   let payload = null;
   try {
     payload = JSON.parse(rawBody);
@@ -926,6 +1036,30 @@ async function handleOpenClawBridgeCallbackRequest(request, env) {
   }
   if (!taskId) {
     return bridgeCallbackErrorResponse("missing_task_id", 400);
+  }
+  const callbackTask = await readOpenClawBridgeTaskForCallback(env, payload);
+  if (!callbackTask) {
+    return bridgeCallbackErrorResponse("task_not_found", 404);
+  }
+  if (!callbackTask.projectId || !callbackTask.runtimeId) {
+    warnOpenClawCompatibility("bridge_callback_legacy_unscoped_task", {
+      task_id: callbackTask.id || "",
+      bridge_task_id: callbackTask.bridgeTaskId || callbackTask.bridge_task_id || "",
+      project_id: callbackTask.projectId || "",
+      runtime_id: callbackTask.runtimeId || ""
+    });
+  }
+  const scopeMismatch = bridgeCallbackScopeMismatch(callbackTask, payload);
+  if (scopeMismatch) {
+    return bridgeCallbackErrorResponse(scopeMismatch, 403);
+  }
+  const secret = openClawCallbackSecretForTask(env, callbackTask);
+  if (!secret) {
+    return bridgeCallbackErrorResponse("callback_secret_not_configured", 500);
+  }
+  const expectedSignature = await signOpenClawCallback(secret, timestamp, rawBody);
+  if (!timingSafeEqualText(signature.toLowerCase(), expectedSignature)) {
+    return bridgeCallbackErrorResponse("invalid_signature", 401);
   }
 
   const existing = await env.DB.prepare(
@@ -944,11 +1078,11 @@ async function handleOpenClawBridgeCallbackRequest(request, env) {
     });
   }
 
-  await storeOpenClawBridgeCallbackEvent(env, payload, bridgeId, false, false, "");
+  await storeOpenClawBridgeCallbackEvent(env, payload, callbackTask, bridgeId, false, false, "");
   let applied = false;
   let applyError = "";
   try {
-    const result = await applyOpenClawBridgeCallbackEvent(env, payload);
+    const result = await applyOpenClawBridgeCallbackEvent(env, payload, callbackTask);
     applied = Boolean(result.applied);
     applyError = result.error || "";
   } catch (err) {
@@ -958,7 +1092,13 @@ async function handleOpenClawBridgeCallbackRequest(request, env) {
   }
   await updateOpenClawBridgeCallbackStoredEvent(env, eventId, applied, applyError);
   if (applied) {
-    broadcastOpenClawBridgeEvent(payload);
+    broadcastOpenClawBridgeEvent({
+      ...(payload || {}),
+      project_id: callbackTask.projectId || callbackTask.project_id || "",
+      runtime_id: callbackTask.runtimeId || callbackTask.runtime_id || "",
+      conversation_id: payload?.conversation_id || callbackTask.conversationId || callbackTask.conversation_id || "",
+      assistant_message_id: payload?.assistant_message_id || callbackTask.assistantMessageId || callbackTask.assistant_message_id || ""
+    });
   }
 
   return jsonResponse({
@@ -4612,7 +4752,7 @@ function streamWithHistorySave(result, env, conversationId, sources = [], toolSo
   }));
 }
 
-async function prepareConversation(env, conversationId, userContent) {
+async function prepareConversation(env, conversationId, userContent, projectId = "") {
   if (!env.DB) {
     return {
       id: conversationId || crypto.randomUUID()
@@ -4622,7 +4762,8 @@ async function prepareConversation(env, conversationId, userContent) {
   return ensureConversation(
     env.DB,
     conversationId,
-    titleFromMessage(userContent)
+    titleFromMessage(userContent),
+    projectId
   );
 }
 
@@ -4660,6 +4801,12 @@ export async function handleChat(request, env, ctx) {
     file,
     fileIds = [],
     conversationId,
+    project_id: projectId,
+    projectId: camelProjectId,
+    runtime_id: runtimeId,
+    runtimeId: camelRuntimeId,
+    agent_id: agentId,
+    agentId: camelAgentId,
     toolCall,
     debugTools = false
   } = await request.json();
@@ -4695,7 +4842,7 @@ export async function handleChat(request, env, ctx) {
     fallbackCustomModelConfig
   );
 
-  const conversation = await prepareConversation(env, conversationId, userContent);
+  const conversation = await prepareConversation(env, conversationId, userContent, projectId || camelProjectId || "");
 
   if (image && imageAttachments.length === 0) {
     try {
@@ -4796,9 +4943,55 @@ export async function handleChat(request, env, ctx) {
   const openClawTarget = isOpenClawRequest
     ? resolveOpenClawProviderModel(providerCatalog, provider, model || DEFAULT_TEXT_MODEL)
     : null;
+  const openClawBridgeProvider = isOpenClawRequest
+    ? openClawBridgeProviderConfig(openClawTarget?.provider)
+    : null;
+  const openClawBridgeEnabled = isOpenClawRequest
+    ? shouldUseOpenClawBridge(openClawBridgeProvider, env)
+    : false;
+  const requestedOpenClawAgentId = isOpenClawRequest
+    ? normalizeOpenClawAgentId(openClawTarget?.model)
+    : "";
+  const runtimeResolution = isOpenClawRequest
+    ? await resolveOpenClawRuntimeForProject(env, {
+      projectId: conversation.project_id || projectId || camelProjectId || "default",
+      runtimeId: runtimeId || camelRuntimeId || "",
+      agentId: agentId || camelAgentId || "",
+      modelAgentId: requestedOpenClawAgentId,
+      providerId: openClawTarget?.provider?.id || provider,
+      executionMode: openClawBridgeEnabled ? "bridge" : "legacy"
+    })
+    : null;
+  if (isOpenClawRequest && runtimeResolution && !runtimeResolution.ok) {
+    return new Response(JSON.stringify({
+      ok: false,
+      error: runtimeResolution.error || "runtime_resolution_failed",
+      message: runtimeResolution.message || "OpenClaw runtime resolution failed",
+      project_id: runtimeResolution.project_id || conversation.project_id || "default",
+      runtime_id: runtimeResolution.runtime_id || "",
+      runtimes: runtimeResolution.runtimes || []
+    }), {
+      status: runtimeResolution.error === "runtime_required" ? 409 : 400,
+      headers: {
+        ...corsHeaders(),
+        "X-Conversation-Id": conversation.id,
+        "Content-Type": "application/json; charset=utf-8"
+      }
+    });
+  }
+  const resolvedOpenClawBridgeEnabled = isOpenClawRequest
+    ? runtimeResolution?.execution_mode === "bridge"
+    : false;
   const openClawTask = isOpenClawRequest
     ? await createOpenClawTask(env, {
       conversationId: conversation.id,
+      projectId: runtimeResolution?.project_id || conversation.project_id || "",
+      runtimeId: runtimeResolution?.runtime_id || "",
+      runtimeSlug: runtimeResolution?.runtime_slug || "",
+      agentId: runtimeResolution?.agent_id || requestedOpenClawAgentId,
+      executionMode: runtimeResolution?.execution_mode || (openClawBridgeEnabled ? "bridge" : "legacy"),
+      runtimeResolutionSource: runtimeResolution?.resolution_source || "",
+      runtimeResolutionWarnings: runtimeResolution?.warnings || [],
       provider: openClawTarget?.provider?.id || provider,
       model: openClawTarget?.model?.id || model || DEFAULT_TEXT_MODEL,
       upstreamModelName: openClawTarget?.model?.modelName || openClawTarget?.model?.upstreamModelName || "",
@@ -4865,19 +5058,19 @@ export async function handleChat(request, env, ctx) {
   }
 
   if (isOpenClawRequest) {
-    const openClawBridgeProvider = openClawBridgeProviderConfig(openClawTarget?.provider);
-    const openClawBridgeEnabled = shouldUseOpenClawBridge(openClawBridgeProvider, env);
     logOpenClawAsync("mode-check", {
       enabled: isOpenClawAsyncModeEnabled(env),
-      bridgeEnabled: openClawBridgeEnabled,
+      bridgeEnabled: resolvedOpenClawBridgeEnabled,
+      legacyBridgeModeRequested: openClawBridgeEnabled,
+      runtimeResolutionSource: runtimeResolution?.resolution_source || "",
       provider,
       model: model || DEFAULT_TEXT_MODEL,
       localTaskId: openClawTask?.id || "",
       conversationId: conversation.id
     });
 
-    if (openClawBridgeEnabled) {
-      const openClawAgentId = normalizeOpenClawAgentId(openClawTarget?.model);
+    if (resolvedOpenClawBridgeEnabled) {
+      const openClawAgentId = runtimeResolution?.agent_id || requestedOpenClawAgentId;
       const openClawSessionKey = "agent:" + openClawAgentId + ":" + conversation.id;
       const bridgeResult = await submitOpenClawBridgeTask({
         env,

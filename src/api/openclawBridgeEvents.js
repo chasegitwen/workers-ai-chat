@@ -9,6 +9,16 @@ function taskKey(taskId) {
   return String(taskId || "").trim();
 }
 
+function scopedTaskKey(projectId, runtimeId, taskId) {
+  const task = taskKey(taskId);
+  const project = taskKey(projectId);
+  const runtime = taskKey(runtimeId);
+  if (!project && !runtime) {
+    return task;
+  }
+  return [project, runtime, task].join(":");
+}
+
 function safeJsonParse(text, fallback = {}) {
   try {
     return JSON.parse(text || "");
@@ -55,6 +65,8 @@ export function serializeBridgeEvent(rowOrPayload) {
   const data = {
     event_id: String(rowOrPayload?.event_id || payload?.event_id || ""),
     task_id: String(rowOrPayload?.task_id || payload?.task_id || ""),
+    project_id: String(rowOrPayload?.project_id || payload?.project_id || ""),
+    runtime_id: String(rowOrPayload?.runtime_id || payload?.runtime_id || ""),
     conversation_id: String(rowOrPayload?.conversation_id || payload?.conversation_id || ""),
     assistant_message_id: String(rowOrPayload?.assistant_message_id || payload?.assistant_message_id || ""),
     event_type: eventType,
@@ -82,8 +94,8 @@ export function encodeBridgeSseEvent(event, data) {
     "data: " + JSON.stringify(data) + "\n\n";
 }
 
-function subscribeBridgeEvent(taskId, controller) {
-  const key = taskKey(taskId);
+function subscribeBridgeEvent(projectId, runtimeId, taskId, controller) {
+  const key = scopedTaskKey(projectId, runtimeId, taskId);
   if (!bridgeEventClients.has(key)) {
     bridgeEventClients.set(key, new Set());
   }
@@ -102,7 +114,7 @@ function subscribeBridgeEvent(taskId, controller) {
 
 export function broadcastOpenClawBridgeEvent(payload) {
   const data = serializeBridgeEvent(payload);
-  const key = taskKey(data.task_id);
+  const key = scopedTaskKey(data.project_id, data.runtime_id, data.task_id);
   const clients = bridgeEventClients.get(key);
   if (!clients?.size || !data.event_id) {
     return 0;
@@ -128,13 +140,23 @@ async function readTaskForEventStream(env, taskId) {
     return null;
   }
   return env.DB.prepare(
-    `SELECT id, conversation_id, bridge_task_id, remote_task_id
+    `SELECT id, conversation_id, project_id, runtime_id, bridge_task_id, remote_task_id
       FROM openclaw_tasks
       WHERE id = ?
         OR bridge_task_id = ?
         OR remote_task_id = ?
       LIMIT 1`
   ).bind(taskId, taskId, taskId).first();
+}
+
+function scopedValueMatches(requested, actual) {
+  const left = taskKey(requested);
+  const right = taskKey(actual);
+  return !left || !right || left === right;
+}
+
+function warnBridgeEventCompatibility(event, detail = {}) {
+  console.warn("[openclaw-bridge-events-compat]", event, detail);
 }
 
 async function readBridgeEventHistory(env, task) {
@@ -146,18 +168,35 @@ async function readBridgeEventHistory(env, task) {
   if (!ids.length) {
     return [];
   }
+  const projectId = taskKey(task.project_id);
+  const runtimeId = taskKey(task.runtime_id);
+  if (!projectId || !runtimeId) {
+    warnBridgeEventCompatibility("legacy_unscoped_sse_replay", {
+      task_id: task.id || "",
+      bridge_task_id: task.bridge_task_id || "",
+      remote_task_id: task.remote_task_id || "",
+      project_id: projectId,
+      runtime_id: runtimeId
+    });
+  }
   const placeholders = ids.map(() => "?").join(", ");
+  const scopeSql = projectId || runtimeId
+    ? `AND COALESCE(project_id, '') = ?
+       AND COALESCE(runtime_id, '') = ?`
+    : "";
+  const scopeBindings = projectId || runtimeId ? [projectId, runtimeId] : [];
   const result = await env.DB.prepare(
     `SELECT *
       FROM bridge_events
       WHERE applied = 1
         AND task_id IN (${placeholders})
+        ${scopeSql}
       ORDER BY
         CASE WHEN sequence IS NULL THEN 1 ELSE 0 END,
         sequence ASC,
         received_at ASC
       LIMIT ?`
-  ).bind(...ids, HISTORY_LIMIT).all();
+  ).bind(...ids, ...scopeBindings, HISTORY_LIMIT).all();
   return result?.results || [];
 }
 
@@ -177,6 +216,21 @@ export async function handleOpenClawBridgeEventStream(request, env, url) {
   const task = await readTaskForEventStream(env, requestedTaskId);
   if (!task) {
     return jsonResponse({ ok: false, error: "OpenClaw task not found" }, 404);
+  }
+  const requestedProjectId = taskKey(url.searchParams.get("project_id") || url.searchParams.get("projectId"));
+  const requestedRuntimeId = taskKey(url.searchParams.get("runtime_id") || url.searchParams.get("runtimeId"));
+  if (!scopedValueMatches(requestedProjectId, task.project_id)) {
+    return jsonResponse({ ok: false, error: "project_id_mismatch" }, 403);
+  }
+  if (!scopedValueMatches(requestedRuntimeId, task.runtime_id)) {
+    return jsonResponse({ ok: false, error: "runtime_id_mismatch" }, 403);
+  }
+  if (!taskKey(task.project_id) || !taskKey(task.runtime_id)) {
+    warnBridgeEventCompatibility("legacy_unscoped_sse_subscription", {
+      requested_task_id: requestedTaskId,
+      project_id: task.project_id || "",
+      runtime_id: task.runtime_id || ""
+    });
   }
 
   const streamTaskIds = [...new Set([
@@ -206,7 +260,7 @@ export async function handleOpenClawBridgeEventStream(request, env, url) {
         for (const row of history) {
           controller.enqueue(encoder.encode(encodeBridgeSseEvent("bridge_event", serializeBridgeEvent(row))));
         }
-        const unsubscribeFns = streamTaskIds.map(id => subscribeBridgeEvent(id, controller));
+        const unsubscribeFns = streamTaskIds.map(id => subscribeBridgeEvent(task.project_id || "", task.runtime_id || "", id, controller));
         unsubscribeAll = () => {
           unsubscribeFns.forEach(fn => fn());
         };

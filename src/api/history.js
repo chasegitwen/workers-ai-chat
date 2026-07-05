@@ -1,4 +1,5 @@
 import { jsonResponse } from "../utils/response.js";
+import { DEFAULT_PROJECT_ID, ensureDefaultProject, resolveProjectId } from "./projects.js";
 
 export function createId() {
   return crypto.randomUUID();
@@ -46,31 +47,39 @@ export function titleFromMessage(content) {
   return clean.slice(0, limit) + "...";
 }
 
-export async function createConversation(db, title = "New Chat") {
+function requestProjectId(data, url) {
+  return data?.project_id || data?.projectId || url?.searchParams?.get("project_id") || url?.searchParams?.get("projectId") || "";
+}
+
+export async function createConversation(db, title = "New Chat", projectId = "") {
   const id = createId();
   const timestamp = now();
+  const resolvedProjectId = await resolveProjectId(db, projectId);
 
   await db.prepare(
-    "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)"
-  ).bind(id, title, timestamp, timestamp).run();
+    "INSERT INTO conversations (id, title, created_at, updated_at, project_id) VALUES (?, ?, ?, ?, ?)"
+  ).bind(id, title, timestamp, timestamp, resolvedProjectId).run();
 
   return {
     id,
     title,
+    project_id: resolvedProjectId,
     created_at: timestamp,
     updated_at: timestamp
   };
 }
 
-export async function ensureConversation(db, conversationId, title) {
+export async function ensureConversation(db, conversationId, title, projectId = "") {
   const nextTitle = cleanTitle(title) || "New Chat";
+  const resolvedProjectId = await resolveProjectId(db, projectId);
 
   if (conversationId) {
     const existing = await db.prepare(
-      "SELECT id, title, created_at, updated_at FROM conversations WHERE id = ?"
+      "SELECT id, title, project_id, created_at, updated_at FROM conversations WHERE id = ?"
     ).bind(conversationId).first();
 
     if (existing) {
+      const existingProjectId = existing.project_id || DEFAULT_PROJECT_ID;
       if (isDefaultTitle(existing.title) && !isDefaultTitle(nextTitle)) {
         await db.prepare(
           "UPDATE conversations SET title = ? WHERE id = ?"
@@ -78,15 +87,19 @@ export async function ensureConversation(db, conversationId, title) {
 
         return {
           ...existing,
+          project_id: existingProjectId,
           title: nextTitle
         };
       }
 
-      return existing;
+      return {
+        ...existing,
+        project_id: existingProjectId
+      };
     }
   }
 
-  return createConversation(db, nextTitle);
+  return createConversation(db, nextTitle, resolvedProjectId);
 }
 
 export async function saveMessage(db, conversationId, role, content) {
@@ -137,10 +150,13 @@ export async function handleHistory(request, env, url) {
   }
 
   if (request.method === "GET" && url.pathname === "/api/conversations") {
+    await ensureDefaultProject(env.DB);
+    const projectId = requestProjectId(null, url) || DEFAULT_PROJECT_ID;
     const result = await env.DB.prepare(
       `SELECT
          c.id,
          c.title,
+         COALESCE(c.project_id, ?) AS project_id,
          c.created_at,
          c.updated_at,
          COUNT(m.id) AS message_count,
@@ -153,13 +169,15 @@ export async function handleHistory(request, env, url) {
          ) AS last_message_preview
        FROM conversations c
        LEFT JOIN messages m ON m.conversation_id = c.id
-       GROUP BY c.id, c.title, c.created_at, c.updated_at
+       WHERE COALESCE(c.project_id, ?) = ?
+       GROUP BY c.id, c.title, c.project_id, c.created_at, c.updated_at
        ORDER BY c.updated_at DESC
        LIMIT 50`
-    ).all();
+    ).bind(DEFAULT_PROJECT_ID, DEFAULT_PROJECT_ID, projectId).all();
 
     return jsonResponse({
       ok: true,
+      project_id: projectId,
       conversations: (result.results || []).map(item => ({
         ...item,
         last_message_preview: item.last_message_preview
@@ -171,7 +189,7 @@ export async function handleHistory(request, env, url) {
 
   if (request.method === "POST" && url.pathname === "/api/conversations") {
     const data = await request.json().catch(() => ({}));
-    const conversation = await createConversation(env.DB, data.title || "New Chat");
+    const conversation = await createConversation(env.DB, data.title || "New Chat", requestProjectId(data, url));
 
     return jsonResponse({
       ok: true,

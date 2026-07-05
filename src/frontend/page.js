@@ -441,6 +441,169 @@ body.authenticated .loginScreen{
   flex:0 0 auto;
 }
 
+.projectPanel{
+  flex:0 0 auto;
+  margin-bottom:12px;
+  padding-bottom:12px;
+  border-bottom:1px solid var(--border);
+}
+
+.projectLabel{
+  color:var(--muted);
+  font-size:12px;
+  margin-bottom:6px;
+}
+
+.projectSelect{
+  width:100%;
+  border:1px solid var(--border);
+  background:transparent;
+  color:var(--text);
+  border-radius:12px;
+  padding:9px 10px;
+  font-size:13px;
+}
+
+.projectActions{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:6px;
+  margin-top:8px;
+}
+
+.projectActionBtn{
+  border:1px solid var(--border);
+  background:transparent;
+  color:var(--text);
+  border-radius:10px;
+  min-height:30px;
+  padding:4px 6px;
+  font-size:12px;
+  cursor:pointer;
+}
+
+.projectActionBtn:hover{
+  border-color:var(--primary);
+  color:var(--primary);
+}
+
+.projectStatus{
+  min-height:16px;
+  margin-top:6px;
+  color:var(--muted);
+  font-size:11px;
+  line-height:1.35;
+}
+
+.projectMeta{
+  margin-top:8px;
+  padding:8px;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:rgba(37,99,235,.04);
+}
+
+.projectMeta strong,
+.projectRuntimeName{
+  display:block;
+  color:var(--text);
+  font-size:12px;
+  line-height:1.3;
+}
+
+.projectMeta span,
+.projectRuntimeMeta,
+.projectRuntimeWarning{
+  display:block;
+  margin-top:3px;
+  color:var(--muted);
+  font-size:11px;
+  line-height:1.35;
+}
+
+.projectRuntimeList{
+  display:flex;
+  flex-direction:column;
+  gap:7px;
+  margin-top:8px;
+}
+
+.projectRuntimeItem{
+  border:1px solid var(--border);
+  border-radius:8px;
+  padding:8px;
+  background:rgba(255,255,255,.45);
+}
+
+body.dark .projectRuntimeItem{
+  background:rgba(15,23,42,.36);
+}
+
+.projectRuntimeItem.default{
+  border-color:var(--primary);
+}
+
+.projectRuntimeBadges,
+.projectRuntimeActions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:4px;
+  margin-top:6px;
+}
+
+.projectBadge{
+  border:1px solid var(--border);
+  border-radius:999px;
+  padding:2px 6px;
+  color:var(--muted);
+  font-size:10px;
+  line-height:1.35;
+}
+
+.projectBadge.ok{
+  border-color:rgba(22,163,74,.35);
+  color:#15803d;
+}
+
+.projectBadge.warn{
+  border-color:rgba(217,119,6,.4);
+  color:#b45309;
+}
+
+.projectBadge.danger{
+  border-color:rgba(220,38,38,.35);
+  color:#dc2626;
+}
+
+.projectRuntimeWarning{
+  color:#b45309;
+}
+
+.projectRuntimeBtn,
+.projectRuntimeAgent{
+  border:1px solid var(--border);
+  background:transparent;
+  color:var(--text);
+  border-radius:8px;
+  min-height:26px;
+  padding:3px 7px;
+  font-size:11px;
+}
+
+.projectRuntimeBtn{
+  cursor:pointer;
+}
+
+.projectRuntimeBtn:disabled,
+.projectRuntimeAgent:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+}
+
+.projectRuntimeAgent{
+  max-width:100%;
+}
+
 .historyList{
   display:flex;
   flex-direction:column;
@@ -2202,6 +2365,17 @@ body.dark .toolErrorNotice{
 
     <aside class="sidebar">
 
+      <div class="projectPanel">
+        <div class="projectLabel">Project</div>
+        <select id="projectSelect" class="projectSelect" aria-label="Project"></select>
+        <div class="projectActions">
+          <button id="createProjectBtn" class="projectActionBtn" type="button">New</button>
+          <button id="renameProjectBtn" class="projectActionBtn" type="button">Rename</button>
+          <button id="archiveProjectBtn" class="projectActionBtn" type="button">Archive</button>
+        </div>
+        <div id="projectStatus" class="projectStatus"></div>
+      </div>
+
       <button id="newChatBtn" class="newChatBtn" type="button">
         New Chat
       </button>
@@ -2417,6 +2591,11 @@ const loginBtn = document.getElementById("loginBtn");
 const loginError = document.getElementById("loginError");
 const logoutBtn = document.getElementById("logoutBtn");
 const newChatBtn = document.getElementById("newChatBtn");
+const projectSelect = document.getElementById("projectSelect");
+const createProjectBtn = document.getElementById("createProjectBtn");
+const renameProjectBtn = document.getElementById("renameProjectBtn");
+const archiveProjectBtn = document.getElementById("archiveProjectBtn");
+const projectStatus = document.getElementById("projectStatus");
 const conversationList = document.getElementById("conversationList");
 const libraryPanel = document.getElementById("libraryPanel");
 const libraryToggle = document.getElementById("libraryToggle");
@@ -2454,6 +2633,11 @@ let pendingToolCall = null;
 let searchResults = document.getElementById("searchResults");
 let currentConversationId = null;
 let conversationsCache = [];
+let projectsCache = [];
+let projectOpenClawRuntimes = [];
+let activeProjectId = localStorage.getItem("selected_project_id") || "default";
+const DEFAULT_PROJECT_ID = "default";
+const SELECTED_PROJECT_STORAGE_KEY = "selected_project_id";
 const WELCOME_HIDDEN_KEY = "welcome_hidden";
 syncWelcomeVisibility();
 
@@ -2537,6 +2721,7 @@ async function checkAuth(){
     if(res.ok && data.ok && data.authenticated){
       showApp();
       await loadModels();
+      await loadProjects();
       await loadConversations();
       await loadFilesLibrary();
       input.focus();
@@ -2575,6 +2760,7 @@ async function login(event){
     loginPassword.value = "";
     showApp();
     await loadModels();
+    await loadProjects();
     await loadConversations();
     await loadFilesLibrary();
     input.focus();
@@ -7124,6 +7310,8 @@ function renderOpenClawReconnectBanner(task){
     progress !== null ? "<br />progress: " + progress + "%" : "",
     remoteMessage ? "<br />" + escapeHtml(remoteMessage) : "",
     task.model ? "<br />model: " + escapeHtml(task.upstreamModelName || task.model) : "",
+    task.projectId || task.project_id ? "<br />project: " + escapeHtml(task.projectId || task.project_id) : "",
+    task.runtimeId || task.runtime_id ? "<br />runtime: " + escapeHtml(task.runtimeId || task.runtime_id) : "",
     "</div>",
     "<div class='openClawTaskActions'>",
     "<button type='button' data-openclaw-task-action='reconnect'>Reconnect</button>",
@@ -7221,6 +7409,8 @@ function renderOpenClawTaskBanner(){
     escapeHtml(status),
     progress !== null ? "<br />progress: " + progress + "%" : "",
     remoteMessage ? "<br />" + escapeHtml(remoteMessage) : "",
+    task.projectId || task.project_id ? "<br />project: " + escapeHtml(task.projectId || task.project_id) : "",
+    task.runtimeId || task.runtime_id ? "<br />runtime: " + escapeHtml(task.runtimeId || task.runtime_id) : "",
     modelLabel ? "<br />模型：" + escapeHtml(modelLabel) : "",
     started ? "<br />开始：" + escapeHtml(started) : "",
     "<br />" + escapeHtml(openClawTaskBannerDisclaimer(task)),
@@ -7528,13 +7718,29 @@ async function finishOpenClawBridgeEventTask(taskId, element, event){
   }
 }
 
-function startOpenClawBridgeEventStream(taskId, element){
+function openClawTaskScopeParams(taskId, task){
+  const sourceTask = task || openClawTasks.find(item => item.id === taskId || item.bridgeTaskId === taskId || item.bridge_task_id === taskId || item.remoteTaskId === taskId || item.remote_task_id === taskId) || activeOpenClawTask || {};
+  const params = new URLSearchParams();
+  params.set("task_id", taskId);
+  const projectId = sourceTask.projectId || sourceTask.project_id || activeProjectId || "";
+  const runtimeId = sourceTask.runtimeId || sourceTask.runtime_id || "";
+  if(projectId){
+    params.set("project_id", projectId);
+  }
+  if(runtimeId){
+    params.set("runtime_id", runtimeId);
+  }
+  return params;
+}
+
+function startOpenClawBridgeEventStream(taskId, element, task){
   if(!taskId || typeof EventSource === "undefined"){
     return false;
   }
   stopOpenClawBridgeEventStream();
   const state = createOpenClawBridgeEventState();
-  const source = new EventSource("/api/openclaw/bridge/events/stream?task_id=" + encodeURIComponent(taskId), {
+  const params = openClawTaskScopeParams(taskId, task);
+  const source = new EventSource("/api/openclaw/bridge/events/stream?" + params.toString(), {
     withCredentials:true
   });
   openClawBridgeEventSource = source;
@@ -7580,7 +7786,10 @@ function startOpenClawBridgeEventStream(taskId, element){
 }
 
 async function fetchOpenClawTaskStatus(taskId){
-  const res = await fetch("/api/openclaw/tasks/" + encodeURIComponent(taskId) + "/status", {
+  const params = openClawTaskScopeParams(taskId);
+  params.delete("task_id");
+  const query = params.toString();
+  const res = await fetch("/api/openclaw/tasks/" + encodeURIComponent(taskId) + "/status" + (query ? "?" + query : ""), {
     credentials:"include"
   });
   const data = await res.json();
@@ -7744,6 +7953,8 @@ function showOpenClawTaskRecord(task){
     "task id: " + (task.id || ""),
     openClawTaskHasRemoteId(task) ? "remote_task_id: " + (task.remoteTaskId || task.remote_task_id || "") : "",
     "status: " + (task.status || ""),
+    "project_id: " + (task.projectId || task.project_id || ""),
+    "runtime_id: " + (task.runtimeId || task.runtime_id || ""),
     "provider: " + (task.provider || ""),
     "model: " + (task.model || ""),
     "upstreamModelName: " + (task.upstreamModelName || ""),
@@ -8018,9 +8229,408 @@ function enterBlankChat(){
   setActiveConversation();
 }
 
+function activeProject(){
+  return projectsCache.find(project => project.id === activeProjectId) || projectsCache.find(project => project.id === DEFAULT_PROJECT_ID) || projectsCache[0] || null;
+}
+
+function setProjectStatus(message){
+  if(projectStatus){
+    projectStatus.innerHTML = message || "";
+  }
+}
+
+function projectName(project){
+  return project?.name || project?.id || "Default Project";
+}
+
+function persistActiveProject(projectId){
+  activeProjectId = projectId || DEFAULT_PROJECT_ID;
+  localStorage.setItem(SELECTED_PROJECT_STORAGE_KEY, activeProjectId);
+}
+
+function renderProjectSelector(){
+  projectSelect.innerHTML = "";
+  projectsCache.forEach(project => {
+    const option = document.createElement("option");
+    option.value = project.id;
+    option.textContent = projectName(project);
+    projectSelect.appendChild(option);
+  });
+  projectSelect.value = activeProjectId;
+  const project = activeProject();
+  renameProjectBtn.disabled = !project;
+  archiveProjectBtn.disabled = !project || project.id === DEFAULT_PROJECT_ID || Boolean(project.is_default);
+}
+
+function runtimeCapabilityLabel(binding){
+  const runtime = binding?.runtime || {};
+  const capabilities = runtime.capabilities || {};
+  const flags = [];
+  if(capabilities.bridge_callback){
+    flags.push("Bridge");
+  }
+  if(capabilities.sse_events){
+    flags.push("SSE");
+  }
+  if(capabilities.remote_console){
+    flags.push("Console");
+  }
+  if(capabilities.legacy_only){
+    flags.push("Legacy only");
+  }
+  return flags.length ? flags.join(" / ") : "No verified Bridge capabilities";
+}
+
+function runtimeAgents(binding){
+  const runtimeAgentsList = Array.isArray(binding?.runtime?.agents) ? binding.runtime.agents : [];
+  const allowed = Array.isArray(binding?.allowed_agents) ? binding.allowed_agents : [];
+  if(allowed.length){
+    const allowedIds = new Set(allowed);
+    const merged = allowed.map(agentId => {
+      const match = runtimeAgentsList.find(agent => (agent.agent_id || agent.id) === agentId);
+      return match || { agent_id:agentId, display_name:agentId };
+    });
+    runtimeAgentsList.forEach(agent => {
+      const agentId = agent.agent_id || agent.id;
+      if(agentId && !allowedIds.has(agentId)){
+        merged.push(agent);
+      }
+    });
+    return merged;
+  }
+  return runtimeAgentsList;
+}
+
+function runtimeCanBeBridgeDefault(binding){
+  const runtime = binding?.runtime || {};
+  return Boolean(binding?.is_enabled)
+    && Boolean(runtime.is_enabled)
+    && runtime.status === "verified"
+    && runtime.bridge_mode === "bridge"
+    && runtime.capabilities?.bridge_callback === true;
+}
+
+function runtimeWarnings(binding){
+  const runtime = binding?.runtime || {};
+  const capabilities = runtime.capabilities || {};
+  const warnings = [];
+  if(!binding?.is_enabled || !runtime.is_enabled){
+    warnings.push("Runtime is disabled for this project or globally.");
+  }
+  if(runtime.status !== "verified"){
+    warnings.push("Runtime is not verified.");
+  }
+  if(runtime.bridge_mode !== "bridge" || !capabilities.bridge_callback){
+    warnings.push("Bridge callback mode is unsupported.");
+  }
+  if(!capabilities.sse_events){
+    warnings.push("SSE events are unsupported.");
+  }
+  return warnings;
+}
+
+function renderProjectMeta(project){
+  const status = project?.is_archived ? "archived" : (project?.is_default ? "default" : "active");
+  const slug = project?.slug || project?.id || DEFAULT_PROJECT_ID;
+  return [
+    "<div class='projectMeta'>",
+    "<strong>" + escapeHtml(projectName(project)) + "</strong>",
+    "<span>slug: " + escapeHtml(slug) + "</span>",
+    "<span>status: " + escapeHtml(status) + "</span>",
+    "</div>"
+  ].join("");
+}
+
+function renderRuntimeBadges(binding){
+  const runtime = binding?.runtime || {};
+  const badges = [];
+  badges.push("<span class='projectBadge " + (binding?.is_default ? "ok" : "") + "'>" + (binding?.is_default ? "Default" : "Bound") + "</span>");
+  badges.push("<span class='projectBadge " + (binding?.is_enabled && runtime.is_enabled ? "ok" : "danger") + "'>" + (binding?.is_enabled && runtime.is_enabled ? "Enabled" : "Disabled") + "</span>");
+  badges.push("<span class='projectBadge " + (runtime.status === "verified" ? "ok" : "warn") + "'>" + escapeHtml(runtime.status || "unverified") + "</span>");
+  badges.push("<span class='projectBadge " + (runtimeCanBeBridgeDefault(binding) ? "ok" : "warn") + "'>" + escapeHtml(runtimeCapabilityLabel(binding)) + "</span>");
+  return "<div class='projectRuntimeBadges'>" + badges.join("") + "</div>";
+}
+
+function renderRuntimeAgentControl(binding){
+  const agents = runtimeAgents(binding);
+  if(!agents.length){
+    return "<span class='projectRuntimeMeta'>default agent: " + escapeHtml(binding?.default_agent_id || "not configured") + "</span>";
+  }
+  const selected = binding?.default_agent_id || agents[0]?.agent_id || agents[0]?.id || "";
+  return [
+    "<select class='projectRuntimeAgent' data-runtime-agent='" + escapeHtml(binding.runtime_id) + "' aria-label='Default agent for " + escapeHtml(binding.runtime?.display_name || binding.runtime_id) + "'>",
+    agents.map(agent => {
+      const agentId = agent.agent_id || agent.id || "";
+      const label = agent.display_name || agent.name || agentId;
+      return "<option value='" + escapeHtml(agentId) + "'" + (agentId === selected ? " selected" : "") + ">" + escapeHtml(label) + "</option>";
+    }).join(""),
+    "</select>"
+  ].join("");
+}
+
+function renderRuntimeActions(binding){
+  const canDefault = runtimeCanBeBridgeDefault(binding);
+  const defaultTitle = canDefault
+    ? "Set as project default runtime"
+    : "Disabled, unverified, or Bridge-unsupported runtimes cannot become the Bridge default";
+  return [
+    "<div class='projectRuntimeActions'>",
+    "<button class='projectRuntimeBtn' type='button' data-runtime-default='" + escapeHtml(binding.runtime_id) + "' " + (binding.is_default || !canDefault ? "disabled" : "") + " title='" + escapeHtml(defaultTitle) + "'>Set Default</button>",
+    "<button class='projectRuntimeBtn' type='button' data-runtime-toggle='" + escapeHtml(binding.runtime_id) + "'>" + (binding.is_enabled ? "Disable" : "Enable") + "</button>",
+    renderRuntimeAgentControl(binding),
+    "</div>"
+  ].join("");
+}
+
+function renderRuntimeBinding(binding){
+  const runtime = binding.runtime || {};
+  const warnings = runtimeWarnings(binding);
+  return [
+    "<div class='projectRuntimeItem" + (binding.is_default ? " default" : "") + "' data-runtime-id='" + escapeHtml(binding.runtime_id) + "'>",
+    "<strong class='projectRuntimeName'>" + escapeHtml(runtime.display_name || binding.runtime_id) + "</strong>",
+    "<span class='projectRuntimeMeta'>runtime_id: " + escapeHtml(binding.runtime_id) + "</span>",
+    "<span class='projectRuntimeMeta'>provider_id: " + escapeHtml(runtime.provider_id || "not configured") + "</span>",
+    "<span class='projectRuntimeMeta'>mode: " + escapeHtml(runtime.bridge_mode || "unknown") + " / agent: " + escapeHtml(binding.default_agent_id || "not configured") + "</span>",
+    renderRuntimeBadges(binding),
+    warnings.map(warning => "<span class='projectRuntimeWarning'>" + escapeHtml(warning) + "</span>").join(""),
+    renderRuntimeActions(binding),
+    "</div>"
+  ].join("");
+}
+
+function renderProjectRuntimeStatus(){
+  const project = activeProject();
+  const sections = [renderProjectMeta(project)];
+  if(!projectOpenClawRuntimes.length){
+    sections.push("<div class='projectRuntimeList'><div class='projectRuntimeItem'><span class='projectRuntimeWarning'>No OpenClaw runtime bound.</span></div></div>");
+    setProjectStatus(sections.join(""));
+    return;
+  }
+  sections.push("<div class='projectRuntimeList'>" + projectOpenClawRuntimes.map(renderRuntimeBinding).join("") + "</div>");
+  setProjectStatus(sections.join(""));
+}
+
+async function loadProjectOpenClawRuntimes(){
+  try{
+    const res = await fetch("/api/projects/" + encodeURIComponent(activeProjectId || DEFAULT_PROJECT_ID) + "/openclaw-runtimes");
+    const data = await res.json();
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "load project runtimes failed");
+    }
+    projectOpenClawRuntimes = Array.isArray(data.runtimes) ? data.runtimes : [];
+    renderProjectRuntimeStatus();
+  }catch(err){
+    console.warn("load project OpenClaw runtimes failed", err);
+    projectOpenClawRuntimes = [];
+    setProjectStatus("OpenClaw runtimes unavailable.");
+  }
+}
+
+async function updateProjectRuntimeBinding(runtimeId, patch){
+  const res = await fetch(
+    "/api/projects/" + encodeURIComponent(activeProjectId || DEFAULT_PROJECT_ID) + "/openclaw-runtimes/" + encodeURIComponent(runtimeId),
+    {
+      method:"PATCH",
+      headers:{
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify(patch || {})
+    }
+  );
+  const data = await res.json();
+  if(!res.ok || !data.ok){
+    throw new Error(data.message || data.error || "update runtime binding failed");
+  }
+  projectOpenClawRuntimes = projectOpenClawRuntimes.map(binding => binding.runtime_id === runtimeId ? data.binding : binding);
+  renderProjectRuntimeStatus();
+  return data.binding;
+}
+
+async function setDefaultProjectRuntime(runtimeId){
+  const binding = projectOpenClawRuntimes.find(item => item.runtime_id === runtimeId);
+  if(!binding){
+    return;
+  }
+  if(!runtimeCanBeBridgeDefault(binding)){
+    setProjectStatus(renderProjectMeta(activeProject()) + "<div class='projectRuntimeList'>" + projectOpenClawRuntimes.map(renderRuntimeBinding).join("") + "</div><span class='projectRuntimeWarning'>Cannot set disabled, unverified, or Bridge-unsupported runtime as default.</span>");
+    return;
+  }
+  try{
+    await updateProjectRuntimeBinding(runtimeId, {
+      is_default:true,
+      is_enabled:true
+    });
+    await loadProjectOpenClawRuntimes();
+  }catch(err){
+    setProjectStatus(renderProjectMeta(activeProject()) + "<span class='projectRuntimeWarning'>Set default failed: " + escapeHtml(err.message || String(err)) + "</span>");
+  }
+}
+
+async function toggleProjectRuntimeBinding(runtimeId){
+  const binding = projectOpenClawRuntimes.find(item => item.runtime_id === runtimeId);
+  if(!binding){
+    return;
+  }
+  try{
+    await updateProjectRuntimeBinding(runtimeId, {
+      is_enabled:!binding.is_enabled,
+      is_default:binding.is_default && !binding.is_enabled
+    });
+    await loadProjectOpenClawRuntimes();
+  }catch(err){
+    setProjectStatus(renderProjectMeta(activeProject()) + "<span class='projectRuntimeWarning'>Runtime update failed: " + escapeHtml(err.message || String(err)) + "</span>");
+  }
+}
+
+async function changeDefaultRuntimeAgent(runtimeId, agentId){
+  try{
+    await updateProjectRuntimeBinding(runtimeId, {
+      default_agent_id:agentId
+    });
+    await loadProjectOpenClawRuntimes();
+  }catch(err){
+    setProjectStatus(renderProjectMeta(activeProject()) + "<span class='projectRuntimeWarning'>Agent update failed: " + escapeHtml(err.message || String(err)) + "</span>");
+  }
+}
+
+async function loadProjects(){
+  try{
+    const res = await fetch("/api/projects");
+    const data = await res.json();
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "load projects failed");
+    }
+    projectsCache = Array.isArray(data.projects) ? data.projects : [];
+    const activeExists = projectsCache.some(project => project.id === activeProjectId);
+    if(!activeExists){
+      persistActiveProject(projectsCache.find(project => project.id === DEFAULT_PROJECT_ID)?.id || projectsCache[0]?.id || DEFAULT_PROJECT_ID);
+    }
+    renderProjectSelector();
+    await loadProjectOpenClawRuntimes();
+    return projectsCache;
+  }catch(err){
+    console.warn("load projects failed", err);
+    if(!projectsCache.length){
+      projectsCache = [{
+        id:DEFAULT_PROJECT_ID,
+        name:"Default Project",
+        is_default:true,
+        is_archived:false
+      }];
+      persistActiveProject(DEFAULT_PROJECT_ID);
+      renderProjectSelector();
+    }
+    setProjectStatus("Project list unavailable; using Default Project.");
+    return projectsCache;
+  }
+}
+
+async function switchProject(projectId){
+  const nextProjectId = projectId || DEFAULT_PROJECT_ID;
+  if(nextProjectId === activeProjectId){
+    return;
+  }
+  persistActiveProject(nextProjectId);
+  renderProjectSelector();
+  enterBlankChat();
+  await loadProjectOpenClawRuntimes();
+  await loadConversations();
+}
+
+async function createProject(){
+  const name = prompt("Project name");
+  if(!name || !name.trim()){
+    return;
+  }
+  try{
+    const res = await fetch("/api/projects", {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify({
+        name:name.trim()
+      })
+    });
+    const data = await res.json();
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "create project failed");
+    }
+    await loadProjects();
+    persistActiveProject(data.project?.id || activeProjectId);
+    renderProjectSelector();
+    enterBlankChat();
+    await loadProjectOpenClawRuntimes();
+    await loadConversations();
+    setProjectStatus("Project created.");
+  }catch(err){
+    setProjectStatus("Create failed: " + (err.message || String(err)));
+  }
+}
+
+async function renameProject(){
+  const project = activeProject();
+  if(!project){
+    return;
+  }
+  const name = prompt("Project name", projectName(project));
+  if(!name || !name.trim()){
+    return;
+  }
+  try{
+    const res = await fetch("/api/projects/" + encodeURIComponent(project.id), {
+      method:"PATCH",
+      headers:{
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify({
+        name:name.trim()
+      })
+    });
+    const data = await res.json();
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "rename project failed");
+    }
+    await loadProjects();
+    setProjectStatus("Project renamed.");
+  }catch(err){
+    setProjectStatus("Rename failed: " + (err.message || String(err)));
+  }
+}
+
+async function archiveProject(){
+  const project = activeProject();
+  if(!project || project.id === DEFAULT_PROJECT_ID || project.is_default){
+    return;
+  }
+  if(!confirm("Archive project \"" + projectName(project) + "\"?")){
+    return;
+  }
+  try{
+    const res = await fetch("/api/projects/" + encodeURIComponent(project.id) + "/archive", {
+      method:"POST"
+    });
+    const data = await res.json();
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "archive project failed");
+    }
+    persistActiveProject(DEFAULT_PROJECT_ID);
+    enterBlankChat();
+    await loadProjects();
+    await loadProjectOpenClawRuntimes();
+    await loadConversations();
+    setProjectStatus("Project archived.");
+  }catch(err){
+    setProjectStatus("Archive failed: " + (err.message || String(err)));
+  }
+}
+
 async function loadConversations(){
   try{
-    const res = await fetch("/api/conversations");
+    const params = new URLSearchParams({
+      project_id:activeProjectId || DEFAULT_PROJECT_ID
+    });
+    const res = await fetch("/api/conversations?" + params.toString());
     const data = await res.json();
 
     if(!res.ok || !data.ok){
@@ -8066,6 +8676,9 @@ async function loadConversations(){
     });
 
     setActiveConversation();
+    if(currentConversationId && !conversationsCache.some(item => item.id === currentConversationId)){
+      enterBlankChat();
+    }
     return conversationsCache;
   }catch(err){
     console.log("load conversations failed", err);
@@ -8246,6 +8859,27 @@ openClawTaskHistoryPanel.addEventListener("click", event => {
   loadOpenClawTaskHistory(view);
 });
 newChatBtn.addEventListener("click", createNewConversation);
+projectSelect.addEventListener("change", () => switchProject(projectSelect.value));
+createProjectBtn.addEventListener("click", createProject);
+renameProjectBtn.addEventListener("click", renameProject);
+archiveProjectBtn.addEventListener("click", archiveProject);
+projectStatus.addEventListener("click", event => {
+  const defaultRuntimeId = event.target?.dataset?.runtimeDefault;
+  if(defaultRuntimeId){
+    setDefaultProjectRuntime(defaultRuntimeId);
+    return;
+  }
+  const toggleRuntimeId = event.target?.dataset?.runtimeToggle;
+  if(toggleRuntimeId){
+    toggleProjectRuntimeBinding(toggleRuntimeId);
+  }
+});
+projectStatus.addEventListener("change", event => {
+  const runtimeId = event.target?.dataset?.runtimeAgent;
+  if(runtimeId){
+    changeDefaultRuntimeAgent(runtimeId, event.target.value);
+  }
+});
 viewSummaryBtn.addEventListener("click", viewCurrentSummary);
 chat.addEventListener("click", event => {
   if(event.target.closest(".welcomeCloseBtn")){
@@ -9290,6 +9924,7 @@ async function sendMessage(){
       signal:activeChatAbortController?.signal,
 
       body:JSON.stringify({
+        project_id:activeProjectId || DEFAULT_PROJECT_ID,
         conversationId:currentConversationId,
         messages:[
           {
@@ -9361,7 +9996,7 @@ async function sendMessage(){
           setContextStatus("OpenClaw task submitted. Waiting for remote result...");
           if(data.taskId){
             openClawReconnectTask = data.task || activeOpenClawTask;
-            startOpenClawBridgeEventStream(data.taskId, aiDiv);
+            startOpenClawBridgeEventStream(data.taskId, aiDiv, data.task || activeOpenClawTask);
             startOpenClawReconnectPolling(data.taskId);
           }
         }

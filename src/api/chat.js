@@ -41,6 +41,7 @@ const OPENCLAW_CHAT_TIMEOUT_MS = 240000;
 const OPENCLAW_TASK_EXPIRE_MS = 10 * 60 * 1000;
 const OPENCLAW_ASYNC_SUBMIT_TIMEOUT_MS = 15000;
 const OPENCLAW_ASYNC_SUBMIT_SCAN_BYTES = 65536;
+const OPENCLAW_CALLBACK_TIMESTAMP_WINDOW_MS = 5 * 60 * 1000;
 const MODEL_SETTINGS_KEY = "model_settings";
 const AUTO_SEARCH_PATTERN = /搜索|查一下|查询|联网查|最新|最近|今天|现在|当前|目前|官网|价格|新闻|发布|更新|\bsearch\b|\blook up\b|\blatest\b|\brecent\b|\btoday\b|\bcurrent\b|\bnow\b|\bnews\b|\bprice\b|\brelease\b|\bupdate\b|\bofficial\b/i;
 
@@ -206,6 +207,10 @@ function serializeOpenClawTask(row) {
     bridge_result_hash: row.bridge_result_hash || "",
     bridgeModeEnabled: Boolean(row.bridge_mode_enabled),
     bridge_mode_enabled: Boolean(row.bridge_mode_enabled),
+    bridgeLastSequence: row.bridge_last_sequence ?? null,
+    bridge_last_sequence: row.bridge_last_sequence ?? null,
+    bridgeLastSeenAt: row.bridge_last_seen_at || "",
+    bridge_last_seen_at: row.bridge_last_seen_at || "",
     metadata,
     canReconnect: Boolean(metadata.canReconnect),
     canQueryRemoteStatus: Boolean(metadata.canQueryRemoteStatus),
@@ -405,6 +410,560 @@ async function hashOpenClawBridgeResult(text) {
   return Array.from(new Uint8Array(digest))
     .map(byte => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+function timingSafeEqualText(leftValue, rightValue) {
+  const left = new TextEncoder().encode(String(leftValue || ""));
+  const right = new TextEncoder().encode(String(rightValue || ""));
+  let diff = left.length ^ right.length;
+  const length = Math.max(left.length, right.length);
+  for (let i = 0; i < length; i++) {
+    diff |= (left[i] || 0) ^ (right[i] || 0);
+  }
+  return diff === 0;
+}
+
+async function signOpenClawCallback(secret, timestamp, rawBody) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    {
+      name: "HMAC",
+      hash: "SHA-256"
+    },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(String(timestamp || "") + "." + String(rawBody || ""))
+  );
+  const hex = Array.from(new Uint8Array(signature))
+    .map(byte => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return "sha256=" + hex;
+}
+
+function parseOpenClawCallbackTimestamp(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return NaN;
+  }
+  if (/^\d+$/.test(text)) {
+    const number = Number(text);
+    return text.length <= 10 ? number * 1000 : number;
+  }
+  return Date.parse(text);
+}
+
+function openClawCallbackAllowedBridgeIds(env) {
+  return String(env.OPENCLAW_CALLBACK_ALLOWED_BRIDGE_IDS || "")
+    .split(",")
+    .map(value => value.trim())
+    .filter(Boolean);
+}
+
+function bridgeCallbackTextContent(payload) {
+  const content = payload?.content && typeof payload.content === "object" ? payload.content : {};
+  const candidate = content.final_answer
+    ?? content.finalAnswer
+    ?? content.text
+    ?? content.result
+    ?? content.output
+    ?? payload?.final_answer
+    ?? payload?.result
+    ?? payload?.text
+    ?? "";
+  if (typeof candidate === "string") {
+    return candidate.trim();
+  }
+  if (candidate && typeof candidate === "object") {
+    return JSON.stringify(candidate, null, 2);
+  }
+  return "";
+}
+
+function bridgeCallbackErrorText(payload) {
+  const content = payload?.content && typeof payload.content === "object" ? payload.content : {};
+  return String(content.error || content.message || content.text || payload?.error || payload?.message || "OpenClaw Bridge error").trim();
+}
+
+function bridgeCallbackToolText(payload, fallback) {
+  const content = payload?.content && typeof payload.content === "object" ? payload.content : {};
+  const toolName = String(content.tool_name || content.toolName || content.name || "").trim();
+  const text = String(content.text || content.summary || content.result || "").trim();
+  if (text) {
+    return text;
+  }
+  if (toolName) {
+    return fallback + ": " + toolName;
+  }
+  return fallback;
+}
+
+function bridgeCallbackSequence(payload) {
+  const value = payload?.sequence;
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.trunc(number) : null;
+}
+
+async function readOpenClawBridgeTaskForCallback(env, payload) {
+  if (!env.DB) {
+    return null;
+  }
+  const taskId = String(payload?.task_id || "").trim();
+  const assistantMessageId = String(payload?.assistant_message_id || "").trim();
+  if (!taskId && !assistantMessageId) {
+    return null;
+  }
+  if (taskId) {
+    const row = await env.DB.prepare(
+      `SELECT *
+        FROM openclaw_tasks
+        WHERE bridge_task_id = ?
+          OR remote_task_id = ?
+          OR id = ?
+        ORDER BY updated_at DESC
+        LIMIT 1`
+    ).bind(taskId, taskId, taskId).first();
+    if (row) {
+      return serializeOpenClawTask(row);
+    }
+  }
+  if (assistantMessageId) {
+    const row = await env.DB.prepare(
+      `SELECT *
+        FROM openclaw_tasks
+        WHERE assistant_message_id = ?
+        ORDER BY updated_at DESC
+        LIMIT 1`
+    ).bind(assistantMessageId).first();
+    if (row) {
+      return serializeOpenClawTask(row);
+    }
+  }
+  return null;
+}
+
+function bridgeCallbackShouldApplySequencedEvent(task, sequence) {
+  if (!task) {
+    return false;
+  }
+  if (isOpenClawTaskTerminalStatus(task.storedStatus || task.status)) {
+    return false;
+  }
+  if (sequence === null || sequence === undefined) {
+    return true;
+  }
+  const lastSequence = Number(task.bridgeLastSequence ?? task.bridge_last_sequence ?? -1);
+  return !Number.isFinite(lastSequence) || sequence > lastSequence;
+}
+
+async function updateOpenClawTaskBridgeActivity(env, task, payload, options = {}) {
+  if (!env.DB || !task?.id) {
+    return false;
+  }
+  const now = Date.now();
+  const sequence = bridgeCallbackSequence(payload);
+  const lastSeenAt = new Date(now).toISOString();
+  const eventType = String(payload?.event_type || "");
+  const nextStatus = options.status || "running";
+  const message = options.message || bridgeCallbackTextContent(payload) || options.fallbackMessage || eventType;
+  const progress = options.progress ?? task.remoteProgress ?? task.remote_progress ?? null;
+  const sequenceSql = sequence === null ? "bridge_last_sequence" : "?";
+  const bindings = [
+    nextStatus,
+    now,
+    eventType,
+    progress,
+    message,
+    lastSeenAt
+  ];
+  if (sequence !== null) {
+    bindings.push(sequence);
+  }
+  bindings.push(task.id);
+  await env.DB.prepare(
+    `UPDATE openclaw_tasks
+      SET status = ?,
+        updated_at = ?,
+        remote_status = ?,
+        remote_progress = ?,
+        remote_message = ?,
+        bridge_last_seen_at = ?,
+        bridge_last_sequence = ${sequenceSql}
+      WHERE id = ?`
+  ).bind(...bindings).run();
+  return true;
+}
+
+async function updateOpenClawTaskBridgeHeartbeat(env, task, payload) {
+  if (!env.DB || !task?.id) {
+    return false;
+  }
+  const now = Date.now();
+  const sequence = bridgeCallbackSequence(payload);
+  if (sequence === null) {
+    await env.DB.prepare(
+      `UPDATE openclaw_tasks
+        SET updated_at = ?,
+          bridge_last_seen_at = ?
+        WHERE id = ?`
+    ).bind(now, new Date(now).toISOString(), task.id).run();
+  } else {
+    await env.DB.prepare(
+      `UPDATE openclaw_tasks
+        SET updated_at = ?,
+          bridge_last_seen_at = ?,
+          bridge_last_sequence = MAX(COALESCE(bridge_last_sequence, -1), ?)
+        WHERE id = ?`
+    ).bind(now, new Date(now).toISOString(), sequence, task.id).run();
+  }
+  return true;
+}
+
+async function applyOpenClawBridgeFinalCallback(env, task, payload) {
+  if (!env.DB || !task?.id) {
+    return false;
+  }
+  const finalText = bridgeCallbackTextContent(payload);
+  if (!finalText) {
+    return false;
+  }
+  const now = Date.now();
+  let assistantMessage = null;
+  const assistantMessageId = String(payload?.assistant_message_id || task.assistantMessageId || task.assistant_message_id || "").trim();
+  if (assistantMessageId) {
+    assistantMessage = await updateAssistantMessageContent(env, assistantMessageId, finalText);
+  }
+  if (!assistantMessage?.id) {
+    const conversationId = String(payload?.conversation_id || task.conversationId || task.conversation_id || "").trim();
+    if (conversationId) {
+      assistantMessage = await saveMessage(env.DB, conversationId, "assistant", finalText);
+    }
+  }
+  const sequence = bridgeCallbackSequence(payload);
+  const bridgeResultHash = await hashOpenClawBridgeResult(finalText);
+  await env.DB.prepare(
+    `UPDATE openclaw_tasks
+      SET status = ?,
+        updated_at = ?,
+        completed_at = COALESCE(completed_at, ?),
+        error = ?,
+        latency_ms = COALESCE(latency_ms, ? - started_at),
+        assistant_message_id = COALESCE(NULLIF(?, ''), assistant_message_id),
+        remote_status = ?,
+        remote_progress = ?,
+        remote_message = ?,
+        bridge_result_hash = ?,
+        bridge_last_seen_at = ?,
+        bridge_last_sequence = CASE
+          WHEN ? IS NULL THEN bridge_last_sequence
+          ELSE MAX(COALESCE(bridge_last_sequence, -1), ?)
+        END
+      WHERE id = ?`
+  ).bind(
+    "completed",
+    now,
+    now,
+    "",
+    now,
+    assistantMessage?.id || assistantMessageId || "",
+    "completed",
+    100,
+    "OpenClaw Bridge final received",
+    bridgeResultHash,
+    new Date(now).toISOString(),
+    sequence,
+    sequence,
+    task.id
+  ).run();
+  if (env.DB) {
+    await maybeUpdateConversationSummary(env, task.conversationId || task.conversation_id);
+  }
+  return true;
+}
+
+async function applyOpenClawBridgeErrorCallback(env, task, payload) {
+  if (!env.DB || !task?.id) {
+    return false;
+  }
+  if (isOpenClawTaskTerminalStatus(task.storedStatus || task.status)) {
+    return false;
+  }
+  const now = Date.now();
+  const sequence = bridgeCallbackSequence(payload);
+  const message = bridgeCallbackErrorText(payload);
+  await env.DB.prepare(
+    `UPDATE openclaw_tasks
+      SET status = ?,
+        updated_at = ?,
+        completed_at = COALESCE(completed_at, ?),
+        error = ?,
+        remote_status = ?,
+        remote_message = ?,
+        bridge_last_seen_at = ?,
+        bridge_last_sequence = CASE
+          WHEN ? IS NULL THEN bridge_last_sequence
+          ELSE MAX(COALESCE(bridge_last_sequence, -1), ?)
+        END
+      WHERE id = ? AND status != 'completed'`
+  ).bind(
+    "failed",
+    now,
+    now,
+    message,
+    "failed",
+    message,
+    new Date(now).toISOString(),
+    sequence,
+    sequence,
+    task.id
+  ).run();
+  return true;
+}
+
+async function applyOpenClawBridgeCallbackEvent(env, payload) {
+  const eventType = String(payload?.event_type || "").trim();
+  const task = await readOpenClawBridgeTaskForCallback(env, payload);
+  if (!task) {
+    return {
+      applied: false,
+      error: "task_not_found"
+    };
+  }
+  const sequence = bridgeCallbackSequence(payload);
+  if (eventType === "bridge.heartbeat") {
+    return {
+      applied: await updateOpenClawTaskBridgeHeartbeat(env, task, payload),
+      error: ""
+    };
+  }
+  if (eventType === "bridge.final") {
+    return {
+      applied: await applyOpenClawBridgeFinalCallback(env, task, payload),
+      error: ""
+    };
+  }
+  if (eventType === "bridge.error") {
+    return {
+      applied: await applyOpenClawBridgeErrorCallback(env, task, payload),
+      error: ""
+    };
+  }
+  if (eventType === "bridge.started") {
+    if (isOpenClawTaskTerminalStatus(task.storedStatus || task.status)) {
+      return { applied: false, error: "task_already_terminal" };
+    }
+    return {
+      applied: await updateOpenClawTaskBridgeActivity(env, task, payload, {
+        status: "running",
+        progress: task.remoteProgress ?? task.remote_progress ?? 0,
+        fallbackMessage: "started"
+      }),
+      error: ""
+    };
+  }
+  if (eventType === "bridge.activity") {
+    if (!bridgeCallbackShouldApplySequencedEvent(task, sequence)) {
+      return { applied: false, error: "stale_sequence_or_terminal" };
+    }
+    return {
+      applied: await updateOpenClawTaskBridgeActivity(env, task, payload, {
+        status: "running",
+        fallbackMessage: "activity"
+      }),
+      error: ""
+    };
+  }
+  if (eventType === "bridge.tool_call") {
+    if (!bridgeCallbackShouldApplySequencedEvent(task, sequence)) {
+      return { applied: false, error: "stale_sequence_or_terminal" };
+    }
+    return {
+      applied: await updateOpenClawTaskBridgeActivity(env, task, payload, {
+        status: "tool_calling",
+        message: bridgeCallbackToolText(payload, "Tool call")
+      }),
+      error: ""
+    };
+  }
+  if (eventType === "bridge.tool_result") {
+    if (!bridgeCallbackShouldApplySequencedEvent(task, sequence)) {
+      return { applied: false, error: "stale_sequence_or_terminal" };
+    }
+    return {
+      applied: await updateOpenClawTaskBridgeActivity(env, task, payload, {
+        status: "running",
+        message: bridgeCallbackToolText(payload, "Tool result")
+      }),
+      error: ""
+    };
+  }
+  return {
+    applied: false,
+    error: "unknown_event_type"
+  };
+}
+
+async function storeOpenClawBridgeCallbackEvent(env, payload, bridgeId, applied, duplicate, error) {
+  if (!env.DB) {
+    return;
+  }
+  await env.DB.prepare(
+    `INSERT INTO bridge_events (
+      event_id,
+      task_id,
+      conversation_id,
+      assistant_message_id,
+      event_type,
+      sequence,
+      payload_json,
+      created_at,
+      received_at,
+      bridge_id,
+      applied,
+      duplicate,
+      error
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    String(payload?.event_id || ""),
+    String(payload?.task_id || ""),
+    String(payload?.conversation_id || ""),
+    String(payload?.assistant_message_id || ""),
+    String(payload?.event_type || ""),
+    bridgeCallbackSequence(payload),
+    JSON.stringify(payload || {}),
+    String(payload?.created_at || ""),
+    new Date().toISOString(),
+    bridgeId,
+    applied ? 1 : 0,
+    duplicate ? 1 : 0,
+    error || ""
+  ).run();
+}
+
+async function updateOpenClawBridgeCallbackStoredEvent(env, eventId, applied, error) {
+  if (!env.DB || !eventId) {
+    return;
+  }
+  await env.DB.prepare(
+    `UPDATE bridge_events
+      SET applied = ?,
+        error = ?
+      WHERE event_id = ?`
+  ).bind(applied ? 1 : 0, error || "", eventId).run();
+}
+
+function bridgeCallbackErrorResponse(error, status) {
+  return jsonResponse({
+    ok: false,
+    error
+  }, status);
+}
+
+async function handleOpenClawBridgeCallbackRequest(request, env) {
+  if (request.method !== "POST") {
+    return bridgeCallbackErrorResponse("method_not_allowed", 405);
+  }
+  if (!env.DB) {
+    return bridgeCallbackErrorResponse("d1_not_configured", 500);
+  }
+  const secret = String(env.OPENCLAW_CALLBACK_SECRET || "").trim();
+  if (!secret) {
+    return bridgeCallbackErrorResponse("callback_secret_not_configured", 500);
+  }
+
+  const bridgeId = String(request.headers.get("X-OpenClaw-Bridge-Id") || "").trim();
+  const timestamp = String(request.headers.get("X-OpenClaw-Timestamp") || "").trim();
+  const signature = String(request.headers.get("X-OpenClaw-Signature") || "").trim();
+  const headerEventId = String(request.headers.get("X-OpenClaw-Event-Id") || "").trim();
+  if (!bridgeId) {
+    return bridgeCallbackErrorResponse("missing_bridge_id", 400);
+  }
+  const allowedBridgeIds = openClawCallbackAllowedBridgeIds(env);
+  if (allowedBridgeIds.length && !allowedBridgeIds.includes(bridgeId)) {
+    return bridgeCallbackErrorResponse("bridge_id_not_allowed", 403);
+  }
+  if (!timestamp) {
+    return bridgeCallbackErrorResponse("missing_timestamp", 400);
+  }
+  const timestampMs = parseOpenClawCallbackTimestamp(timestamp);
+  if (!Number.isFinite(timestampMs)) {
+    return bridgeCallbackErrorResponse("invalid_timestamp", 400);
+  }
+  if (Math.abs(Date.now() - timestampMs) > OPENCLAW_CALLBACK_TIMESTAMP_WINDOW_MS) {
+    return bridgeCallbackErrorResponse("stale_timestamp", 401);
+  }
+  if (!signature) {
+    return bridgeCallbackErrorResponse("missing_signature", 401);
+  }
+
+  const rawBody = await request.text();
+  const expectedSignature = await signOpenClawCallback(secret, timestamp, rawBody);
+  if (!timingSafeEqualText(signature.toLowerCase(), expectedSignature)) {
+    return bridgeCallbackErrorResponse("invalid_signature", 401);
+  }
+
+  let payload = null;
+  try {
+    payload = JSON.parse(rawBody);
+  } catch (err) {
+    return bridgeCallbackErrorResponse("invalid_json", 400);
+  }
+  const eventId = String(payload?.event_id || "").trim();
+  const taskId = String(payload?.task_id || "").trim();
+  if (!eventId) {
+    return bridgeCallbackErrorResponse("missing_event_id", 400);
+  }
+  if (headerEventId && headerEventId !== eventId) {
+    return bridgeCallbackErrorResponse("event_id_mismatch", 400);
+  }
+  if (!taskId) {
+    return bridgeCallbackErrorResponse("missing_task_id", 400);
+  }
+
+  const existing = await env.DB.prepare(
+    `SELECT event_id, task_id
+      FROM bridge_events
+      WHERE event_id = ?
+      LIMIT 1`
+  ).bind(eventId).first();
+  if (existing) {
+    return jsonResponse({
+      ok: true,
+      event_id: eventId,
+      task_id: taskId,
+      applied: false,
+      duplicate: true
+    });
+  }
+
+  await storeOpenClawBridgeCallbackEvent(env, payload, bridgeId, false, false, "");
+  let applied = false;
+  let applyError = "";
+  try {
+    const result = await applyOpenClawBridgeCallbackEvent(env, payload);
+    applied = Boolean(result.applied);
+    applyError = result.error || "";
+  } catch (err) {
+    applied = false;
+    applyError = err?.message || String(err);
+    console.warn("[openclaw-bridge-callback] failed to apply event", applyError);
+  }
+  await updateOpenClawBridgeCallbackStoredEvent(env, eventId, applied, applyError);
+
+  return jsonResponse({
+    ok: true,
+    event_id: eventId,
+    task_id: taskId,
+    applied,
+    duplicate: false
+  });
 }
 
 async function updateOpenClawBridgeTaskStart(env, task, bridgeTask) {
@@ -1388,7 +1947,12 @@ async function handleOpenClawTasksRequest(request, env, url, ctx) {
       }
       const remoteResult = await getOpenClawTaskStatus(env, remoteTaskId, task);
       if (!remoteResult.ok) {
-        const nextTask = (isOpenClawTaskTerminalStatus(task.status) || isOpenClawTaskTerminalStatus(task.storedStatus))
+        const hasLocalBridgeFinal = isOpenClawBridgeTask(task)
+          && String(task.bridgeResultHash || task.bridge_result_hash || "").trim()
+          && String(task.status || task.storedStatus || "").toLowerCase() === "completed";
+        const nextTask = hasLocalBridgeFinal
+          ? task
+          : (isOpenClawTaskTerminalStatus(task.status) || isOpenClawTaskTerminalStatus(task.storedStatus))
           ? await markOpenClawRemoteStatusUnavailable(env, task, "Remote status unavailable")
           : task;
         return jsonResponse({
@@ -4060,6 +4624,10 @@ async function prepareConversation(env, conversationId, userContent) {
 
 export async function handleChat(request, env, ctx) {
   const url = new URL(request.url);
+  if (url.pathname === "/api/openclaw/bridge/callback") {
+    return handleOpenClawBridgeCallbackRequest(request, env);
+  }
+
   const openClawTasksResponse = await handleOpenClawTasksRequest(request, env, url, ctx);
 
   if (openClawTasksResponse) {

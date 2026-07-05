@@ -26,6 +26,7 @@ import {
   classifyOpenClawBridgeResultFinality,
   shouldRecoverOpenClawBridgeCompletedStatus
 } from "./openclawBridgeClient.js";
+import { broadcastOpenClawBridgeEvent } from "./openclawBridgeEvents.js";
 
 const defaultSystemMessage = {
   role: "system",
@@ -956,6 +957,9 @@ async function handleOpenClawBridgeCallbackRequest(request, env) {
     console.warn("[openclaw-bridge-callback] failed to apply event", applyError);
   }
   await updateOpenClawBridgeCallbackStoredEvent(env, eventId, applied, applyError);
+  if (applied) {
+    broadcastOpenClawBridgeEvent(payload);
+  }
 
   return jsonResponse({
     ok: true,

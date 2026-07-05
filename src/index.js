@@ -7,6 +7,7 @@ import { handleModelHealth } from "./api/modelHealth.js";
 import { handleSearchAndFetch } from "./api/searchAndFetch.js";
 import { handleSearchWeb } from "./api/searchWeb.js";
 import { handleSettings } from "./api/settings.js";
+import { handleOpenClawBridgeEventStream } from "./api/openclawBridgeEvents.js";
 import { htmlPage } from "./frontend/page.js";
 import { requireAuth } from "./lib/auth.js";
 import { getEnabledModels } from "./providers/config.js";
@@ -31,6 +32,16 @@ export default {
       }
 
       return handleChat(request, env, ctx);
+    }
+
+    if (url.pathname === "/api/openclaw/bridge/events/stream") {
+      const auth = await requireAuth(request, env);
+
+      if (!auth.ok) {
+        return auth.response;
+      }
+
+      return handleOpenClawBridgeEventStream(request, env, url);
     }
 
     if (url.pathname.startsWith("/api/openclaw/tasks")) {

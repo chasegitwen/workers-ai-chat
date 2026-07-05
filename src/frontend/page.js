@@ -2482,6 +2482,8 @@ let openClawReconnectPollingTimer = null;
 let openClawReconnectPollingTaskId = "";
 let openClawCompletedRemoteSyncAttempts = new Map();
 let openClawAutoResumeAttempts = new Set();
+let openClawBridgeEventSource = null;
+let openClawBridgeEventTaskId = "";
 const OPENCLAW_RECONNECT_POLL_MS = 4000;
 const OPENCLAW_AUTO_RESUME_MESSAGE = "连接中断，正在尝试恢复远端任务……";
 
@@ -7402,6 +7404,181 @@ function stopOpenClawReconnectPolling(){
   openClawReconnectPollingTaskId = "";
 }
 
+function stopOpenClawBridgeEventStream(taskId = ""){
+  if(taskId && openClawBridgeEventTaskId && taskId !== openClawBridgeEventTaskId){
+    return;
+  }
+  if(openClawBridgeEventSource){
+    openClawBridgeEventSource.close();
+    openClawBridgeEventSource = null;
+  }
+  if(!taskId || taskId === openClawBridgeEventTaskId){
+    openClawBridgeEventTaskId = "";
+  }
+}
+
+function createOpenClawBridgeEventState(){
+  return {
+    seenEventIds:new Set(),
+    lastSequence:-Infinity,
+    final:false
+  };
+}
+
+function applyOpenClawBridgeEventState(state, event){
+  const target = state || createOpenClawBridgeEventState();
+  const eventId = String(event?.event_id || "");
+  if(eventId && target.seenEventIds.has(eventId)){
+    return { accepted:false, reason:"duplicate", state:target };
+  }
+  if(eventId){
+    target.seenEventIds.add(eventId);
+  }
+  const eventType = String(event?.event_type || "");
+  const sequence = Number(event?.sequence);
+  const hasSequence = Number.isFinite(sequence);
+  if(hasSequence && sequence < target.lastSequence){
+    return { accepted:false, reason:"old_sequence", state:target };
+  }
+  if(target.final && eventType !== "bridge.final" && eventType !== "bridge.error"){
+    return { accepted:false, reason:"after_final", state:target };
+  }
+  if(hasSequence){
+    target.lastSequence = Math.max(target.lastSequence, sequence);
+  }
+  if(eventType === "bridge.final" || eventType === "bridge.error"){
+    target.final = true;
+  }
+  return { accepted:true, reason:"", state:target };
+}
+
+function bridgeEventMessage(event){
+  const content = event?.content && typeof event.content === "object" ? event.content : {};
+  if(event?.event_type === "bridge.tool_call"){
+    return content.text || content.summary || content.tool_name || content.toolName || content.name || "Tool call";
+  }
+  if(event?.event_type === "bridge.tool_result"){
+    return content.text || content.summary || content.result || content.tool_name || content.toolName || "Tool result";
+  }
+  if(event?.event_type === "bridge.error"){
+    return event.error || content.error || content.message || content.text || "OpenClaw Bridge failed.";
+  }
+  return content.text || content.summary || event.final_answer || event.status || event.event_type || "";
+}
+
+function mergeOpenClawBridgeEventTask(event, localTaskId){
+  const taskId = localTaskId || activeOpenClawTask?.id || "";
+  if(!taskId){
+    return;
+  }
+  const message = bridgeEventMessage(event);
+  const patch = {
+    id:taskId,
+    bridge_task_id:event.task_id || activeOpenClawTask?.bridge_task_id || activeOpenClawTask?.bridgeTaskId || "",
+    bridgeTaskId:event.task_id || activeOpenClawTask?.bridgeTaskId || activeOpenClawTask?.bridge_task_id || "",
+    remote_status:event.event_type || event.status || "",
+    remoteStatus:event.event_type || event.status || "",
+    remote_message:message,
+    remoteMessage:message,
+    bridge_last_sequence:event.sequence ?? activeOpenClawTask?.bridge_last_sequence ?? activeOpenClawTask?.bridgeLastSequence ?? null,
+    bridgeLastSequence:event.sequence ?? activeOpenClawTask?.bridgeLastSequence ?? activeOpenClawTask?.bridge_last_sequence ?? null
+  };
+  if(event.event_type === "bridge.final"){
+    patch.status = "completed";
+    patch.remote_status = "completed";
+    patch.remoteStatus = "completed";
+    patch.remote_progress = 100;
+    patch.remoteProgress = 100;
+  }else if(event.event_type === "bridge.error"){
+    patch.status = "failed";
+    patch.remote_status = "failed";
+    patch.remoteStatus = "failed";
+    patch.error = message;
+  }else if(event.event_type === "bridge.tool_call"){
+    patch.status = "tool_calling";
+  }else{
+    patch.status = "running";
+  }
+  mergeOpenClawTask({
+    ...(activeOpenClawTask || {}),
+    ...patch
+  });
+}
+
+async function finishOpenClawBridgeEventTask(taskId, element, event){
+  stopOpenClawBridgeEventStream(taskId);
+  stopOpenClawReconnectPolling();
+  setContextStatus(event.event_type === "bridge.error" ? "OpenClaw task failed." : "OpenClaw task completed.");
+  if(event.event_type === "bridge.final"){
+    if(event.final_answer){
+      renderAssistantMarkdown(element, event.final_answer);
+    }
+    try{
+      await finalizeOpenClawTaskResult(taskId);
+    }catch(err){
+      console.warn("finalize OpenClaw Bridge SSE task failed", err);
+      setContextStatus("OpenClaw task completed, but result fetch failed: " + (err.message || String(err)));
+      return;
+    }
+    if(currentConversationId){
+      await loadConversationMessages(currentConversationId);
+    }
+  }else{
+    renderAssistantMarkdown(element, bridgeEventMessage(event));
+  }
+}
+
+function startOpenClawBridgeEventStream(taskId, element){
+  if(!taskId || typeof EventSource === "undefined"){
+    return false;
+  }
+  stopOpenClawBridgeEventStream();
+  const state = createOpenClawBridgeEventState();
+  const source = new EventSource("/api/openclaw/bridge/events/stream?task_id=" + encodeURIComponent(taskId), {
+    withCredentials:true
+  });
+  openClawBridgeEventSource = source;
+  openClawBridgeEventTaskId = taskId;
+  source.addEventListener("bridge_event", async event => {
+    let data = null;
+    try{
+      data = JSON.parse(event.data || "{}");
+    }catch(err){
+      console.warn("parse OpenClaw Bridge SSE event failed", err);
+      return;
+    }
+    const result = applyOpenClawBridgeEventState(state, data);
+    if(!result.accepted){
+      return;
+    }
+    mergeOpenClawBridgeEventTask(data, taskId);
+    const message = bridgeEventMessage(data);
+    if(data.event_type === "bridge.started"){
+      renderAssistantMarkdown(element, "OpenClaw task started.");
+    }else if(data.event_type === "bridge.activity"){
+      renderAssistantMarkdown(element, message || "OpenClaw task is running.");
+    }else if(data.event_type === "bridge.tool_call"){
+      renderAssistantMarkdown(element, "Tool call: " + message);
+    }else if(data.event_type === "bridge.tool_result"){
+      renderAssistantMarkdown(element, "Tool result: " + message);
+    }
+    if(message && data.event_type !== "bridge.final"){
+      setContextStatus(message);
+    }
+    if(data.event_type === "bridge.final" || data.event_type === "bridge.error"){
+      await finishOpenClawBridgeEventTask(taskId, element, data);
+    }
+  });
+  source.addEventListener("error", () => {
+    if(openClawBridgeEventSource !== source){
+      return;
+    }
+    stopOpenClawBridgeEventStream(taskId);
+    startOpenClawReconnectPolling(taskId);
+  });
+  return true;
+}
+
 async function fetchOpenClawTaskStatus(taskId){
   const res = await fetch("/api/openclaw/tasks/" + encodeURIComponent(taskId) + "/status", {
     credentials:"include"
@@ -7468,6 +7645,7 @@ async function pollOpenClawReconnectTask(taskId){
     if(task.status === "completed"){
       openClawCompletedRemoteSyncAttempts.delete(task.id);
       stopOpenClawReconnectPolling();
+      stopOpenClawBridgeEventStream(task.id);
       setContextStatus("OpenClaw task completed.");
       if(isOpenClawBridgeTaskRecord(task) || (!task.assistantMessageId && !task.assistant_message_id)){
         try{
@@ -7485,12 +7663,14 @@ async function pollOpenClawReconnectTask(taskId){
     if(task.status === "failed" || task.status === "aborted" || task.status === "cancelled"){
       openClawCompletedRemoteSyncAttempts.delete(task.id);
       stopOpenClawReconnectPolling();
+      stopOpenClawBridgeEventStream(task.id);
       setContextStatus(task.status === "failed" ? "OpenClaw task failed." : "OpenClaw task cancelled.");
       renderOpenClawTaskBanner();
       return;
     }
     if(task.status === "expired" && !task.remoteTaskId && !task.remote_task_id){
       stopOpenClawReconnectPolling();
+      stopOpenClawBridgeEventStream(task.id);
       setContextStatus("OpenClaw task record expired. Remote progress cannot be confirmed.");
       renderOpenClawTaskBanner();
       return;
@@ -9181,6 +9361,7 @@ async function sendMessage(){
           setContextStatus("OpenClaw task submitted. Waiting for remote result...");
           if(data.taskId){
             openClawReconnectTask = data.task || activeOpenClawTask;
+            startOpenClawBridgeEventStream(data.taskId, aiDiv);
             startOpenClawReconnectPolling(data.taskId);
           }
         }

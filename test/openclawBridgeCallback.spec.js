@@ -1,8 +1,14 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import worker from "../src";
+import { createSession } from "../src/lib/auth.js";
 
 const CALLBACK_SECRET = "test-callback-secret";
 const BRIDGE_ID = "openclaw-test-bridge";
+const AUTH_ENV = {
+  ADMIN_USERNAME: "admin",
+  ADMIN_PASSWORD: "password",
+  SESSION_SECRET: "test-session-secret"
+};
 let db;
 
 async function signCallback(timestamp, rawBody, secret = CALLBACK_SECRET) {
@@ -30,9 +36,14 @@ async function signCallback(timestamp, rawBody, secret = CALLBACK_SECRET) {
 function callbackEnv() {
   return {
     DB: db,
+    ...AUTH_ENV,
     OPENCLAW_CALLBACK_SECRET: CALLBACK_SECRET,
     OPENCLAW_CALLBACK_ALLOWED_BRIDGE_IDS: BRIDGE_ID
   };
+}
+
+async function authCookie() {
+  return "wa_session=" + await createSession("admin", AUTH_ENV);
 }
 
 async function postCallback(payload, options = {}) {
@@ -152,7 +163,21 @@ class FakeD1 {
     return null;
   }
 
-  all() {
+  all(sql, bindings) {
+    const normalized = sql.replace(/\s+/g, " ").trim().toLowerCase();
+    if (normalized.includes("from bridge_events")) {
+      const ids = new Set(bindings.slice(0, -1).map(value => String(value || "")));
+      return [...this.bridgeEvents.values()]
+        .filter(event => ids.has(String(event.task_id || "")) && Number(event.applied || 0) === 1)
+        .sort((left, right) => {
+          const leftSequence = left.sequence === null || left.sequence === undefined ? Number.MAX_SAFE_INTEGER : Number(left.sequence);
+          const rightSequence = right.sequence === null || right.sequence === undefined ? Number.MAX_SAFE_INTEGER : Number(right.sequence);
+          if (leftSequence !== rightSequence) {
+            return leftSequence - rightSequence;
+          }
+          return String(left.received_at || "").localeCompare(String(right.received_at || ""));
+        });
+    }
     return [];
   }
 
@@ -465,5 +490,75 @@ describe("OpenClaw bridge callback endpoint", () => {
     expect(task.status).toBe("running");
     expect(task.remote_message).toBe("");
     expect(event.error).toBe("unknown_event_type");
+  });
+
+  it("requires login for the bridge event stream", async () => {
+    const response = await worker.fetch(new Request("http://example.com/api/openclaw/bridge/events/stream?task_id=local_callback_task"), callbackEnv(), {});
+
+    expect(response.status).toBe(401);
+  });
+
+  it("rejects bridge event stream access for an unknown task", async () => {
+    const response = await worker.fetch(new Request("http://example.com/api/openclaw/bridge/events/stream?task_id=missing", {
+      headers: {
+        Cookie: await authCookie()
+      }
+    }), callbackEnv(), {});
+    const body = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(body.error).toBe("OpenClaw task not found");
+  });
+
+  it("streams historical bridge_events before listening live", async () => {
+    await postCallback(basePayload({
+      event_id: "evt_history_1",
+      event_type: "bridge.activity",
+      sequence: 7,
+      content: { text: "historical activity" }
+    }));
+
+    const response = await worker.fetch(new Request("http://example.com/api/openclaw/bridge/events/stream?task_id=local_callback_task", {
+      headers: {
+        Cookie: await authCookie()
+      }
+    }), callbackEnv(), {});
+    const reader = response.body.getReader();
+    const first = await reader.read();
+    await reader.cancel();
+    const text = new TextDecoder().decode(first.value);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("text/event-stream");
+    expect(text).toContain("event: bridge_event");
+    expect(text).toContain("evt_history_1");
+    expect(text).toContain("historical activity");
+  });
+
+  it("broadcasts applied callback events to subscribed stream clients once", async () => {
+    const response = await worker.fetch(new Request("http://example.com/api/openclaw/bridge/events/stream?task_id=local_callback_task", {
+      headers: {
+        Cookie: await authCookie()
+      }
+    }), callbackEnv(), {});
+    const reader = response.body.getReader();
+    await reader.read();
+
+    const payload = basePayload({
+      event_id: "evt_live_1",
+      event_type: "bridge.activity",
+      sequence: 8,
+      content: { text: "live activity" }
+    });
+    const firstCallback = await postCallback(payload);
+    const secondCallback = await postCallback(payload);
+    const chunk = await reader.read();
+    await reader.cancel();
+    const text = new TextDecoder().decode(chunk.value);
+
+    expect((await firstCallback.json()).duplicate).toBe(false);
+    expect((await secondCallback.json()).duplicate).toBe(true);
+    expect(text).toContain("evt_live_1");
+    expect(text).toContain("live activity");
   });
 });

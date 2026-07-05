@@ -22,6 +22,17 @@ export default {
       });
     }
 
+    if (url.pathname === "/api/openclaw/bridge/callback") {
+      if (request.method !== "POST") {
+        return jsonResponse({
+          ok: false,
+          error: "Method not allowed"
+        }, 405);
+      }
+
+      return handleChat(request, env, ctx);
+    }
+
     if (url.pathname.startsWith("/api/openclaw/tasks")) {
       if (request.method !== "GET" && request.method !== "POST") {
         return jsonResponse({

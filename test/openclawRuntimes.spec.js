@@ -576,6 +576,60 @@ describe("OpenClaw runtime registry", () => {
     });
   });
 
+  it("resolves explicit Common Chat Seattle legacy runtime without falling back to Hillsboro", async () => {
+    const result = await resolveOpenClawRuntimeForProject(env(new FakeD1()), {
+      projectId: "default",
+      runtimeId: "seattle-openclaw",
+      providerId: "openclaw-seattle",
+      executionMode: "legacy",
+      allowUnboundExplicitRuntime: true
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      project_id: "default",
+      runtime_id: "seattle-openclaw",
+      runtime_slug: "seattle-openclaw",
+      provider_id: "openclaw-seattle",
+      execution_mode: "legacy",
+      resolution_source: "explicit"
+    });
+    expect(result.runtime_id).not.toBe("hillsboro-openclaw");
+    expect(result.warnings).toContain("Resolved explicit OpenClaw runtime without project binding");
+  });
+
+  it("resolves Project Chat to bound Hillsboro when runtime is not manually overridden", async () => {
+    const db = new FakeD1();
+    db.bindings.set("project-a:hillsboro-openclaw", {
+      project_id: "project-a",
+      runtime_id: "hillsboro-openclaw",
+      is_default: 1,
+      is_enabled: 1,
+      allowed_agents_json: JSON.stringify(["main", "glm51"]),
+      default_agent_id: "main",
+      created_at: "2026-07-05T00:00:00.000Z",
+      updated_at: "2026-07-05T00:00:00.000Z"
+    });
+
+    const result = await resolveOpenClawRuntimeForProject(env(db), {
+      projectId: "project-a",
+      modelAgentId: "glm51",
+      providerId: "openclaw-hillsboro",
+      executionMode: "bridge"
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      project_id: "project-a",
+      runtime_id: "hillsboro-openclaw",
+      runtime_slug: "hillsboro-openclaw",
+      provider_id: "openclaw-hillsboro",
+      agent_id: "glm51",
+      execution_mode: "bridge",
+      resolution_source: "project_default"
+    });
+  });
+
   it("rejects setting disabled or unverified Seattle as the project default runtime", async () => {
     const db = new FakeD1();
     db.bindings.set("default:seattle-openclaw", {

@@ -76,3 +76,83 @@ Adjust the line range to match the production error.
 ## Rule of Thumb
 
 Passing `node --check src/frontend/page.js` is necessary but not sufficient. For this app, generated inline scripts must also be parsed from `htmlPage()` before deployment.
+
+## Incident: Chat Turns Blank After Sending Follow-up
+
+After Milestone 4.9 sidebar changes, continuing an existing chat by pressing Enter or clicking Send could make the current conversation view go blank. The conversation was not lost: clicking the active chat in the left sidebar restored the messages.
+
+### Root Cause
+
+`sendMessage()` refreshes the sidebar conversation list after a successful response:
+
+```js
+await loadConversations();
+```
+
+`loadConversations()` also contained a defensive cleanup path:
+
+```js
+if(currentConversationId && !conversationsCache.some(item => item.id === currentConversationId)){
+  enterBlankChat();
+}
+```
+
+That cleanup is useful after deletes or workspace switches, but it is too aggressive immediately after sending a message. If the refreshed conversation list is temporarily stale, scoped differently, or otherwise does not include the current conversation at that exact moment, `enterBlankChat()` clears the active chat view even though the conversation still exists.
+
+### Fix
+
+Keep the default cleanup behavior for normal list loads, deletes, and workspace switches, but allow send-message refreshes to preserve the current chat view:
+
+```js
+async function loadConversations(options = {}){
+  const clearMissingCurrent = options.clearMissingCurrent !== false;
+  // ...
+  if(clearMissingCurrent && currentConversationId && !conversationsCache.some(item => item.id === currentConversationId)){
+    enterBlankChat();
+  }
+}
+```
+
+Then in `sendMessage()` after a successful response:
+
+```js
+await loadConversations({
+  clearMissingCurrent:false
+});
+```
+
+This keeps the sidebar list fresh without clearing the current chat if the list refresh momentarily does not contain the active conversation.
+
+### Regression Test
+
+`test/openclawBridgeFrontend.spec.js` includes source-level assertions that:
+
+- `loadConversations(options = {})` supports `clearMissingCurrent`.
+- The missing-current cleanup is guarded by `clearMissingCurrent`.
+- The post-send list refresh calls `loadConversations({ clearMissingCurrent:false })`.
+
+### Validation
+
+Run:
+
+```powershell
+node --check src\frontend\page.js
+```
+
+```powershell
+node --input-type=module -e "import { htmlPage } from './src/frontend/page.js'; const scripts=[...htmlPage().matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(m=>m[1]); for (let i=0;i<scripts.length;i++){ new Function(scripts[i]); } console.log('generated inline scripts parse ok:', scripts.length);"
+```
+
+```powershell
+npx vitest run --pool threads --reporter verbose
+```
+
+### Release Status
+
+As of this note, the chat-blank fix is a local working-tree change only:
+
+- Not committed.
+- Not pushed.
+- No new tag created.
+
+Do not assume this fix is included in `v0.10.0-beta` unless a later commit/tag explicitly includes it.

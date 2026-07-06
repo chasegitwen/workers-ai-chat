@@ -350,6 +350,7 @@ export async function resolveOpenClawRuntimeForProject(env, options = {}) {
   const requestedExecutionMode = cleanText(options.executionMode || options.execution_mode || "legacy", 40) || "legacy";
   const requestedAgentId = cleanText(options.agentId || options.agent_id, 160);
   const modelAgentId = cleanText(options.modelAgentId || options.model_agent_id, 160);
+  const allowUnboundExplicitRuntime = Boolean(options.allowUnboundExplicitRuntime);
   const warnings = [];
 
   if (!env.DB) {
@@ -379,13 +380,34 @@ export async function resolveOpenClawRuntimeForProject(env, options = {}) {
       binding = await readProjectRuntimeBinding(env.DB, projectId, explicitRuntimeId);
       resolutionSource = "explicit";
       if (!binding) {
-        return {
-          ok: false,
-          error: "runtime_not_bound",
-          message: "OpenClaw runtime is not bound to this project",
-          project_id: projectId,
-          runtime_id: explicitRuntimeId
-        };
+        const runtime = allowUnboundExplicitRuntime
+          ? await readRuntime(env.DB, explicitRuntimeId)
+          : null;
+        if (runtime) {
+          warnings.push("Resolved explicit OpenClaw runtime without project binding");
+          warnRuntimeResolution("explicit_unbound_runtime", {
+            project_id: projectId,
+            runtime_id: explicitRuntimeId
+          });
+          binding = {
+            project_id: projectId,
+            runtime_id: runtime.id,
+            is_default: false,
+            is_enabled: true,
+            allowed_agents: [],
+            allowed_agents_json: "[]",
+            default_agent_id: "",
+            runtime
+          };
+        } else {
+          return {
+            ok: false,
+            error: "runtime_not_bound",
+            message: "OpenClaw runtime is not bound to this project",
+            project_id: projectId,
+            runtime_id: explicitRuntimeId
+          };
+        }
       }
     } else {
       const bindings = (await listProjectRuntimeBindings(env.DB, projectId))
@@ -425,7 +447,11 @@ export async function resolveOpenClawRuntimeForProject(env, options = {}) {
       };
     }
 
-    if (!binding.is_enabled || !binding.runtime?.is_enabled) {
+    const executionMode = requestedExecutionMode === "bridge"
+      ? "bridge"
+      : (binding.runtime.bridge_mode || requestedExecutionMode || "legacy");
+
+    if ((!binding.is_enabled || !binding.runtime?.is_enabled) && executionMode === "bridge") {
       return {
         ok: false,
         error: "runtime_disabled",
@@ -435,9 +461,6 @@ export async function resolveOpenClawRuntimeForProject(env, options = {}) {
       };
     }
 
-    const executionMode = requestedExecutionMode === "bridge"
-      ? "bridge"
-      : (binding.runtime.bridge_mode || requestedExecutionMode || "legacy");
     if (!runtimeSupportsExecutionMode(binding.runtime, executionMode)) {
       return {
         ok: false,

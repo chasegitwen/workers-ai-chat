@@ -7358,6 +7358,33 @@ function getSelectedProviderForRequest(modelId){
   return model?.provider || "";
 }
 
+function getOpenClawRuntimeIdForRequest(modelId){
+  const model = modelOptions.find(item => item.id === modelId);
+  if(!isOpenClawModelTarget(model)){
+    return "";
+  }
+  const values = [
+    model.provider,
+    model.providerLabel,
+    model.providerName,
+    model.id,
+    model.modelId,
+    model.modelName,
+    model.upstreamModelName,
+    model.label,
+    model.displayName,
+    model.apiBase,
+    model.baseUrl
+  ].map(value => String(value || "").toLowerCase());
+  if(values.some(value => value.includes("seattle"))){
+    return "seattle-openclaw";
+  }
+  if(values.some(value => value.includes("hillsboro"))){
+    return "hillsboro-openclaw";
+  }
+  return "";
+}
+
 function isOpenClawModelTarget(model){
   if(!model){
     return false;
@@ -9294,7 +9321,8 @@ async function deleteProject(projectId){
   }
 }
 
-async function loadConversations(){
+async function loadConversations(options = {}){
+  const clearMissingCurrent = options.clearMissingCurrent !== false;
   try{
     const commonConversations = await fetchConversationsForProject(DEFAULT_PROJECT_ID);
     renderConversationRows(conversationList, commonConversations);
@@ -9312,7 +9340,7 @@ async function loadConversations(){
     }
 
     setActiveConversation();
-    if(currentConversationId && !conversationsCache.some(item => item.id === currentConversationId)){
+    if(clearMissingCurrent && currentConversationId && !conversationsCache.some(item => item.id === currentConversationId)){
       enterBlankChat();
     }
     return conversationsCache;
@@ -9422,7 +9450,14 @@ async function createConversationForProject(projectId){
 }
 
 async function createNewConversation(){
-  await createConversationForProject(activeProjectId || DEFAULT_PROJECT_ID);
+  if(!isCommonWorkspace()){
+    persistActiveWorkspace(COMMON_WORKSPACE_KEY);
+    renderProjectSelector();
+    enterBlankChat();
+    await loadProjectOpenClawRuntimes();
+    await loadConversations();
+  }
+  await createConversationForProject(DEFAULT_PROJECT_ID);
 }
 
 async function deleteConversation(conversationId, title){
@@ -10650,6 +10685,7 @@ async function sendMessage(){
     const fallbackModel = modelSettingsState?.fallbackModels?.[0] || "";
     const selectedModelConfig = getModelConfigForRequest(modelSelect.value);
     const fallbackModelConfig = getModelConfigForRequest(fallbackModel);
+    const selectedOpenClawRuntimeId = getOpenClawRuntimeIdForRequest(modelSelect.value);
     console.log("[phase10.3] frontend image count", (legacyImageToSend ? 1 : 0) + extraAttachmentsToSend.length);
 
     const res = await fetch("/", {
@@ -10673,6 +10709,7 @@ async function sendMessage(){
         ],
         model:modelSelect.value,
         provider:getSelectedProviderForRequest(modelSelect.value),
+        runtime_id:selectedOpenClawRuntimeId || undefined,
         providers:modelProviders,
         autoFallbackEnabled:Boolean(modelSettingsState?.fallbackEnabled),
         fallbackModel,
@@ -10763,7 +10800,9 @@ async function sendMessage(){
     }
     webSearchContext = "";
     webSearchSources = [];
-    await loadConversations();
+    await loadConversations({
+      clearMissingCurrent:false
+    });
     await loadSummaryStatus();
 
     if(imageToSend){

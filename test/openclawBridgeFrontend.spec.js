@@ -80,6 +80,14 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).not.toContain("蹇界暐");
   });
 
+  it("sends an explicit Seattle runtime_id when the selected OpenClaw model is Seattle", () => {
+    const page = htmlPage();
+
+    expect(page).toMatch(/function getOpenClawRuntimeIdForRequest\(modelId\)\{[\s\S]*?if\(values\.some\(value => value\.includes\("seattle"\)\)\)\{\s*return "seattle-openclaw";\s*\}/);
+    expect(page).toMatch(/const selectedOpenClawRuntimeId = getOpenClawRuntimeIdForRequest\(modelSelect\.value\);[\s\S]*?runtime_id:selectedOpenClawRuntimeId \|\| undefined/);
+    expect(page).not.toMatch(/runtime_id:"hillsboro-openclaw"/);
+  });
+
   it("exposes compact workspace sidebar and scopes conversation requests by project_id", () => {
     const page = htmlPage();
 
@@ -180,14 +188,23 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("data-runtime-agent=");
     expect(page).toContain("Cannot set disabled, unverified, or Bridge-unsupported runtime as default.");
     expect(page).toContain("updateProjectRuntimeBinding");
-    expect(page).toContain("createConversationForProject(activeProjectId || DEFAULT_PROJECT_ID)");
+    expect(page).toMatch(/async function createNewConversation\(\)\{\s*if\(!isCommonWorkspace\(\)\)\{\s*persistActiveWorkspace\(COMMON_WORKSPACE_KEY\);[\s\S]*?await createConversationForProject\(DEFAULT_PROJECT_ID\);/);
     expect(page).toContain("createConversationForProject(project.id)");
     expect(page).toContain("project_id:targetProjectId");
     expect(page).toContain("body:JSON.stringify({");
+    expect(page).toContain("function getOpenClawRuntimeIdForRequest(modelId)");
+    expect(page).toContain("return \"seattle-openclaw\";");
+    expect(page).toContain("return \"hillsboro-openclaw\";");
+    expect(page).toContain("const selectedOpenClawRuntimeId = getOpenClawRuntimeIdForRequest(modelSelect.value);");
+    expect(page).toContain("runtime_id:selectedOpenClawRuntimeId || undefined");
     expect(page).toContain("method:\"DELETE\"");
     expect(page).toContain("Delete chat ");
     expect(page).toContain("Delete project ");
     expect(page).toContain("fetch(\"/api/conversations?\" + params.toString())");
+    expect(page).toContain("async function loadConversations(options = {})");
+    expect(page).toContain("const clearMissingCurrent = options.clearMissingCurrent !== false;");
+    expect(page).toContain("if(clearMissingCurrent && currentConversationId && !conversationsCache.some(item => item.id === currentConversationId))");
+    expect(page).toMatch(/webSearchContext = "";\s*webSearchSources = \[\];\s*await loadConversations\(\{\s*clearMissingCurrent:false\s*\}\);/);
     expect(page).toContain("if(isExpandedProject){");
     expect(page).toContain("document.getElementById(\"projectConversationMount\")");
     expect(page).toContain("if(projectMount){");

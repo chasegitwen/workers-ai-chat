@@ -106,6 +106,30 @@ function resolveOpenClawProviderModel(providerCatalog, requestedProvider, reques
   }
 }
 
+function inferOpenClawRuntimeIdFromSelection(provider, model) {
+  const values = [
+    provider?.id,
+    provider?.label,
+    provider?.providerName,
+    provider?.apiBase,
+    provider?.baseUrl,
+    model?.id,
+    model?.modelId,
+    model?.modelName,
+    model?.upstreamModelName,
+    model?.label,
+    model?.displayName
+  ].map(value => String(value || "").toLowerCase());
+
+  if (values.some(value => value.includes("seattle"))) {
+    return "seattle-openclaw";
+  }
+  if (values.some(value => value.includes("hillsboro"))) {
+    return "hillsboro-openclaw";
+  }
+  return "";
+}
+
 function openClawTaskMetadata(extra = {}) {
   return JSON.stringify({
     source: "worker-local",
@@ -4952,14 +4976,19 @@ export async function handleChat(request, env, ctx) {
   const requestedOpenClawAgentId = isOpenClawRequest
     ? normalizeOpenClawAgentId(openClawTarget?.model)
     : "";
+  const requestedProjectId = conversation.project_id || projectId || camelProjectId || "default";
+  const selectedOpenClawRuntimeId = isOpenClawRequest
+    ? (runtimeId || camelRuntimeId || inferOpenClawRuntimeIdFromSelection(openClawTarget?.provider, openClawTarget?.model))
+    : "";
   const runtimeResolution = isOpenClawRequest
     ? await resolveOpenClawRuntimeForProject(env, {
-      projectId: conversation.project_id || projectId || camelProjectId || "default",
-      runtimeId: runtimeId || camelRuntimeId || "",
+      projectId: requestedProjectId,
+      runtimeId: selectedOpenClawRuntimeId,
       agentId: agentId || camelAgentId || "",
       modelAgentId: requestedOpenClawAgentId,
       providerId: openClawTarget?.provider?.id || provider,
-      executionMode: openClawBridgeEnabled ? "bridge" : "legacy"
+      executionMode: openClawBridgeEnabled ? "bridge" : "legacy",
+      allowUnboundExplicitRuntime: Boolean(selectedOpenClawRuntimeId) && requestedProjectId === "default"
     })
     : null;
   if (isOpenClawRequest && runtimeResolution && !runtimeResolution.ok) {

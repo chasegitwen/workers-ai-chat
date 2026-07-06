@@ -1,5 +1,7 @@
 import { jsonResponse } from "../utils/response.js";
 
+export const HILLSBORO_OPENCLAW_RUNTIME_ID = "hillsboro-openclaw";
+
 function isoNow() {
   return new Date().toISOString();
 }
@@ -216,6 +218,93 @@ function runtimeSupportsExecutionMode(runtime, executionMode) {
   return runtime.bridge_mode === "bridge"
     && runtime.is_enabled
     && runtime.capabilities?.bridge_callback === true;
+}
+
+function runtimeIsVerifiedBridgeCapable(runtime) {
+  return runtime?.id === HILLSBORO_OPENCLAW_RUNTIME_ID
+    && runtime.is_enabled
+    && runtime.status === "verified"
+    && runtimeSupportsExecutionMode(runtime, "bridge");
+}
+
+function defaultAgentsForRuntime(runtime) {
+  const agents = Array.isArray(runtime?.agents) ? runtime.agents : [];
+  const agentIds = agents
+    .map(agent => typeof agent === "string" ? agent : agent?.agent_id)
+    .map(agentId => cleanText(agentId, 160))
+    .filter(Boolean);
+  const allowedAgents = agentIds.length ? agentIds : ["main"];
+  const defaultAgentId = allowedAgents.includes("main") ? "main" : allowedAgents[0];
+  return {
+    allowedAgents,
+    defaultAgentId
+  };
+}
+
+export async function ensureHillsboroRuntimeBindingForProject(db, projectId) {
+  const cleanProjectId = cleanId(projectId);
+  if (!db || !cleanProjectId) {
+    return {
+      ok: false,
+      reason: "missing_db_or_project"
+    };
+  }
+
+  const runtime = await readOpenClawRuntime(db, HILLSBORO_OPENCLAW_RUNTIME_ID);
+  if (!runtime) {
+    return {
+      ok: false,
+      reason: "hillsboro_runtime_missing"
+    };
+  }
+  if (!runtimeIsVerifiedBridgeCapable(runtime)) {
+    return {
+      ok: false,
+      reason: "hillsboro_runtime_not_bridge_capable",
+      runtime_id: HILLSBORO_OPENCLAW_RUNTIME_ID
+    };
+  }
+
+  const timestamp = isoNow();
+  const { allowedAgents, defaultAgentId } = defaultAgentsForRuntime(runtime);
+
+  await db.prepare(
+    `UPDATE project_openclaw_runtime_bindings
+     SET is_default = 0,
+       updated_at = ?
+     WHERE project_id = ?`
+  ).bind(timestamp, cleanProjectId).run();
+
+  await db.prepare(
+    `INSERT INTO project_openclaw_runtime_bindings (
+      project_id,
+      runtime_id,
+      is_default,
+      is_enabled,
+      allowed_agents_json,
+      default_agent_id,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, 1, 1, ?, ?, ?, ?)
+    ON CONFLICT(project_id, runtime_id) DO UPDATE SET
+      is_default = 1,
+      is_enabled = 1,
+      allowed_agents_json = excluded.allowed_agents_json,
+      default_agent_id = excluded.default_agent_id,
+      updated_at = excluded.updated_at`
+  ).bind(
+    cleanProjectId,
+    HILLSBORO_OPENCLAW_RUNTIME_ID,
+    JSON.stringify(allowedAgents),
+    defaultAgentId,
+    timestamp,
+    timestamp
+  ).run();
+
+  return {
+    ok: true,
+    binding: await readProjectRuntimeBinding(db, cleanProjectId, HILLSBORO_OPENCLAW_RUNTIME_ID)
+  };
 }
 
 function bridgeDefaultRejection(binding, isDefault, isEnabled) {

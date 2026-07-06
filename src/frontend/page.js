@@ -1,4 +1,4 @@
-export function htmlPage() {
+﻿export function htmlPage() {
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -369,10 +369,10 @@ body.authenticated .loginScreen{
   min-height:0;
   overflow:hidden;
   background:var(--panel);
-  border:1px solid var(--border);
-  border-radius:22px;
-  padding:22px;
-  box-shadow:0 8px 28px rgba(0,0,0,.08);
+  border:1px solid rgba(148,163,184,.22);
+  border-radius:20px;
+  padding:18px;
+  box-shadow:0 6px 22px rgba(15,23,42,.06);
 
   display:flex;
   flex-direction:column;
@@ -404,10 +404,54 @@ body.authenticated .loginScreen{
   overflow:hidden;
 }
 
+.sidebarSection{
+  flex:0 0 auto;
+  min-height:0;
+}
+
+.sidebarSection.chatsSection{
+  flex:1 1 auto;
+  display:flex;
+  flex-direction:column;
+  min-height:120px;
+}
+
+.sidebarSectionHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  color:var(--text);
+  font-size:13px;
+  line-height:1.35;
+  font-weight:700;
+  margin:12px 0 6px;
+}
+
+.chatSearchInput{
+  width:100%;
+  min-height:34px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:transparent;
+  color:var(--text);
+  padding:8px 10px;
+  font-size:13px;
+  outline:none;
+}
+
+.chatSearchInput:focus{
+  border-color:var(--primary);
+  box-shadow:0 0 0 2px rgba(37,99,235,.12);
+}
+
 .modelArea{
   flex:0 0 auto;
-  padding-top:12px;
-  border-top:1px solid var(--border);
+  position:relative;
+  z-index:1;
+  padding-top:10px;
+  margin-top:10px;
+  background:var(--panel);
 }
 
 .modelLabel{
@@ -443,9 +487,19 @@ body.authenticated .loginScreen{
 
 .projectPanel{
   flex:0 0 auto;
-  margin-bottom:12px;
-  padding-bottom:12px;
-  border-bottom:1px solid var(--border);
+  max-height:40%;
+  min-height:0;
+  overflow-y:auto;
+  margin:6px 0 12px;
+  padding:2px 0 0;
+}
+
+.projectHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin-bottom:6px;
 }
 
 .projectLabel{
@@ -454,45 +508,288 @@ body.authenticated .loginScreen{
   margin-bottom:6px;
 }
 
-.projectSelect{
-  width:100%;
-  border:1px solid var(--border);
-  background:transparent;
+.projectSectionLabel{
   color:var(--text);
-  border-radius:12px;
-  padding:9px 10px;
   font-size:13px;
+  line-height:1.35;
+  font-weight:700;
 }
 
-.projectActions{
-  display:grid;
-  grid-template-columns:repeat(3, minmax(0,1fr));
-  gap:6px;
-  margin-top:8px;
-}
-
-.projectActionBtn{
+.projectHeaderBtn,
+.projectMenuBtn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
   border:1px solid var(--border);
   background:transparent;
   color:var(--text);
-  border-radius:10px;
-  min-height:30px;
-  padding:4px 6px;
-  font-size:12px;
   cursor:pointer;
 }
 
-.projectActionBtn:hover{
+.projectHeaderBtn{
+  width:24px;
+  height:24px;
+  border-radius:8px;
+  font-size:16px;
+  line-height:1;
+}
+
+.projectHeaderBtn:hover,
+.projectMenuBtn:hover{
   border-color:var(--primary);
   color:var(--primary);
 }
 
+.projectList{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+
+.projectRow{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  min-height:36px;
+  border-radius:10px;
+  padding:3px 4px 3px 6px;
+  border-left:3px solid transparent;
+}
+
+.projectRow.active{
+  background:rgba(37,99,235,.12);
+  border-left-color:var(--primary);
+  box-shadow:inset 0 0 0 1px rgba(37,99,235,.08);
+}
+
+.projectChevronBtn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:22px;
+  height:24px;
+  flex:0 0 auto;
+  border:none;
+  background:transparent;
+  color:var(--muted);
+  border-radius:7px;
+  cursor:pointer;
+  font-size:13px;
+  line-height:1;
+}
+
+.projectChevronBtn:hover{
+  color:var(--primary);
+  background:rgba(37,99,235,.08);
+}
+
+.projectNameBtn{
+  min-width:0;
+  flex:1;
+  border:none;
+  background:transparent;
+  color:var(--text);
+  padding:6px 0;
+  font-size:13px;
+  font-weight:600;
+  text-align:left;
+  cursor:pointer;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.projectRow.active .projectNameBtn{
+  color:var(--primary);
+  font-weight:700;
+}
+
+.projectStatusDot{
+  width:6px;
+  height:6px;
+  border-radius:999px;
+  background:#16a34a;
+  flex:0 0 auto;
+}
+
+.projectMenuBtn{
+  width:24px;
+  height:24px;
+  border-radius:8px;
+  font-size:16px;
+  line-height:1;
+  opacity:.72;
+}
+
+.projectConversationList{
+  flex:0 0 auto;
+  min-height:0;
+  max-height:220px;
+  margin:2px 0 8px 28px;
+  padding-left:6px;
+}
+
+.projectEmpty{
+  color:var(--muted);
+  font-size:12px;
+  padding:5px 8px;
+}
+
 .projectStatus{
-  min-height:16px;
-  margin-top:6px;
+  min-height:0;
+  margin:0 0 8px;
   color:var(--muted);
   font-size:11px;
   line-height:1.35;
+}
+
+.projectStatusMessage{
+  display:block;
+  margin-top:4px;
+  color:var(--muted);
+}
+
+.projectSettingsPopover{
+  position:fixed;
+  z-index:120;
+  left:248px;
+  top:88px;
+  width:min(520px, calc(100vw - 280px));
+  max-height:calc(100vh - 112px);
+  display:none;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:var(--panel);
+  box-shadow:0 24px 70px rgba(15,23,42,.24);
+  overflow:hidden;
+}
+
+.projectSettingsPopover.open{
+  display:flex;
+  flex-direction:column;
+}
+
+.projectSettingsPopoverHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:12px 14px;
+  border-bottom:1px solid var(--border);
+}
+
+.projectSettingsPopoverTitle{
+  font-weight:700;
+  color:var(--text);
+}
+
+.projectSettingsPopoverClose{
+  width:28px;
+  height:28px;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:transparent;
+  color:var(--text);
+  cursor:pointer;
+}
+
+.projectSettingsPopoverBody{
+  padding:12px 14px 14px;
+  overflow:auto;
+}
+
+.projectSettings{
+  margin:4px 0 8px;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:rgba(37,99,235,.025);
+}
+
+.projectSettings > summary{
+  cursor:pointer;
+  padding:7px 8px;
+  color:var(--text);
+  font-size:12px;
+  font-weight:600;
+  list-style:none;
+}
+
+.projectSettings > summary::-webkit-details-marker{
+  display:none;
+}
+
+.projectSettings > summary::after{
+  content:">";
+  float:right;
+  color:var(--muted);
+}
+
+.projectSettings[open] > summary::after{
+  content:"v";
+}
+
+.projectSettingsBody{
+  padding:0 8px 8px;
+}
+
+.projectSettingsPlaceholder{
+  display:block;
+  color:var(--muted);
+  font-size:11px;
+  padding:4px 0;
+}
+
+.projectRuntimeSummary{
+  display:block;
+  color:var(--muted);
+  font-size:11px;
+  line-height:1.35;
+  padding:0 8px 7px;
+}
+
+.projectRuntimeDetails{
+  margin-top:6px;
+  border-top:1px solid var(--border);
+}
+
+.projectRuntimeDetails > summary{
+  cursor:pointer;
+  color:var(--text);
+  font-size:12px;
+  padding:7px 0;
+}
+
+.projectActionMenu{
+  position:fixed;
+  z-index:80;
+  min-width:150px;
+  display:none;
+  padding:6px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--panel);
+  box-shadow:0 14px 32px rgba(15,23,42,.2);
+}
+
+.projectActionMenu.open{
+  display:block;
+}
+
+.projectActionMenu button{
+  width:100%;
+  border:0;
+  border-radius:8px;
+  background:transparent;
+  color:var(--text);
+  cursor:pointer;
+  padding:8px 10px;
+  font-size:13px;
+  text-align:left;
+}
+
+.projectActionMenu button:hover{
+  background:rgba(37,99,235,.08);
+  color:var(--primary);
 }
 
 .projectMeta{
@@ -640,7 +937,8 @@ body.dark .projectRuntimeItem{
   color:var(--text);
   border-radius:0;
   padding:7px 0;
-  font-size:13px;
+  font-size:12px;
+  font-weight:400;
   text-align:left;
   cursor:pointer;
   white-space:nowrap;
@@ -700,10 +998,8 @@ body.dark .projectRuntimeItem{
   overflow:hidden;
   display:flex;
   flex-direction:column;
-  border-top:1px solid var(--border);
-  border-bottom:1px solid var(--border);
-  padding:12px 0;
-  margin:0 0 14px;
+  padding:8px 0 10px;
+  margin:2px 0 10px;
 }
 
 .libraryPanel.collapsed{
@@ -2357,7 +2653,7 @@ body.dark .toolErrorNotice{
     <div class="brand">Workers <span>AI</span> Assistant</div>
     <div class="topbarActions">
       <button id="logoutBtn" class="themeBtn" type="button">Logout</button>
-      <button class="themeBtn" onclick="toggleTheme()">深色 / 浅色</button>
+      <button class="themeBtn" onclick="toggleTheme()">娣辫壊 / 娴呰壊</button>
     </div>
   </div>
 
@@ -2365,24 +2661,30 @@ body.dark .toolErrorNotice{
 
     <aside class="sidebar">
 
-      <div class="projectPanel">
-        <div class="projectLabel">Project</div>
-        <select id="projectSelect" class="projectSelect" aria-label="Project"></select>
-        <div class="projectActions">
-          <button id="createProjectBtn" class="projectActionBtn" type="button">New</button>
-          <button id="renameProjectBtn" class="projectActionBtn" type="button">Rename</button>
-          <button id="archiveProjectBtn" class="projectActionBtn" type="button">Archive</button>
-        </div>
-        <div id="projectStatus" class="projectStatus"></div>
-      </div>
-
       <button id="newChatBtn" class="newChatBtn" type="button">
         New Chat
       </button>
 
       <div class="sidebarMain">
 
-        <div id="conversationList" class="historyList"></div>
+        <div class="sidebarSection searchSection">
+          <input id="chatSearchInput" class="chatSearchInput" type="search" placeholder="Search Chats" aria-label="Search Chats" />
+        </div>
+
+        <div class="projectPanel sidebarSection">
+          <div class="projectHeader">
+            <span class="projectSectionLabel">Projects</span>
+            <button id="createProjectBtn" class="projectHeaderBtn" type="button" title="New Project" aria-label="New Project">+</button>
+          </div>
+          <div id="projectList" class="projectList"></div>
+        </div>
+
+        <div id="projectStatus" class="projectStatus"></div>
+
+        <div class="sidebarSection chatsSection">
+          <div class="sidebarSectionHeader">Chats</div>
+          <div id="conversationList" class="historyList"></div>
+        </div>
 
         <div id="libraryPanel" class="libraryPanel collapsed">
           <div id="libraryToggle" class="libraryHeader" role="button" tabindex="0" aria-expanded="false">
@@ -2417,16 +2719,16 @@ body.dark .toolErrorNotice{
       </div>
 
       <p class="sidebarIntro">
-        这是部署在 Cloudflare Workers 上的 AI 网页助手。
-        不依赖 VPS，不需要本地 GPU，直接调用 Workers AI。
+        杩欐槸閮ㄧ讲鍦?Cloudflare Workers 涓婄殑 AI 缃戦〉鍔╂墜銆?
+        涓嶄緷璧?VPS锛屼笉闇€瑕佹湰鍦?GPU锛岀洿鎺ヨ皟鐢?Workers AI銆?
       </p>
 
       <div class="sidebarBadges">
-        <div class="badge">多轮对话</div>
+        <div class="badge">澶氳疆瀵硅瘽</div>
         <div class="badge">Markdown</div>
-        <div class="badge">模型切换</div>
-        <div class="badge">打字机效果</div>
-        <div class="badge">深浅色切换</div>
+        <div class="badge">妯″瀷鍒囨崲</div>
+        <div class="badge">鎵撳瓧鏈烘晥鏋?</div>
+        <div class="badge">娣辨祬鑹插垏鎹?</div>
       </div>
 
       <div class="modelArea">
@@ -2451,6 +2753,14 @@ body.dark .toolErrorNotice{
 
     </aside>
 
+    <div id="projectSettingsPopover" class="projectSettingsPopover" hidden>
+      <div class="projectSettingsPopoverHeader">
+        <div class="projectSettingsPopoverTitle">Project Settings</div>
+        <button id="projectSettingsCloseBtn" class="projectSettingsPopoverClose" type="button" aria-label="Close Project Settings">X</button>
+      </div>
+      <div id="projectSettingsPopoverBody" class="projectSettingsPopoverBody"></div>
+    </div>
+
     <section class="chatCard">
 
       <div class="chatHeader">
@@ -2464,15 +2774,15 @@ body.dark .toolErrorNotice{
 
         <div id="welcomeCard" class="msg ai welcomeMsg">
           <div class="welcomeText">
-            你好，我是基于 Cloudflare Workers AI 的网页助手。
-            你可以问我问题，也可以让我写代码、总结、翻译或分析内容。
+            浣犲ソ锛屾垜鏄熀浜?Cloudflare Workers AI 鐨勭綉椤靛姪鎵嬨€?
+            浣犲彲浠ラ棶鎴戦棶棰橈紝涔熷彲浠ヨ鎴戝啓浠ｇ爜銆佹€荤粨銆佺炕璇戞垨鍒嗘瀽鍐呭銆?
           </div>
           <div class="welcomeActions">
             <label class="welcomeNeverShow">
               <input id="welcomeNeverShowInput" type="checkbox" />
-              <span>不再显示</span>
+              <span>涓嶅啀鏄剧ず</span>
             </label>
-            <button class="welcomeCloseBtn" type="button" aria-label="关闭欢迎提示">&times;</button>
+            <button class="welcomeCloseBtn" type="button" aria-label="鍏抽棴娆㈣繋鎻愮ず">&times;</button>
           </div>
         </div>
         <div id="searchResults"></div>
@@ -2499,7 +2809,7 @@ body.dark .toolErrorNotice{
   <div id="openClawTaskHistoryPanel" class="openClawTaskHistory" hidden>
     <div class="openClawTaskHistoryHeader">
       <strong>Task History</strong>
-      <button id="openClawTaskHistoryRefresh" type="button">刷新</button>
+      <button id="openClawTaskHistoryRefresh" type="button">鍒锋柊</button>
     </div>
     <div class="openClawTaskHistoryTabs">
       <button type="button" data-openclaw-task-view="recent" class="active">Recent</button>
@@ -2591,11 +2901,13 @@ const loginBtn = document.getElementById("loginBtn");
 const loginError = document.getElementById("loginError");
 const logoutBtn = document.getElementById("logoutBtn");
 const newChatBtn = document.getElementById("newChatBtn");
-const projectSelect = document.getElementById("projectSelect");
+const projectList = document.getElementById("projectList");
 const createProjectBtn = document.getElementById("createProjectBtn");
-const renameProjectBtn = document.getElementById("renameProjectBtn");
-const archiveProjectBtn = document.getElementById("archiveProjectBtn");
 const projectStatus = document.getElementById("projectStatus");
+const projectSettingsPopover = document.getElementById("projectSettingsPopover");
+const projectSettingsPopoverBody = document.getElementById("projectSettingsPopoverBody");
+const projectSettingsCloseBtn = document.getElementById("projectSettingsCloseBtn");
+const chatSearchInput = document.getElementById("chatSearchInput");
 const conversationList = document.getElementById("conversationList");
 const libraryPanel = document.getElementById("libraryPanel");
 const libraryToggle = document.getElementById("libraryToggle");
@@ -2635,9 +2947,32 @@ let currentConversationId = null;
 let conversationsCache = [];
 let projectsCache = [];
 let projectOpenClawRuntimes = [];
-let activeProjectId = localStorage.getItem("selected_project_id") || "default";
+let projectActionMenu = null;
+let projectActionMenuProjectId = "";
 const DEFAULT_PROJECT_ID = "default";
+const COMMON_WORKSPACE_KEY = "common";
 const SELECTED_PROJECT_STORAGE_KEY = "selected_project_id";
+const SELECTED_WORKSPACE_STORAGE_KEY = "selected_workspace";
+const EXPANDED_PROJECTS_STORAGE_KEY = "expanded_project_ids";
+function workspaceKeyForProjectId(projectId){
+  const id = String(projectId || "").trim();
+  return !id || id === DEFAULT_PROJECT_ID ? COMMON_WORKSPACE_KEY : "project:" + id;
+}
+function projectIdFromWorkspaceKey(workspaceKey){
+  const key = String(workspaceKey || "").trim();
+  return key.startsWith("project:") ? key.slice("project:".length) || DEFAULT_PROJECT_ID : DEFAULT_PROJECT_ID;
+}
+function parseExpandedProjectIds(value){
+  try{
+    const parsed = JSON.parse(value || "[]");
+    return Array.isArray(parsed) ? parsed.map(item => String(item || "").trim()).filter(Boolean) : [];
+  }catch(err){
+    return [];
+  }
+}
+let activeWorkspaceKey = localStorage.getItem(SELECTED_WORKSPACE_STORAGE_KEY) || workspaceKeyForProjectId(localStorage.getItem(SELECTED_PROJECT_STORAGE_KEY));
+let activeProjectId = projectIdFromWorkspaceKey(activeWorkspaceKey);
+let expandedProjectIds = new Set(parseExpandedProjectIds(localStorage.getItem(EXPANDED_PROJECTS_STORAGE_KEY)));
 const WELCOME_HIDDEN_KEY = "welcome_hidden";
 syncWelcomeVisibility();
 
@@ -2652,7 +2987,7 @@ let selectedWebPageChunks = [];
 let lastWebRelevantChunkCount = 0;
 
 const sendBtn = document.getElementById("sendBtn");
-const SEND_BUTTON_TEXT = sendBtn.textContent.trim() || "发送";
+const SEND_BUTTON_TEXT = sendBtn.textContent.trim() || "Send";
 const INPUT_MAX_HEIGHT = 180;
 let activeChatAbortController = null;
 let openClawWaitTimers = [];
@@ -2669,7 +3004,7 @@ let openClawAutoResumeAttempts = new Set();
 let openClawBridgeEventSource = null;
 let openClawBridgeEventTaskId = "";
 const OPENCLAW_RECONNECT_POLL_MS = 4000;
-const OPENCLAW_AUTO_RESUME_MESSAGE = "连接中断，正在尝试恢复远端任务……";
+const OPENCLAW_AUTO_RESUME_MESSAGE = "Connection interrupted; trying to resume the remote task...";
 
 const imageBtn = document.getElementById("imageBtn");
 const imageInput = document.getElementById("imageInput");
@@ -2802,7 +3137,7 @@ async function loadModels(){
       .forEach(model => {
         const option = document.createElement("option");
         option.value = model.id;
-        option.textContent = (model.label || model.id) + (model.recommended ? " · 推荐" : "");
+        option.textContent = (model.label || model.id) + (model.recommended ? " 路 鎺ㄨ崘" : "");
         option.dataset.provider = model.provider || "workers-ai";
         modelSelect.appendChild(option);
       });
@@ -2921,10 +3256,10 @@ async function syncSettingsToServer(settings){
       body:JSON.stringify({ settings })
     });
     if(!res.ok) throw new Error(await res.text());
-    settingsSyncStatus.textContent = "已同步";
+    settingsSyncStatus.textContent = "Synced";
   }catch(err){
     console.warn("settings sync failed", err);
-    settingsSyncStatus.textContent = "设置已本地保存，云端同步失败";
+    settingsSyncStatus.textContent = "璁剧疆宸叉湰鍦颁繚瀛橈紝浜戠鍚屾澶辫触";
   }
 }
 
@@ -2968,7 +3303,7 @@ function renderModelOptions(){
     }
     const option = document.createElement("option");
     option.value = model.id;
-    option.textContent = (model.label || model.id) + (model.recommended ? " / 推荐" : "");
+    option.textContent = (model.label || model.id) + (model.recommended ? " / 鎺ㄨ崘" : "");
     option.dataset.provider = model.provider || "";
     option.dataset.providerType = model.providerType || "";
     groups.get(groupLabel).appendChild(option);
@@ -2997,7 +3332,7 @@ function refreshSettingsControls(){
     if(includeEmpty){
       const empty = document.createElement("option");
       empty.value = "";
-      empty.textContent = "不使用";
+      empty.textContent = "None";
       select.appendChild(empty);
     }
     modelOptions.forEach(model => {
@@ -3585,7 +3920,7 @@ imageInput.addEventListener("change", () => {
   if (!file) return;
 
   if (!file.type.startsWith("image/")) {
-    alert("请选择图片文件");
+    alert("璇烽€夋嫨鍥剧墖鏂囦欢");
     return;
   }
 
@@ -3617,7 +3952,7 @@ async function searchWeb(){
   const query = input.value.trim();
 
   if(!query){
-    alert("请输入搜索关键词");
+    alert("璇疯緭鍏ユ悳绱㈠叧閿瘝");
     return;
   }
 
@@ -3640,7 +3975,7 @@ async function searchWeb(){
     const data = await res.json();
 
     if(!res.ok || !data.ok){
-      throw new Error(data.error || "搜索失败");
+      throw new Error(data.error || "鎼滅储澶辫触");
     }
 
     renderSearchResults(data.results || [], data);
@@ -3654,7 +3989,7 @@ async function searchWeb(){
   }catch(err){
 
     setContextStatus("\u641c\u7d22\u5931\u8d25");
-    alert("搜索失败：" + err.message);
+    alert("Search failed: " + err.message);
 
   }
 
@@ -3677,7 +4012,7 @@ function renderSearchResults(results, meta){
 
   if(!results.length){
     searchResults.innerHTML =
-      "<div class='msg ai'>没有找到搜索结果。</div>";
+      "<div class='msg ai'>娌℃湁鎵惧埌鎼滅储缁撴灉銆?/div>";
     return;
   }
 
@@ -3688,7 +4023,7 @@ function renderSearchResults(results, meta){
   const title = document.createElement("div");
   title.style.fontWeight = "700";
   title.style.marginBottom = "10px";
-  title.textContent = "搜索结果";
+  title.textContent = "鎼滅储缁撴灉";
   box.appendChild(title);
 
   const debugMeta = document.createElement("div");
@@ -4028,7 +4363,7 @@ async function webAnswer(){
   return;
 
   if(!query){
-    alert("请先在聊天框或搜索框输入问题");
+    alert("璇峰厛鍦ㄨ亰澶╂鎴栨悳绱㈡杈撳叆闂");
     return;
   }
 
@@ -4051,18 +4386,18 @@ async function webAnswer(){
     const data = await res.json();
 
     if(!res.ok || !data.ok){
-      throw new Error(data.error || "联网搜索失败");
+      throw new Error(data.error || "鑱旂綉鎼滅储澶辫触");
     }
 
     webSearchSources = data.pages || [];
 
     webSearchContext = webSearchSources.map((page, index) => {
       return [
-        "【来源 " + (index + 1) + "】",
-        "标题：" + page.title,
-        "URL：" + page.url,
-        "摘要：" + (page.description || ""),
-        "正文片段：",
+        "Source " + (index + 1),
+        "Title: " + page.title,
+        "URL: " + page.url,
+        "Summary: " + (page.description || ""),
+        "Text:",
         page.text
       ].join(String.fromCharCode(10));
     }).join(String.fromCharCode(10, 10));
@@ -4073,7 +4408,7 @@ async function webAnswer(){
     );
 
     if(!webSearchContext){
-      alert("搜索到了结果，但网页正文抓取失败。可以先用搜索结果手动抓取。");
+      alert("Search returned results, but page text extraction failed.");
       return;
     }
 
@@ -4082,7 +4417,7 @@ async function webAnswer(){
   }catch(err){
 
     setContextStatus("\u8054\u7f51\u56de\u7b54\u5931\u8d25");
-    alert("联网回答失败：" + err.message);
+    alert("Web answer failed: " + err.message);
 
   }
 
@@ -4099,12 +4434,12 @@ async function fetchWebPage(pageUrlFromResult){
   const pageUrl = (typeof pageUrlFromResult === "string" ? pageUrlFromResult : input.value).trim();
 
   if(!pageUrl){
-    alert("请先输入网页 URL");
+    alert("璇峰厛杈撳叆缃戦〉 URL");
     return;
   }
 
   if(!/^https?:\\/\\//i.test(pageUrl)){
-    alert("网址必须以 http:// 或 https:// 开头");
+    alert("URL must start with http:// or https://");
     return;
   }
 
@@ -4127,7 +4462,7 @@ async function fetchWebPage(pageUrlFromResult){
     const data = await res.json();
 
     if(!res.ok || !data.ok){
-      throw new Error(data.error || "网页抓取失败");
+      throw new Error(data.error || "缃戦〉鎶撳彇澶辫触");
     }
 
     selectedWebPage = {
@@ -4145,7 +4480,7 @@ async function fetchWebPage(pageUrlFromResult){
   }catch(err){
 
     setContextStatus("\u7f51\u9875\u6293\u53d6\u5931\u8d25" + (getCurrentContextStatus() ? "\uff0c" + getCurrentContextStatus() : ""));
-    alert("网页抓取失败：" + err.message);
+    alert("Page fetch failed: " + err.message);
 
   }
 
@@ -4155,7 +4490,7 @@ async function fetchWebPage(pageUrlFromResult){
 
 async function extractPdfText(file){
   if (!window.pdfjsLib) {
-    throw new Error("pdf.js 没有加载成功，请检查 CDN 是否可访问");
+    throw new Error("pdf.js did not load; check CDN access");
   }
 
   const arrayBuffer = await file.arrayBuffer();
@@ -4175,7 +4510,7 @@ async function extractPdfText(file){
       .map(item => item.str)
       .join(" ");
 
-    fullText += String.fromCharCode(10, 10) + "--- 第 " + pageNum + " 页 ---" + String.fromCharCode(10) + pageText;
+    fullText += String.fromCharCode(10, 10) + "--- 绗?" + pageNum + " 椤?---" + String.fromCharCode(10) + pageText;
   }
 
   return fullText.trim();
@@ -4184,7 +4519,7 @@ async function extractPdfText(file){
 async function extractDocxText(file){
   
   if (!window.mammoth) {
-    throw new Error("mammoth.js 没有加载成功，请检查 CDN 是否可访问");
+    throw new Error("mammoth.js did not load; check CDN access");
   }
 
   const arrayBuffer = await file.arrayBuffer();
@@ -4222,7 +4557,7 @@ function pickRelevantChunks(question, chunks, maxChunks = 6){
 
   const queryWords = question
     .toLowerCase()
-    .split(/[\\s,.;:!?，。；：！？、()（）\\[\\]{}'"“”‘’]+/)
+    .split(/[\\s,.;:!?()\\[\\]{}'"-]+/)
     .filter(word => word.length >= 2);
 
   if(queryWords.length === 0){
@@ -4252,7 +4587,7 @@ function pickRelevantChunks(question, chunks, maxChunks = 6){
     .filter(item => item.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, maxChunks)
-    .map(item => "【片段 " + (item.index + 1) + "】" + String.fromCharCode(10) + item.chunk);
+    .map(item => "Chunk " + (item.index + 1) + String.fromCharCode(10) + item.chunk);
 
   return picked.length ? picked : chunks.slice(0, maxChunks);
 }
@@ -4273,7 +4608,7 @@ async function uploadFileToLibrary(file, textContent){
   const data = await res.json();
 
   if(!res.ok || !data.ok){
-    throw new Error(data.error || "文件上传失败");
+    throw new Error(data.error || "鏂囦欢涓婁紶澶辫触");
   }
 
   return data.file;
@@ -4297,7 +4632,7 @@ fileInput.addEventListener("change", async () => {
   const isDocxFile = name.endsWith(".docx");
 
   if (!isTextFile && !isPdfFile && !isDocxFile) {
-    alert("当前支持 TXT / Markdown / PDF / DOCX 文件");
+    alert("褰撳墠鏀寔 TXT / Markdown / PDF / DOCX 鏂囦欢");
     fileInput.value = "";
     return;
   }
@@ -4327,14 +4662,14 @@ fileInput.addEventListener("change", async () => {
         const reader = new FileReader();
 
         reader.onload = () => resolve(reader.result || "");
-        reader.onerror = () => reject(new Error("文件读取失败"));
+        reader.onerror = () => reject(new Error("鏂囦欢璇诲彇澶辫触"));
 
         reader.readAsText(file, "utf-8");
       });
     }
 
     if(!selectedFileText.trim()){
-      throw new Error("没有提取到文本内容");
+      throw new Error("No text content extracted");
     }
     selectedFileChunks = splitTextIntoChunks(selectedFileText);
     const savedFile = await uploadFileToLibrary(file, selectedFileText);
@@ -4359,7 +4694,7 @@ fileInput.addEventListener("change", async () => {
 
   }catch(err){
 
-    alert("文件读取失败：" + err.message);
+    alert("File read failed: " + err.message);
 
     selectedFile = previousFile;
     selectedFileId = previousFileId;
@@ -4417,7 +4752,7 @@ let modelHealthCollapsed = false;
 const conversation = [
   {
     role:"system",
-    content:"你是一个网页 AI 助手，请简洁、准确、友好地回答。可以使用 Markdown。"
+    content:"You are a web AI assistant. Answer concisely, accurately, and helpfully. Markdown is allowed."
   }
 ];
 
@@ -4439,7 +4774,7 @@ function setupSettingsHeaderActions(){
   actions.appendChild(applySettingsBtn);
   actions.appendChild(saveSettingsBtn);
   actions.appendChild(closeSettingsBtn);
-  closeSettingsBtn.textContent = "×";
+  closeSettingsBtn.textContent = "X";
   closeSettingsBtn.className = "settingsIconBtn";
   closeSettingsBtn.setAttribute("aria-label", "Close");
 
@@ -4460,7 +4795,7 @@ function createEditDialog(){
     "<div class='editDialogPanel' role='dialog' aria-modal='true'>",
     "<div class='settingsHeader'>",
     "<h3 id='editDialogTitle'>编辑</h3>",
-    "<button id='editDialogCloseBtn' class='settingsIconBtn' type='button' aria-label='Close'>×</button>",
+    "<button id='editDialogCloseBtn' class='settingsIconBtn' type='button' aria-label='Close'>X</button>",
     "</div>",
     "<div id='editDialogBody' class='editDialogGrid'></div>",
     "<div class='editDialogFooter'>",
@@ -4499,6 +4834,7 @@ function closeEditDialog(){
     editDialog.body.innerHTML = "";
     editDialog.saveBtn.onclick = null;
     editDialog.deleteBtn.onclick = null;
+    editDialog.deleteBtn.style.display = "";
     editDialog.mode = "";
     editDialog.providerId = "";
     editDialog.modelId = "";
@@ -4624,7 +4960,7 @@ function saveSettingsFromUi(closeAfter){
     modelSettingsState.lastModel = "";
   }
 
-  persistSettings(closeAfter ? "已保存" : "已应用", Boolean(closeAfter));
+  persistSettings(closeAfter ? "Saved" : "Applied", Boolean(closeAfter));
 }
 
 function addProvider(){
@@ -4634,14 +4970,14 @@ function addProvider(){
   const apiKeyEnv = providerApiKeyEnvInput.value.trim();
 
   if(!label){
-    settingsSyncStatus.textContent = "请填写 provider 名称";
+    settingsSyncStatus.textContent = "璇峰～鍐?provider 鍚嶇О";
     return;
   }
 
   const id = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || ("provider-" + Date.now());
 
   if(getProvider(id)){
-    settingsSyncStatus.textContent = "provider 已存在";
+    settingsSyncStatus.textContent = "Provider already exists";
     return;
   }
 
@@ -4657,7 +4993,7 @@ function addProvider(){
   providerLabelInput.value = "";
   providerBaseUrlInput.value = "";
   providerApiKeyEnvInput.value = "";
-  saveCurrentSettings("已添加 provider");
+  saveCurrentSettings("宸叉坊鍔?provider");
 }
 
 function addProviderModel(){
@@ -4667,7 +5003,7 @@ function addProviderModel(){
   const modelName = modelNameInput.value.trim() || id;
 
   if(!provider || !id){
-    settingsSyncStatus.textContent = "请选择 provider 并填写模型 ID";
+    settingsSyncStatus.textContent = "璇烽€夋嫨 provider 骞跺～鍐欐ā鍨?ID";
     return;
   }
 
@@ -4685,19 +5021,19 @@ function addProviderModel(){
   modelLabelInput.value = "";
   modelIdInput.value = "";
   modelNameInput.value = "";
-  saveCurrentSettings("已添加模型");
+  saveCurrentSettings("Added model");
 }
 
 function removeProvider(providerId){
   modelProviders = modelProviders.filter(provider => provider.id !== providerId);
-  saveCurrentSettings("已删除 provider");
+  saveCurrentSettings("宸插垹闄?provider");
 }
 
 function removeProviderModel(providerId, modelId){
   const provider = getProvider(providerId);
   if(!provider) return;
   provider.models = (provider.models || []).filter(model => model.id !== modelId);
-  saveCurrentSettings("已删除模型");
+  saveCurrentSettings("Deleted model");
 }
 
 function renderProvidersList(){
@@ -4714,7 +5050,7 @@ function renderProvidersList(){
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
       removeBtn.className = "settingsBtn";
-      removeBtn.textContent = "删除 provider";
+      removeBtn.textContent = "鍒犻櫎 provider";
       removeBtn.addEventListener("click", () => removeProvider(provider.id));
       header.appendChild(removeBtn);
     }
@@ -4727,7 +5063,7 @@ function renderProvidersList(){
       const removeModelBtn = document.createElement("button");
       removeModelBtn.type = "button";
       removeModelBtn.className = "settingsBtn";
-      removeModelBtn.textContent = "删除";
+      removeModelBtn.textContent = "鍒犻櫎";
       removeModelBtn.addEventListener("click", () => removeProviderModel(provider.id, model.id));
       modelRow.appendChild(name);
       modelRow.appendChild(removeModelBtn);
@@ -4772,7 +5108,7 @@ function pruneInvalidModelReferences(){
 function editProvider(providerId){
   const provider = getProvider(providerId);
   if(!provider || !providerEditable(provider)){
-    settingsSyncStatus.textContent = "当前 provider 不可编辑";
+    settingsSyncStatus.textContent = "褰撳墠 provider 涓嶅彲缂栬緫";
     return;
   }
   editingProviderId = provider.id;
@@ -4781,7 +5117,7 @@ function editProvider(providerId){
   providerTypeSelect.value = provider.providerType || "openai-compatible";
   providerBaseUrlInput.value = provider.apiBase || "";
   providerApiKeyEnvInput.value = provider.apiKeyEnv || "";
-  addProviderBtn.textContent = "保存 provider 修改";
+  addProviderBtn.textContent = "淇濆瓨 provider 淇敼";
   cancelProviderEditBtn.style.display = "inline-block";
 }
 
@@ -4789,7 +5125,7 @@ function editProviderModel(providerId, modelId){
   const provider = getProvider(providerId);
   const model = provider?.models?.find(item => item.id === modelId);
   if(!provider || !model || !modelEditable(model)){
-    settingsSyncStatus.textContent = "当前模型不可编辑";
+    settingsSyncStatus.textContent = "褰撳墠妯″瀷涓嶅彲缂栬緫";
     return;
   }
   editingModelRef = { providerId, modelId };
@@ -4797,7 +5133,7 @@ function editProviderModel(providerId, modelId){
   modelLabelInput.value = model.label || model.id;
   modelIdInput.value = model.id;
   modelNameInput.value = model.modelName || model.id;
-  addProviderModelBtn.textContent = "保存模型修改";
+  addProviderModelBtn.textContent = "淇濆瓨妯″瀷淇敼";
   cancelModelEditBtn.style.display = "inline-block";
 }
 
@@ -4812,7 +5148,7 @@ function saveSettingsFromUi(closeAfter){
     modelSelect.value = nextDefault;
   }
   modelSettingsState.lastModel = modelSettingsState.rememberLastModel && nextDefault ? nextDefault : "";
-  persistSettings(closeAfter ? "已保存" : "已应用", Boolean(closeAfter));
+  persistSettings(closeAfter ? "Saved" : "Applied", Boolean(closeAfter));
 }
 
 function addProvider(){
@@ -4825,18 +5161,18 @@ function addProvider(){
   const apiKeyEnv = providerApiKeyEnvInput.value.trim();
 
   if(!label || !id){
-    settingsSyncStatus.textContent = "provider id 和名称不能为空";
+    settingsSyncStatus.textContent = "Provider id and name are required";
     return;
   }
   if(modelProviders.some(provider => provider.id === id && provider.id !== editingProviderId)){
-    settingsSyncStatus.textContent = "provider id 已存在";
+    settingsSyncStatus.textContent = "Provider id already exists";
     return;
   }
 
   if(editingProviderId){
     const provider = getProvider(editingProviderId);
     if(!provider || !providerEditable(provider)){
-      settingsSyncStatus.textContent = "当前 provider 不可编辑";
+      settingsSyncStatus.textContent = "褰撳墠 provider 涓嶅彲缂栬緫";
       return;
     }
     provider.id = id;
@@ -4851,7 +5187,7 @@ function addProvider(){
       apiKeyEnv:provider.apiKeyEnv
     }));
     clearProviderForm();
-    refreshDraftSettings("已更新 provider");
+    refreshDraftSettings("宸叉洿鏂?provider");
     return;
   }
 
@@ -4866,7 +5202,7 @@ function addProvider(){
     models:[]
   });
   clearProviderForm();
-  refreshDraftSettings("已添加 provider");
+  refreshDraftSettings("宸叉坊鍔?provider");
 }
 
 function addProviderModel(){
@@ -4876,11 +5212,11 @@ function addProviderModel(){
   const modelName = modelNameInput.value.trim() || id;
 
   if(!provider || !id || !label){
-    settingsSyncStatus.textContent = "请选择 provider 并填写模型 id/name";
+    settingsSyncStatus.textContent = "璇烽€夋嫨 provider 骞跺～鍐欐ā鍨?id/name";
     return;
   }
   if((provider.models || []).some(model => model.id === id && !(editingModelRef && editingModelRef.providerId === provider.id && editingModelRef.modelId === model.id))){
-    settingsSyncStatus.textContent = "同一 provider 下 model id 不能重复";
+    settingsSyncStatus.textContent = "鍚屼竴 provider 涓?model id 涓嶈兘閲嶅";
     return;
   }
 
@@ -4888,7 +5224,7 @@ function addProviderModel(){
     const originalProvider = getProvider(editingModelRef.providerId);
     const originalModel = originalProvider?.models?.find(model => model.id === editingModelRef.modelId);
     if(!originalProvider || !originalModel || !modelEditable(originalModel)){
-      settingsSyncStatus.textContent = "当前模型不可编辑";
+      settingsSyncStatus.textContent = "褰撳墠妯″瀷涓嶅彲缂栬緫";
       return;
     }
     originalProvider.models = (originalProvider.models || []).filter(model => model.id !== editingModelRef.modelId);
@@ -4908,16 +5244,16 @@ function addProviderModel(){
     editable:true
   });
   clearModelForm();
-  refreshDraftSettings(editingModelRef ? "已更新模型" : "已添加模型");
+  refreshDraftSettings(editingModelRef ? "Updated model" : "Added model");
 }
 
 function removeProvider(providerId){
   const provider = getProvider(providerId);
   if(!provider || !providerEditable(provider)){
-    settingsSyncStatus.textContent = "当前 provider 不可删除";
+    settingsSyncStatus.textContent = "褰撳墠 provider 涓嶅彲鍒犻櫎";
     return;
   }
-  if(!confirm("确定删除 provider " + provider.label + " 吗？")){
+  if(!confirm("纭畾鍒犻櫎 provider " + provider.label + " 鍚楋紵")){
     return;
   }
   if(editingProviderId === providerId){
@@ -4928,17 +5264,17 @@ function removeProvider(providerId){
   }
   modelProviders = modelProviders.filter(provider => provider.id !== providerId);
   pruneInvalidModelReferences();
-  refreshDraftSettings("已删除 provider");
+  refreshDraftSettings("宸插垹闄?provider");
 }
 
 function removeProviderModel(providerId, modelId){
   const provider = getProvider(providerId);
   const targetModel = provider?.models?.find(model => model.id === modelId);
   if(!provider || !targetModel || !modelEditable(targetModel)){
-    settingsSyncStatus.textContent = "当前模型不可删除";
+    settingsSyncStatus.textContent = "褰撳墠妯″瀷涓嶅彲鍒犻櫎";
     return;
   }
-  if(!confirm("确定删除模型 " + (targetModel.label || targetModel.id) + " 吗？")){
+  if(!confirm("纭畾鍒犻櫎妯″瀷 " + (targetModel.label || targetModel.id) + " 鍚楋紵")){
     return;
   }
   if(editingModelRef?.providerId === providerId && editingModelRef?.modelId === modelId){
@@ -4946,7 +5282,7 @@ function removeProviderModel(providerId, modelId){
   }
   provider.models = (provider.models || []).filter(model => model.id !== modelId);
   pruneInvalidModelReferences();
-  refreshDraftSettings("已删除模型");
+  refreshDraftSettings("Deleted model");
 }
 
 function renderProvidersList(){
@@ -4963,7 +5299,7 @@ function renderProvidersList(){
       const editBtn = document.createElement("button");
       editBtn.type = "button";
       editBtn.className = "settingsBtn";
-      editBtn.textContent = "编辑";
+      editBtn.textContent = "缂栬緫";
       editBtn.addEventListener("click", () => editProvider(provider.id));
       header.appendChild(editBtn);
     }
@@ -4971,7 +5307,7 @@ function renderProvidersList(){
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
       removeBtn.className = "settingsBtn";
-      removeBtn.textContent = "删除 provider";
+      removeBtn.textContent = "鍒犻櫎 provider";
       removeBtn.addEventListener("click", () => removeProvider(provider.id));
       header.appendChild(removeBtn);
     }
@@ -4985,14 +5321,14 @@ function renderProvidersList(){
         const editModelBtn = document.createElement("button");
         editModelBtn.type = "button";
         editModelBtn.className = "settingsBtn";
-        editModelBtn.textContent = "编辑";
+        editModelBtn.textContent = "缂栬緫";
         editModelBtn.addEventListener("click", () => editProviderModel(provider.id, model.id));
         modelRow.appendChild(editModelBtn);
       }
       const removeModelBtn = document.createElement("button");
       removeModelBtn.type = "button";
       removeModelBtn.className = "settingsBtn";
-      removeModelBtn.textContent = "删除";
+      removeModelBtn.textContent = "鍒犻櫎";
       removeModelBtn.addEventListener("click", () => removeProviderModel(provider.id, model.id));
       modelRow.prepend(name);
       modelRow.appendChild(removeModelBtn);
@@ -5028,11 +5364,11 @@ async function syncSettingsToServer(settings){
       settings.version = data.version || data.updatedAt;
       writeSettingsCache(settings);
     }
-    settingsSyncStatus.textContent = "已同步";
+    settingsSyncStatus.textContent = "Synced";
     return true;
   }catch(err){
     console.warn("settings sync failed", err);
-    settingsSyncStatus.textContent = "已本地保存，云端同步失败";
+    settingsSyncStatus.textContent = "宸叉湰鍦颁繚瀛橈紝浜戠鍚屾澶辫触";
     return false;
   }
 }
@@ -5068,7 +5404,7 @@ function saveSettingsFromUi(closeAfter){
     modelSelect.value = nextDefault;
   }
   modelSettingsState.lastModel = modelSettingsState.rememberLastModel && nextDefault ? nextDefault : "";
-  persistSettings(closeAfter ? "已保存" : "已应用", Boolean(closeAfter));
+  persistSettings(closeAfter ? "Saved" : "Applied", Boolean(closeAfter));
 }
 
 function addProvider(){
@@ -5080,17 +5416,17 @@ function addProvider(){
   const apiBase = providerBaseUrlInput.value.trim();
   const apiKeyEnv = providerApiKeyEnvInput.value.trim();
   if(!label || !id){
-    settingsSyncStatus.textContent = "provider id 和名称不能为空";
+    settingsSyncStatus.textContent = "Provider id and name are required";
     return;
   }
   if(modelProviders.some(provider => provider.id === id && provider.id !== editingProviderId)){
-    settingsSyncStatus.textContent = "provider id 已存在";
+    settingsSyncStatus.textContent = "Provider id already exists";
     return;
   }
   if(editingProviderId){
     const provider = getProvider(editingProviderId);
     if(!provider || !providerEditable(provider)){
-      settingsSyncStatus.textContent = "当前 provider 不可编辑";
+      settingsSyncStatus.textContent = "褰撳墠 provider 涓嶅彲缂栬緫";
       return;
     }
     provider.id = id;
@@ -5105,7 +5441,7 @@ function addProvider(){
       apiKeyEnv:provider.apiKeyEnv
     }));
     clearProviderForm();
-    refreshDraftSettings("已更新 provider");
+    refreshDraftSettings("宸叉洿鏂?provider");
     return;
   }
   modelProviders.push({
@@ -5119,7 +5455,7 @@ function addProvider(){
     models:[]
   });
   clearProviderForm();
-  refreshDraftSettings("已添加 provider");
+  refreshDraftSettings("宸叉坊鍔?provider");
 }
 
 function addProviderModel(){
@@ -5129,18 +5465,18 @@ function addProviderModel(){
   const modelName = modelNameInput.value.trim() || id;
   const wasEditing = Boolean(editingModelRef);
   if(!provider || !id || !label){
-    settingsSyncStatus.textContent = "请选择 provider 并填写模型 id/name";
+    settingsSyncStatus.textContent = "璇烽€夋嫨 provider 骞跺～鍐欐ā鍨?id/name";
     return;
   }
   if((provider.models || []).some(model => model.id === id && !(editingModelRef && editingModelRef.providerId === provider.id && editingModelRef.modelId === model.id))){
-    settingsSyncStatus.textContent = "同一 provider 下 model id 不能重复";
+    settingsSyncStatus.textContent = "鍚屼竴 provider 涓?model id 涓嶈兘閲嶅";
     return;
   }
   if(editingModelRef){
     const originalProvider = getProvider(editingModelRef.providerId);
     const originalModel = originalProvider?.models?.find(model => model.id === editingModelRef.modelId);
     if(!originalProvider || !originalModel || !modelEditable(originalModel)){
-      settingsSyncStatus.textContent = "当前模型不可编辑";
+      settingsSyncStatus.textContent = "褰撳墠妯″瀷涓嶅彲缂栬緫";
       return;
     }
     originalProvider.models = (originalProvider.models || []).filter(model => model.id !== editingModelRef.modelId);
@@ -5159,16 +5495,16 @@ function addProviderModel(){
     editable:true
   });
   clearModelForm();
-  refreshDraftSettings(wasEditing ? "已更新模型" : "已添加模型");
+  refreshDraftSettings(wasEditing ? "Updated model" : "Added model");
 }
 
 function removeProvider(providerId){
   const provider = getProvider(providerId);
   if(!provider || !providerEditable(provider)){
-    settingsSyncStatus.textContent = "当前 provider 不可删除";
+    settingsSyncStatus.textContent = "褰撳墠 provider 涓嶅彲鍒犻櫎";
     return;
   }
-  if(!confirm("确定删除 provider " + provider.label + " 吗？")){
+  if(!confirm("纭畾鍒犻櫎 provider " + provider.label + " 鍚楋紵")){
     return;
   }
   if(editingProviderId === providerId){
@@ -5179,17 +5515,17 @@ function removeProvider(providerId){
   }
   modelProviders = modelProviders.filter(provider => provider.id !== providerId);
   pruneInvalidModelReferences();
-  refreshDraftSettings("已删除 provider");
+  refreshDraftSettings("宸插垹闄?provider");
 }
 
 function removeProviderModel(providerId, modelId){
   const provider = getProvider(providerId);
   const targetModel = provider?.models?.find(model => model.id === modelId);
   if(!provider || !targetModel || !modelEditable(targetModel)){
-    settingsSyncStatus.textContent = "当前模型不可删除";
+    settingsSyncStatus.textContent = "褰撳墠妯″瀷涓嶅彲鍒犻櫎";
     return;
   }
-  if(!confirm("确定删除模型 " + (targetModel.label || targetModel.id) + " 吗？")){
+  if(!confirm("纭畾鍒犻櫎妯″瀷 " + (targetModel.label || targetModel.id) + " 鍚楋紵")){
     return;
   }
   if(editingModelRef?.providerId === providerId && editingModelRef?.modelId === modelId){
@@ -5197,7 +5533,7 @@ function removeProviderModel(providerId, modelId){
   }
   provider.models = (provider.models || []).filter(model => model.id !== modelId);
   pruneInvalidModelReferences();
-  refreshDraftSettings("已删除模型");
+  refreshDraftSettings("Deleted model");
 }
 
 function renderProvidersList(){
@@ -5214,7 +5550,7 @@ function renderProvidersList(){
       const editBtn = document.createElement("button");
       editBtn.type = "button";
       editBtn.className = "settingsBtn";
-      editBtn.textContent = "编辑";
+      editBtn.textContent = "缂栬緫";
       editBtn.addEventListener("click", () => editProvider(provider.id));
       header.appendChild(editBtn);
     }
@@ -5222,7 +5558,7 @@ function renderProvidersList(){
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
       removeBtn.className = "settingsBtn";
-      removeBtn.textContent = "删除 provider";
+      removeBtn.textContent = "鍒犻櫎 provider";
       removeBtn.addEventListener("click", () => removeProvider(provider.id));
       header.appendChild(removeBtn);
     }
@@ -5237,14 +5573,14 @@ function renderProvidersList(){
         const editModelBtn = document.createElement("button");
         editModelBtn.type = "button";
         editModelBtn.className = "settingsBtn";
-        editModelBtn.textContent = "编辑";
+        editModelBtn.textContent = "缂栬緫";
         editModelBtn.addEventListener("click", () => editProviderModel(provider.id, model.id));
         modelRow.appendChild(editModelBtn);
       }
       const removeModelBtn = document.createElement("button");
       removeModelBtn.type = "button";
       removeModelBtn.className = "settingsBtn";
-      removeModelBtn.textContent = "删除";
+      removeModelBtn.textContent = "鍒犻櫎";
       removeModelBtn.addEventListener("click", () => removeProviderModel(provider.id, model.id));
       modelRow.appendChild(removeModelBtn);
       row.appendChild(modelRow);
@@ -5263,12 +5599,12 @@ function addProvider(){
   const apiKeyEnv = providerApiKeyEnvInput.value.trim();
 
   if(!label || !id){
-    settingsSyncStatus.textContent = "provider id 和名称不能为空";
+    settingsSyncStatus.textContent = "Provider id and name are required";
     return;
   }
 
   if(modelProviders.some(provider => provider.id === id)){
-    settingsSyncStatus.textContent = "provider id 已存在";
+    settingsSyncStatus.textContent = "Provider id already exists";
     return;
   }
 
@@ -5293,12 +5629,12 @@ function addProviderModel(){
   const modelName = modelNameInput.value.trim() || id;
 
   if(!provider || !id || !label){
-    settingsSyncStatus.textContent = "请选择 provider 并填写模型 id/name";
+    settingsSyncStatus.textContent = "璇烽€夋嫨 provider 骞跺～鍐欐ā鍨?id/name";
     return;
   }
 
   if((provider.models || []).some(model => model.id === id)){
-    settingsSyncStatus.textContent = "同一 provider 下 model id 不能重复";
+    settingsSyncStatus.textContent = "鍚屼竴 provider 涓?model id 涓嶈兘閲嶅";
     return;
   }
 
@@ -5322,14 +5658,14 @@ function editProvider(providerId){
   const provider = getProvider(providerId);
 
   if(!provider || !providerEditable(provider)){
-    settingsSyncStatus.textContent = "当前 provider 不可编辑";
+    settingsSyncStatus.textContent = "褰撳墠 provider 涓嶅彲缂栬緫";
     return;
   }
 
   const dialog = createEditDialog();
   dialog.mode = "provider";
   dialog.providerId = providerId;
-  dialog.title.textContent = "编辑 provider";
+  dialog.title.textContent = "缂栬緫 provider";
   dialog.body.innerHTML = [
     "<label class='settingsField'>Name<input id='editProviderLabel' /></label>",
     "<label class='settingsField'>Provider ID<input id='editProviderId' /></label>",
@@ -5345,7 +5681,7 @@ function editProvider(providerId){
   dialog.deleteBtn.style.display = provider.builtin ? "none" : "inline-block";
   dialog.saveBtn.onclick = () => saveProviderDialog(providerId);
   dialog.deleteBtn.onclick = () => {
-    if(confirm("确定删除 provider " + (provider.label || provider.id) + " 吗？")){
+    if(confirm("纭畾鍒犻櫎 provider " + (provider.label || provider.id) + " 鍚楋紵")){
       removeProvider(providerId);
       closeEditDialog();
     }
@@ -5363,12 +5699,12 @@ function saveProviderDialog(originalId){
   const apiKeyEnv = dialog.body.querySelector("#editProviderApiKeyEnv").value.trim();
 
   if(!provider || !label || !id){
-    settingsSyncStatus.textContent = "provider id 和 name 不能为空";
+    settingsSyncStatus.textContent = "provider id 鍜?name 涓嶈兘涓虹┖";
     return;
   }
 
   if(modelProviders.some(item => item.id === id && item.id !== originalId)){
-    settingsSyncStatus.textContent = "provider id 已存在";
+    settingsSyncStatus.textContent = "Provider id already exists";
     return;
   }
 
@@ -5384,7 +5720,7 @@ function saveProviderDialog(originalId){
     apiKeyEnv:provider.apiKeyEnv || ""
   }));
   closeEditDialog();
-  persistSettings("已更新 provider", false);
+  persistSettings("宸叉洿鏂?provider", false);
 }
 
 function editProviderModel(providerId, modelId){
@@ -5392,7 +5728,7 @@ function editProviderModel(providerId, modelId){
   const model = provider?.models?.find(item => item.id === modelId);
 
   if(!provider || !model || !modelEditable(model)){
-    settingsSyncStatus.textContent = "当前模型不可编辑";
+    settingsSyncStatus.textContent = "褰撳墠妯″瀷涓嶅彲缂栬緫";
     return;
   }
 
@@ -5400,7 +5736,7 @@ function editProviderModel(providerId, modelId){
   dialog.mode = "model";
   dialog.providerId = providerId;
   dialog.modelId = modelId;
-  dialog.title.textContent = "编辑 model";
+  dialog.title.textContent = "缂栬緫 model";
   dialog.body.innerHTML = [
     "<label class='settingsField'>Name<input id='editModelLabel' /></label>",
     "<label class='settingsField'>Model ID<input id='editModelId' /></label>",
@@ -5412,7 +5748,7 @@ function editProviderModel(providerId, modelId){
   dialog.deleteBtn.style.display = "inline-block";
   dialog.saveBtn.onclick = () => saveModelDialog(providerId, modelId);
   dialog.deleteBtn.onclick = () => {
-    if(confirm("确定删除模型 " + (model.label || model.id) + " 吗？")){
+    if(confirm("纭畾鍒犻櫎妯″瀷 " + (model.label || model.id) + " 鍚楋紵")){
       removeProviderModel(providerId, modelId);
       closeEditDialog();
     }
@@ -5429,12 +5765,12 @@ function saveModelDialog(providerId, originalModelId){
   const model = provider?.models?.find(item => item.id === originalModelId);
 
   if(!provider || !model || !label || !id){
-    settingsSyncStatus.textContent = "model id 和 name 不能为空";
+    settingsSyncStatus.textContent = "model id 鍜?name 涓嶈兘涓虹┖";
     return;
   }
 
   if((provider.models || []).some(item => item.id === id && item.id !== originalModelId)){
-    settingsSyncStatus.textContent = "同一 provider 下 model id 不能重复";
+    settingsSyncStatus.textContent = "鍚屼竴 provider 涓?model id 涓嶈兘閲嶅";
     return;
   }
 
@@ -5450,13 +5786,13 @@ function removeProvider(providerId){
   const provider = getProvider(providerId);
 
   if(!provider || !providerEditable(provider)){
-    settingsSyncStatus.textContent = "当前 provider 不可删除";
+    settingsSyncStatus.textContent = "褰撳墠 provider 涓嶅彲鍒犻櫎";
     return;
   }
 
   modelProviders = modelProviders.filter(item => item.id !== providerId);
   pruneInvalidModelReferences();
-  persistSettings("已删除 provider", false);
+  persistSettings("宸插垹闄?provider", false);
 }
 
 function removeProviderModel(providerId, modelId){
@@ -5468,7 +5804,7 @@ function removeProviderModel(providerId, modelId){
 
   provider.models = (provider.models || []).filter(model => model.id !== modelId);
   pruneInvalidModelReferences();
-  persistSettings("已删除模型", false);
+  persistSettings("Deleted model", false);
 }
 
 function renderProvidersList(){
@@ -5493,7 +5829,7 @@ function renderProvidersList(){
       const editBtn = document.createElement("button");
       editBtn.type = "button";
       editBtn.className = "settingsBtn";
-      editBtn.textContent = "编辑";
+      editBtn.textContent = "缂栬緫";
       editBtn.addEventListener("click", () => editProvider(provider.id));
       actions.appendChild(editBtn);
     }
@@ -5519,7 +5855,7 @@ function renderProvidersList(){
         const editModelBtn = document.createElement("button");
         editModelBtn.type = "button";
         editModelBtn.className = "settingsBtn";
-        editModelBtn.textContent = "编辑";
+        editModelBtn.textContent = "缂栬緫";
         editModelBtn.addEventListener("click", () => editProviderModel(provider.id, model.id));
         modelActions.appendChild(editModelBtn);
       }
@@ -5533,7 +5869,7 @@ function renderProvidersList(){
 }
 
 const MODEL_CATEGORY_DEFS = [
-  { type:"workers-hosted", label:"Workers 托管", hint:"直接托管在 Cloudflare Workers AI 的模型" },
+  { type:"workers-hosted", label:"Workers hosted", hint:"Models hosted directly on Cloudflare Workers AI" },
   { type:"claude-compatible", label:"Claude 兼容", hint:"默认走 Cloudflare proxied Claude，可配置 provider" },
   { type:"openai-compatible", label:"OpenAI 兼容", hint:"OpenAI-compatible baseUrl + apiKeyEnv provider" }
 ];
@@ -5929,7 +6265,7 @@ function refreshSettingsControls(){
     if(includeEmpty){
       const empty = document.createElement("option");
       empty.value = "";
-      empty.textContent = "不使用";
+      empty.textContent = "None";
       select.appendChild(empty);
     }
     modelOptions.forEach(model => {
@@ -6081,7 +6417,7 @@ function addProvider(){
   const baseUrl = providerBaseUrlInput.value.trim();
   const apiKeyEnv = providerApiKeyEnvInput.value.trim();
   if(!providerName || !providerId){
-    settingsSyncStatus.textContent = "provider id 和名称不能为空";
+    settingsSyncStatus.textContent = "Provider id and name are required";
     return;
   }
   if(providerType !== "claude-compatible" && providerType !== "openai-compatible"){
@@ -6089,7 +6425,7 @@ function addProvider(){
     return;
   }
   if(modelProviders.some(provider => provider.id === providerId)){
-    settingsSyncStatus.textContent = "provider id 已存在";
+    settingsSyncStatus.textContent = "Provider id already exists";
     return;
   }
   getCategory(providerType).providers.push({
@@ -6103,7 +6439,7 @@ function addProvider(){
     models:[]
   });
   clearProviderForm();
-  persistSettings("已添加 provider", false);
+  persistSettings("宸叉坊鍔?provider", false);
 }
 
 function addProviderModel(){
@@ -6138,14 +6474,14 @@ function addProviderModel(){
       return;
     }
     if((found.provider.models || []).some(item => item.modelId === modelId)){
-      settingsSyncStatus.textContent = "同一 provider 下 model id 不能重复";
+      settingsSyncStatus.textContent = "同一 provider 中 model id 不能重复";
       return;
     }
     found.provider.models = found.provider.models || [];
     found.provider.models.push(model);
   }
   clearModelForm();
-  persistSettings("已添加模型", false);
+  persistSettings("Added model", false);
 }
 
 function editProvider(providerId){
@@ -6210,7 +6546,7 @@ function saveProviderDialog(originalId){
     return;
   }
   if(modelProviders.some(provider => provider.id === providerId && provider.id !== originalId)){
-    settingsSyncStatus.textContent = "provider id 已存在";
+    settingsSyncStatus.textContent = "Provider id already exists";
     return;
   }
   found.category.providers = (found.category.providers || []).filter(provider => provider.providerId !== originalId);
@@ -6278,7 +6614,7 @@ function saveModelDialog(providerId, originalModelId){
     return;
   }
   if((modelList || []).some(item => item.modelId === modelId && item.modelId !== originalModelId)){
-    settingsSyncStatus.textContent = "同一分组下 model id 不能重复";
+    settingsSyncStatus.textContent = "同一分组中 model id 不能重复";
     return;
   }
   model.displayName = displayName;
@@ -6288,7 +6624,7 @@ function saveModelDialog(providerId, originalModelId){
   model.notes = notes;
   updateModelReferences(originalModelId, modelId);
   closeEditDialog();
-  persistSettings("已更新模型", false);
+  persistSettings("Updated model", false);
 }
 
 function removeProvider(providerId, skipDialogClose){
@@ -6296,7 +6632,7 @@ function removeProvider(providerId, skipDialogClose){
   if(!found){
     return;
   }
-  if(!confirm("确定删除 provider " + (found.provider.providerName || found.provider.providerId) + " 吗？其下模型会同时删除。")){
+  if(!confirm("Delete provider " + (found.provider.providerName || found.provider.providerId) + "? Models under it will also be deleted.")){
     return;
   }
   found.category.providers = (found.category.providers || []).filter(provider => provider.providerId !== providerId);
@@ -6304,7 +6640,7 @@ function removeProvider(providerId, skipDialogClose){
   if(skipDialogClose){
     closeEditDialog();
   }
-  persistSettings("已删除 provider", false);
+  persistSettings("Deleted provider", false);
 }
 
 function removeProviderModel(providerId, modelId, skipDialogClose){
@@ -6328,7 +6664,7 @@ function removeProviderModel(providerId, modelId, skipDialogClose){
   if(skipDialogClose){
     closeEditDialog();
   }
-  persistSettings("已删除模型", false);
+  persistSettings("Deleted model", false);
 }
 
 function toggleModelCategory(type){
@@ -6368,10 +6704,10 @@ function formatHealthCheckedAt(checkedAt){
 
 function healthIcon(result){
   if(result.ok){
-    return "✅";
+    return "OK";
   }
   const status = String(result.status || "");
-  return status === "429" ? "⚠️" : "❌";
+  return status === "429" ? "WARN" : "ERR";
 }
 
 function updateModelHealthActions(){
@@ -6470,7 +6806,7 @@ async function runModelHealthCheck(){
     const res = await fetch("/api/model-health");
     const data = await res.json();
     if(!res.ok || !data.ok){
-      throw new Error(data.error || "模型健康检查失败");
+      throw new Error(data.error || "Model health check failed");
     }
     modelHealthCache = data.results || [];
     renderModelHealthResults(modelHealthCache);
@@ -6480,7 +6816,7 @@ async function runModelHealthCheck(){
       modelHealthResults.innerHTML = "";
       const item = document.createElement("div");
       item.className = "modelHealthItem";
-      item.textContent = err.message || "模型健康检查失败";
+      item.textContent = err.message || "Model health check failed";
       modelHealthResults.appendChild(item);
       updateModelHealthActions();
     });
@@ -6507,7 +6843,7 @@ function createActionMenu(items){
   const button = document.createElement("button");
   button.type = "button";
   button.className = "actionMenuButton";
-  button.textContent = "⋯";
+  button.textContent = "...";
   button.setAttribute("aria-label", "更多操作");
   button.setAttribute("aria-expanded", "false");
   const menu = document.createElement("div");
@@ -6582,11 +6918,11 @@ function saveNewProviderDialog(categoryType){
     baseUrl
   });
   if(!providerName || !providerId){
-    settingsSyncStatus.textContent = "provider id 和名称不能为空";
+    settingsSyncStatus.textContent = "Provider id and name are required";
     return;
   }
   if(modelProviders.some(provider => provider.id === providerId)){
-    settingsSyncStatus.textContent = "provider id 已存在";
+    settingsSyncStatus.textContent = "Provider id already exists";
     return;
   }
   getCategory(categoryType).providers.push({
@@ -6661,14 +6997,14 @@ function saveNewModelDialog(providerId){
       return;
     }
     if((found.provider.models || []).some(item => item.modelId === modelId)){
-      settingsSyncStatus.textContent = "同一 provider 下 model id 不能重复";
+      settingsSyncStatus.textContent = "鍚屼竴 provider 涓?model id 涓嶈兘閲嶅";
       return;
     }
     found.provider.models = found.provider.models || [];
     found.provider.models.push(model);
   }
   closeEditDialog();
-  persistSettings("已添加模型", false);
+  persistSettings("Added model", false);
 }
 
 function appendModelRow(container, providerId, model){
@@ -6765,7 +7101,7 @@ function renderProvidersList(){
         const removeBtn = document.createElement("button");
         removeBtn.type = "button";
         removeBtn.className = "settingsBtn";
-        removeBtn.textContent = "删除";
+        removeBtn.textContent = "鍒犻櫎";
         removeBtn.addEventListener("click", () => removeProvider(provider.providerId));
         const addBtn = document.createElement("button");
         addBtn.type = "button";
@@ -7058,9 +7394,9 @@ function clearOpenClawWaitTimers(){
 function startOpenClawWaitHints(aiDiv){
   clearOpenClawWaitTimers();
   const hints = [
-    [15000, "OpenClaw 仍在处理，请继续等待……"],
-    [45000, "任务较慢，可能正在执行工具、访问网页或操作 VPS……"],
-    [90000, "OpenClaw 仍未返回。你可以继续等待，或停止本次请求。"]
+    [15000, "OpenClaw is still processing. Please keep waiting..."],
+    [45000, "This task is taking longer, possibly using tools or remote operations..."],
+    [90000, "OpenClaw has not returned yet. You can keep waiting or stop this request."]
   ];
 
   openClawWaitTimers = hints.map(([delay, message]) => setTimeout(() => {
@@ -7073,8 +7409,8 @@ function startOpenClawWaitHints(aiDiv){
     }
     if(delay >= 90000){
       sendBtn.disabled = false;
-      sendBtn.textContent = "停止";
-      sendBtn.title = "停止本次 OpenClaw 请求";
+      sendBtn.textContent = "鍋滄";
+      sendBtn.title = "鍋滄鏈 OpenClaw 璇锋眰";
     }
   }, delay));
 }
@@ -7091,12 +7427,12 @@ function stopActiveChatRequest(){
 function openClawFriendlyError(err){
   const message = err?.message || "";
   if(err?.name === "AbortError"){
-    return "已停止本次 OpenClaw 请求。";
+    return "Stopped this OpenClaw request.";
   }
   if(/network|connection|fetch|abort|lost|timed out|timeout/i.test(message)){
-    return "OpenClaw 长任务连接中断，任务可能仍在远端执行。你可以稍后检查 OpenClaw WebChat 或重新发起请求。";
+    return "The OpenClaw long-running task connection was interrupted. The task may still be running remotely.";
   }
-  return "请求失败：" + message;
+  return "Request failed: " + message;
 }
 
 function isOpenClawProviderError(error){
@@ -7145,17 +7481,17 @@ function openClawAutoResumeAttemptKey(conversationId, taskId){
 
 function openClawTaskStatusLabel(status){
   const labels = {
-    running:"本地记录：仍在等待",
-    pending:"等待中",
-    completed:"已完成",
-    failed:"请求失败",
-    aborted:"已停止本地等待",
-    cancelled:"已取消",
+    running:"Local record: still waiting",
+    pending:"Pending",
+    completed:"Completed",
+    failed:"璇锋眰澶辫触",
+    aborted:"Stopped local wait",
+    cancelled:"Cancelled",
     cancel_requested:"Cancel requested",
-    disconnected:"连接已中断",
-    expired:"本地记录已过期"
+    disconnected:"Disconnected",
+    expired:"Local record expired"
   };
-  return labels[status] || status || "未知";
+  return labels[status] || status || "鏈煡";
 }
 
 function openClawTaskRemoteStatus(task){
@@ -7250,11 +7586,11 @@ function formatOpenClawTaskTime(value){
   }
   const seconds = Math.max(1, Math.round((Date.now() - time) / 1000));
   if(seconds < 60){
-    return seconds + " 秒前";
+    return seconds + " 绉掑墠";
   }
   const minutes = Math.round(seconds / 60);
   if(minutes < 60){
-    return minutes + " 分钟前";
+    return minutes + " minutes ago";
   }
   return new Date(time).toLocaleString();
 }
@@ -7357,7 +7693,7 @@ function progressQuestionLooksLikeLocalTaskStatus(message){
   if(!text || text.length > 80){
     return false;
   }
-  return /进展|怎么样|如何了|完成了吗|结束了吗|还在运行|状态|进度|status|progress|done|finished|running/i.test(text);
+  return /杩涘睍|鎬庝箞鏍穦濡備綍浜唡瀹屾垚浜嗗悧|缁撴潫浜嗗悧|杩樺湪杩愯|鐘舵€亅杩涘害|status|progress|done|finished|running/i.test(text);
 }
 
 function openClawTaskHasRemoteId(task){
@@ -7365,13 +7701,13 @@ function openClawTaskHasRemoteId(task){
 }
 
 function openClawTaskBannerTitle(task){
-  return openClawTaskHasRemoteId(task) ? "OpenClaw 远端任务" : "OpenClaw 本地任务记录";
+  return openClawTaskHasRemoteId(task) ? "OpenClaw remote task" : "OpenClaw local task record";
 }
 
 function openClawTaskBannerDisclaimer(task){
   return openClawTaskHasRemoteId(task)
-    ? "这是 OpenClaw 远端任务记录；Worker 会轮询远端状态，但不能恢复远端 stream。"
-    : "这是 Worker 本地记录，不能确认 VPS 端真实进度，也不能恢复远端 stream。";
+    ? "This is an OpenClaw remote task record. Worker can poll remote status but cannot restore remote stream."
+    : "This is a Worker local record. It cannot confirm VPS-side progress or restore remote stream.";
 }
 
 function renderOpenClawTaskBanner(){
@@ -7411,16 +7747,16 @@ function renderOpenClawTaskBanner(){
     remoteMessage ? "<br />" + escapeHtml(remoteMessage) : "",
     task.projectId || task.project_id ? "<br />project: " + escapeHtml(task.projectId || task.project_id) : "",
     task.runtimeId || task.runtime_id ? "<br />runtime: " + escapeHtml(task.runtimeId || task.runtime_id) : "",
-    modelLabel ? "<br />模型：" + escapeHtml(modelLabel) : "",
-    started ? "<br />开始：" + escapeHtml(started) : "",
+    modelLabel ? "<br />Model: " + escapeHtml(modelLabel) : "",
+    started ? "<br />Started: " + escapeHtml(started) : "",
     "<br />" + escapeHtml(openClawTaskBannerDisclaimer(task)),
     "</div>",
     "<div class='openClawTaskActions'>",
-    "<button type='button' data-openclaw-task-action='view'>查看记录</button>",
+    "<button type='button' data-openclaw-task-action='view'>View record</button>",
     shouldShowOpenClawCancel(task) ? "<button type='button' data-openclaw-task-action='cancel'>Cancel</button>" : "",
-    isOpenClawTaskPending(task) ? "<button type='button' data-openclaw-task-action='wait'>继续等待</button>" : "",
-    "<button type='button' data-openclaw-task-action='rerun'>重新发起</button>",
-    "<button type='button' data-openclaw-task-action='ignore'>忽略</button>",
+    isOpenClawTaskPending(task) ? "<button type='button' data-openclaw-task-action='wait'>Keep waiting</button>" : "",
+    "<button type='button' data-openclaw-task-action='rerun'>Rerun</button>",
+    "<button type='button' data-openclaw-task-action='ignore'>Ignore</button>",
     "</div>"
   ].join("");
   openClawTaskBanner.dataset.taskId = task.id;
@@ -7942,7 +8278,7 @@ function showOpenClawProgressIntercept(){
   if(!task){
     return;
   }
-  setContextStatus("检测到这个会话已有 OpenClaw 长任务记录。当前只能查看 Worker 本地状态，不能确认远端真实进度。");
+  setContextStatus("This conversation has an OpenClaw long-running task record. Worker can show local status only.");
   renderOpenClawTaskBanner();
 }
 
@@ -7970,12 +8306,12 @@ function showOpenClawTaskRecord(task){
 function formatTaskDuration(task){
   const duration = Number(task.duration_ms ?? task.durationMs ?? task.latencyMs ?? 0);
   if(!duration){
-    return "耗时 --";
+    return "鑰楁椂 --";
   }
   if(duration < 1000){
-    return "耗时 " + duration + "ms";
+    return "鑰楁椂 " + duration + "ms";
   }
-  return "耗时 " + (duration / 1000).toFixed(1).replace(/\.0$/, "") + "s";
+  return "鑰楁椂 " + (duration / 1000).toFixed(1).replace(/\.0$/, "") + "s";
 }
 
 function formatTaskAbsoluteTime(value){
@@ -8015,8 +8351,8 @@ function renderOpenClawTaskHistory(tasks){
     const empty = document.createElement("div");
     empty.className = "openClawTaskHistoryItem";
     empty.textContent = openClawTaskHistoryView === "conversation" && !currentConversationId
-      ? "当前还没有会话。"
-      : "暂无 OpenClaw 任务记录。";
+      ? "No conversation yet"
+      : "No OpenClaw task records.";
     openClawTaskHistoryList.appendChild(empty);
     return;
   }
@@ -8033,15 +8369,15 @@ function renderOpenClawTaskHistory(tasks){
       "<strong>" + escapeHtml(openClawTaskStatusLabel(status)) + "</strong>",
       "<span>" + escapeHtml(formatTaskDuration(task)) + "</span>",
       "</div>",
-      "<div class='openClawTaskHistoryPreview'>" + escapeHtml(prompt || "无摘要") + "</div>",
+      "<div class='openClawTaskHistoryPreview'>" + escapeHtml(prompt || "No summary") + "</div>",
       "<div class='openClawTaskHistoryMeta'>",
       escapeHtml(model || "model --"),
-      " · ",
+      " 路 ",
       escapeHtml(taskConversationLabel(task)),
-      "<br />开始：" + escapeHtml(formatTaskAbsoluteTime(task.created_at || task.started_at || task.startedAt)),
-      task.finished_at || task.completedAt ? "<br />完成：" + escapeHtml(formatTaskAbsoluteTime(task.finished_at || task.completedAt)) : "",
+      "<br />Started: " + escapeHtml(formatTaskAbsoluteTime(task.created_at || task.started_at || task.startedAt)),
+      task.finished_at || task.completedAt ? "<br />Completed: " + escapeHtml(formatTaskAbsoluteTime(task.finished_at || task.completedAt)) : "",
       "</div>",
-      error ? "<details class='openClawTaskHistoryError'><summary>错误摘要</summary><div>" + escapeHtml(error) + "</div></details>" : ""
+      error ? "<details class='openClawTaskHistoryError'><summary>閿欒鎽樿</summary><div>" + escapeHtml(error) + "</div></details>" : ""
     ].join("");
     openClawTaskHistoryList.appendChild(item);
   });
@@ -8057,7 +8393,7 @@ async function loadOpenClawTaskHistory(view = openClawTaskHistoryView){
     renderOpenClawTaskHistory([]);
     return;
   }
-  openClawTaskHistoryList.innerHTML = "<div class='openClawTaskHistoryItem'>正在加载...</div>";
+  openClawTaskHistoryList.innerHTML = "<div class='openClawTaskHistoryItem'>姝ｅ湪鍔犺浇...</div>";
   try{
     const res = await fetch("/api/openclaw/tasks?" + params.toString(), {
       credentials:"include"
@@ -8114,10 +8450,10 @@ function renderWelcomeCard(){
 
   return [
     "<div id='welcomeCard' class='msg ai welcomeMsg'>",
-    "<div class='welcomeText'>你好，我是基于 Cloudflare Workers AI 的网页助手。你可以问我问题，也可以让我写代码、总结、翻译或分析内容。</div>",
+    "<div class='welcomeText'>浣犲ソ锛屾垜鏄熀浜?Cloudflare Workers AI 鐨勭綉椤靛姪鎵嬨€備綘鍙互闂垜闂锛屼篃鍙互璁╂垜鍐欎唬鐮併€佹€荤粨銆佺炕璇戞垨鍒嗘瀽鍐呭銆?/div>",
     "<div class='welcomeActions'>",
-    "<label class='welcomeNeverShow'><input id='welcomeNeverShowInput' type='checkbox' /><span>不再显示</span></label>",
-    "<button class='welcomeCloseBtn' type='button' aria-label='关闭欢迎提示'>&times;</button>",
+    "<label class='welcomeNeverShow'><input id='welcomeNeverShowInput' type='checkbox' /><span>涓嶅啀鏄剧ず</span></label>",
+    "<button class='welcomeCloseBtn' type='button' aria-label='鍏抽棴娆㈣繋鎻愮ず'>&times;</button>",
     "</div>",
     "</div>"
   ].join("");
@@ -8149,10 +8485,10 @@ function resetChatView(){
 }
 
 function setActiveConversation(){
-  conversationList.querySelectorAll(".historyItem").forEach(item => {
+  document.querySelectorAll(".historyItem").forEach(item => {
     item.classList.toggle("active", item.dataset.id === currentConversationId);
   });
-  conversationList.querySelectorAll(".historyRow").forEach(row => {
+  document.querySelectorAll(".historyRow").forEach(row => {
     row.classList.toggle("active", row.dataset.id === currentConversationId);
   });
 }
@@ -8172,7 +8508,7 @@ async function loadSummaryStatus(){
     const data = await res.json();
 
     if(!res.ok || !data.ok){
-      throw new Error(data.error || "加载摘要失败");
+      throw new Error(data.error || "鍔犺浇鎽樿澶辫触");
     }
 
     setSummaryStatus(Boolean((data.summary || "").trim()));
@@ -8189,7 +8525,7 @@ async function viewCurrentSummary(){
   const summary = (data?.summary || "").trim();
 
   if(!summary){
-    alert("当前会话还没有摘要。");
+    alert("Current conversation has no summary.");
     return;
   }
 
@@ -8233,6 +8569,14 @@ function activeProject(){
   return projectsCache.find(project => project.id === activeProjectId) || projectsCache.find(project => project.id === DEFAULT_PROJECT_ID) || projectsCache[0] || null;
 }
 
+function realProjects(){
+  return projectsCache.filter(project => project.id !== DEFAULT_PROJECT_ID && !project.is_default);
+}
+
+function isCommonWorkspace(){
+  return activeProjectId === DEFAULT_PROJECT_ID || activeWorkspaceKey === COMMON_WORKSPACE_KEY;
+}
+
 function setProjectStatus(message){
   if(projectStatus){
     projectStatus.innerHTML = message || "";
@@ -8240,26 +8584,125 @@ function setProjectStatus(message){
 }
 
 function projectName(project){
-  return project?.name || project?.id || "Default Project";
+  if(!project || project.id === DEFAULT_PROJECT_ID || project.is_default){
+    return "Chats";
+  }
+  return project.name || project.id || "Project";
 }
 
-function persistActiveProject(projectId){
-  activeProjectId = projectId || DEFAULT_PROJECT_ID;
+function persistActiveWorkspace(workspaceKey){
+  activeWorkspaceKey = workspaceKey || COMMON_WORKSPACE_KEY;
+  activeProjectId = projectIdFromWorkspaceKey(activeWorkspaceKey);
+  localStorage.setItem(SELECTED_WORKSPACE_STORAGE_KEY, activeWorkspaceKey);
   localStorage.setItem(SELECTED_PROJECT_STORAGE_KEY, activeProjectId);
 }
 
+function persistActiveProject(projectId){
+  persistActiveWorkspace(workspaceKeyForProjectId(projectId));
+}
+
+function persistExpandedProjects(){
+  localStorage.setItem(EXPANDED_PROJECTS_STORAGE_KEY, JSON.stringify([...expandedProjectIds]));
+}
+
+function isProjectExpanded(projectId){
+  return expandedProjectIds.has(projectId);
+}
+
+function setProjectExpanded(projectId, expanded){
+  const id = String(projectId || "").trim();
+  if(!id || id === DEFAULT_PROJECT_ID){
+    return;
+  }
+  if(expanded){
+    expandedProjectIds.add(id);
+  }else{
+    expandedProjectIds.delete(id);
+  }
+  persistExpandedProjects();
+}
+
+async function toggleProjectExpanded(projectId){
+  setProjectExpanded(projectId, !isProjectExpanded(projectId));
+  renderProjectSelector();
+  renderProjectRuntimeStatus();
+  if(projectId === activeProjectId && isProjectExpanded(projectId)){
+    await loadConversations();
+  }
+}
+
 function renderProjectSelector(){
-  projectSelect.innerHTML = "";
-  projectsCache.forEach(project => {
-    const option = document.createElement("option");
-    option.value = project.id;
-    option.textContent = projectName(project);
-    projectSelect.appendChild(option);
+  projectList.innerHTML = "";
+  const projects = realProjects();
+  if(!projects.length){
+    const empty = document.createElement("div");
+    empty.className = "projectEmpty";
+    empty.textContent = "No projects";
+    projectList.appendChild(empty);
+  }
+  projects.forEach(project => {
+    const isActiveProject = !isCommonWorkspace() && project.id === activeProjectId;
+    const isExpandedProject = isActiveProject && isProjectExpanded(project.id);
+    const row = document.createElement("div");
+    row.className = "projectRow" + (isActiveProject ? " active" : "") + (isExpandedProject ? " expanded" : " collapsed");
+    row.dataset.projectId = project.id;
+    row.addEventListener("click", () => switchProject(project.id));
+
+    const chevronBtn = document.createElement("button");
+    chevronBtn.type = "button";
+    chevronBtn.className = "projectChevronBtn";
+    chevronBtn.textContent = isExpandedProject ? String.fromCharCode(9662) : String.fromCharCode(9656);
+    chevronBtn.title = isExpandedProject ? "Collapse project" : "Expand project";
+    chevronBtn.setAttribute("aria-expanded", isExpandedProject ? "true" : "false");
+    chevronBtn.addEventListener("click", event => {
+      event.stopPropagation();
+      if(project.id !== activeProjectId || isCommonWorkspace()){
+        setProjectExpanded(project.id, true);
+        switchProject(project.id);
+      }else{
+        toggleProjectExpanded(project.id);
+      }
+    });
+
+    const dot = document.createElement("span");
+    dot.className = "projectStatusDot";
+    dot.title = project.is_archived ? "Archived" : "Active";
+
+    const nameBtn = document.createElement("button");
+    nameBtn.type = "button";
+    nameBtn.className = "projectNameBtn";
+    nameBtn.textContent = projectName(project);
+    nameBtn.title = projectName(project);
+    nameBtn.addEventListener("click", event => {
+      event.stopPropagation();
+      switchProject(project.id);
+    });
+
+    const menuBtn = document.createElement("button");
+    menuBtn.type = "button";
+    menuBtn.className = "projectMenuBtn";
+    menuBtn.textContent = "...";
+    menuBtn.title = "Project actions";
+    menuBtn.setAttribute("aria-label", "Project actions for " + projectName(project));
+    menuBtn.addEventListener("click", event => {
+      event.stopPropagation();
+      openProjectMenu(project.id, menuBtn);
+    });
+
+    row.appendChild(chevronBtn);
+    row.appendChild(dot);
+    row.appendChild(nameBtn);
+    row.appendChild(menuBtn);
+    projectList.appendChild(row);
+
+    if(isExpandedProject){
+      const mount = document.createElement("div");
+      mount.id = "projectConversationMount";
+      mount.className = "historyList projectConversationList";
+      projectList.appendChild(mount);
+    }
   });
-  projectSelect.value = activeProjectId;
-  const project = activeProject();
-  renameProjectBtn.disabled = !project;
-  archiveProjectBtn.disabled = !project || project.id === DEFAULT_PROJECT_ID || Boolean(project.is_default);
+  conversationList.hidden = false;
 }
 
 function runtimeCapabilityLabel(binding){
@@ -8398,19 +8841,90 @@ function renderRuntimeBinding(binding){
   ].join("");
 }
 
-function renderProjectRuntimeStatus(){
-  const project = activeProject();
-  const sections = [renderProjectMeta(project)];
-  if(!projectOpenClawRuntimes.length){
-    sections.push("<div class='projectRuntimeList'><div class='projectRuntimeItem'><span class='projectRuntimeWarning'>No OpenClaw runtime bound.</span></div></div>");
-    setProjectStatus(sections.join(""));
+function renderRuntimeSummary(binding){
+  if(!binding){
+    return "No OpenClaw runtime bound.";
+  }
+  const runtime = binding.runtime || {};
+  const mode = runtime.bridge_mode === "bridge" ? "Bridge" : (runtime.bridge_mode || "mode unknown");
+  return escapeHtml(runtime.display_name || binding.runtime_id) + "<br>" + escapeHtml(mode + " / " + (binding.default_agent_id || "agent not configured"));
+}
+
+function renderRuntimeSettingsSection(){
+  const defaultBinding = projectOpenClawRuntimes.find(binding => binding.is_default) || projectOpenClawRuntimes[0] || null;
+  const details = projectOpenClawRuntimes.length
+    ? projectOpenClawRuntimes.map(renderRuntimeBinding).join("")
+    : "<div class='projectRuntimeItem'><span class='projectRuntimeWarning'>No OpenClaw runtime bound.</span></div>";
+  return [
+    "<span class='projectRuntimeSummary'>" + renderRuntimeSummary(defaultBinding) + "</span>",
+    "<details class='projectRuntimeDetails'>",
+    "<summary>Runtime</summary>",
+    "<div class='projectRuntimeList'>" + details + "</div>",
+    "</details>"
+  ].join("");
+}
+
+function closeProjectSettingsPopover(){
+  projectSettingsPopover.classList.remove("open");
+  projectSettingsPopover.hidden = true;
+}
+
+function openProjectSettingsPopover(){
+  if(isCommonWorkspace()){
     return;
   }
-  sections.push("<div class='projectRuntimeList'>" + projectOpenClawRuntimes.map(renderRuntimeBinding).join("") + "</div>");
-  setProjectStatus(sections.join(""));
+  renderProjectSettingsPopover();
+  projectSettingsPopover.hidden = false;
+  projectSettingsPopover.classList.add("open");
+}
+
+function renderProjectSettingsPopover(){
+  if(isCommonWorkspace()){
+    projectSettingsPopoverBody.innerHTML = "";
+    closeProjectSettingsPopover();
+    return;
+  }
+  const project = activeProject();
+  projectSettingsPopoverBody.innerHTML = [
+    renderProjectMeta(project),
+    renderRuntimeSettingsSection(),
+    "<span class='projectSettingsPlaceholder'>Variables</span>",
+    "<span class='projectSettingsPlaceholder'>Memory</span>",
+    "<span class='projectSettingsPlaceholder'>Knowledge Base</span>",
+    "<span class='projectSettingsPlaceholder'>Automation</span>"
+  ].join("");
+}
+
+async function openProjectSettingsForProject(projectId){
+  const project = projectById(projectId);
+  if(!project || project.id === DEFAULT_PROJECT_ID || project.is_default){
+    return;
+  }
+  if(activeProjectId !== project.id || isCommonWorkspace()){
+    await switchProject(project.id);
+  }else{
+    renderProjectSelector();
+    await loadProjectOpenClawRuntimes();
+  }
+  openProjectSettingsPopover();
+}
+
+function renderProjectRuntimeStatus(){
+  if(isCommonWorkspace()){
+    setProjectStatus("");
+    renderProjectSettingsPopover();
+    return;
+  }
+  setProjectStatus("");
+  renderProjectSettingsPopover();
 }
 
 async function loadProjectOpenClawRuntimes(){
+  if(isCommonWorkspace()){
+    projectOpenClawRuntimes = [];
+    renderProjectRuntimeStatus();
+    return;
+  }
   try{
     const res = await fetch("/api/projects/" + encodeURIComponent(activeProjectId || DEFAULT_PROJECT_ID) + "/openclaw-runtimes");
     const data = await res.json();
@@ -8423,10 +8937,14 @@ async function loadProjectOpenClawRuntimes(){
     console.warn("load project OpenClaw runtimes failed", err);
     projectOpenClawRuntimes = [];
     setProjectStatus("OpenClaw runtimes unavailable.");
+    renderProjectSettingsPopover();
   }
 }
 
 async function updateProjectRuntimeBinding(runtimeId, patch){
+  if(isCommonWorkspace()){
+    throw new Error("Project settings are not available for general chats");
+  }
   const res = await fetch(
     "/api/projects/" + encodeURIComponent(activeProjectId || DEFAULT_PROJECT_ID) + "/openclaw-runtimes/" + encodeURIComponent(runtimeId),
     {
@@ -8452,7 +8970,8 @@ async function setDefaultProjectRuntime(runtimeId){
     return;
   }
   if(!runtimeCanBeBridgeDefault(binding)){
-    setProjectStatus(renderProjectMeta(activeProject()) + "<div class='projectRuntimeList'>" + projectOpenClawRuntimes.map(renderRuntimeBinding).join("") + "</div><span class='projectRuntimeWarning'>Cannot set disabled, unverified, or Bridge-unsupported runtime as default.</span>");
+    setProjectStatus("Cannot set disabled, unverified, or Bridge-unsupported runtime as default.");
+    renderProjectSettingsPopover();
     return;
   }
   try{
@@ -8462,7 +8981,8 @@ async function setDefaultProjectRuntime(runtimeId){
     });
     await loadProjectOpenClawRuntimes();
   }catch(err){
-    setProjectStatus(renderProjectMeta(activeProject()) + "<span class='projectRuntimeWarning'>Set default failed: " + escapeHtml(err.message || String(err)) + "</span>");
+    setProjectStatus("Set default failed: " + (err.message || String(err)));
+    renderProjectSettingsPopover();
   }
 }
 
@@ -8478,7 +8998,8 @@ async function toggleProjectRuntimeBinding(runtimeId){
     });
     await loadProjectOpenClawRuntimes();
   }catch(err){
-    setProjectStatus(renderProjectMeta(activeProject()) + "<span class='projectRuntimeWarning'>Runtime update failed: " + escapeHtml(err.message || String(err)) + "</span>");
+    setProjectStatus("Runtime update failed: " + (err.message || String(err)));
+    renderProjectSettingsPopover();
   }
 }
 
@@ -8489,7 +9010,8 @@ async function changeDefaultRuntimeAgent(runtimeId, agentId){
     });
     await loadProjectOpenClawRuntimes();
   }catch(err){
-    setProjectStatus(renderProjectMeta(activeProject()) + "<span class='projectRuntimeWarning'>Agent update failed: " + escapeHtml(err.message || String(err)) + "</span>");
+    setProjectStatus("Agent update failed: " + (err.message || String(err)));
+    renderProjectSettingsPopover();
   }
 }
 
@@ -8501,9 +9023,13 @@ async function loadProjects(){
       throw new Error(data.error || "load projects failed");
     }
     projectsCache = Array.isArray(data.projects) ? data.projects : [];
-    const activeExists = projectsCache.some(project => project.id === activeProjectId);
-    if(!activeExists){
-      persistActiveProject(projectsCache.find(project => project.id === DEFAULT_PROJECT_ID)?.id || projectsCache[0]?.id || DEFAULT_PROJECT_ID);
+    if(activeProjectId === DEFAULT_PROJECT_ID){
+      persistActiveWorkspace(COMMON_WORKSPACE_KEY);
+    }else{
+      const active = projectsCache.find(project => project.id === activeProjectId && project.id !== DEFAULT_PROJECT_ID && !project.is_default && !project.is_archived);
+      if(!active){
+        persistActiveWorkspace(COMMON_WORKSPACE_KEY);
+      }
     }
     renderProjectSelector();
     await loadProjectOpenClawRuntimes();
@@ -8513,32 +9039,65 @@ async function loadProjects(){
     if(!projectsCache.length){
       projectsCache = [{
         id:DEFAULT_PROJECT_ID,
-        name:"Default Project",
+        name:"Chats",
         is_default:true,
         is_archived:false
       }];
-      persistActiveProject(DEFAULT_PROJECT_ID);
+      persistActiveWorkspace(COMMON_WORKSPACE_KEY);
       renderProjectSelector();
     }
-    setProjectStatus("Project list unavailable; using Default Project.");
+    setProjectStatus(isCommonWorkspace() ? "" : "Project list unavailable; using general chats.");
     return projectsCache;
   }
 }
 
 async function switchProject(projectId){
-  const nextProjectId = projectId || DEFAULT_PROJECT_ID;
-  if(nextProjectId === activeProjectId){
+  const nextWorkspaceKey = workspaceKeyForProjectId(projectId || DEFAULT_PROJECT_ID);
+  if(nextWorkspaceKey === activeWorkspaceKey){
     return;
   }
-  persistActiveProject(nextProjectId);
+  persistActiveWorkspace(nextWorkspaceKey);
+  if(activeProjectId !== DEFAULT_PROJECT_ID){
+    setProjectExpanded(activeProjectId, true);
+  }
   renderProjectSelector();
   enterBlankChat();
   await loadProjectOpenClawRuntimes();
   await loadConversations();
 }
 
-async function createProject(){
-  const name = prompt("Project name");
+async function switchCommonChats(){
+  await switchProject(DEFAULT_PROJECT_ID);
+}
+
+function openProjectNameDialog(options){
+  const dialog = createEditDialog();
+  const title = options?.title || "Project";
+  const initialName = options?.initialName || "";
+  dialog.title.textContent = title;
+  dialog.body.innerHTML = [
+    "<label class='settingsField full'>",
+    "<span>Project name</span>",
+    "<input id='projectNameDialogInput' type='text' />",
+    "</label>"
+  ].join("");
+  dialog.deleteBtn.style.display = "none";
+  const inputEl = dialog.body.querySelector("#projectNameDialogInput");
+  inputEl.value = initialName;
+  dialog.saveBtn.onclick = () => {
+    const nextName = inputEl.value.trim();
+    if(!nextName){
+      inputEl.focus();
+      return;
+    }
+    Promise.resolve(options?.onSave?.(nextName)).then(closeEditDialog);
+  };
+  dialog.overlay.classList.add("open");
+  inputEl.focus();
+  inputEl.select();
+}
+
+async function createProjectWithName(name){
   if(!name || !name.trim()){
     return;
   }
@@ -8558,6 +9117,7 @@ async function createProject(){
     }
     await loadProjects();
     persistActiveProject(data.project?.id || activeProjectId);
+    setProjectExpanded(activeProjectId, true);
     renderProjectSelector();
     enterBlankChat();
     await loadProjectOpenClawRuntimes();
@@ -8568,12 +9128,92 @@ async function createProject(){
   }
 }
 
-async function renameProject(){
-  const project = activeProject();
-  if(!project){
+function createProject(){
+  openProjectNameDialog({
+    title:"New project",
+    initialName:"",
+    onSave:createProjectWithName
+  });
+}
+
+function projectById(projectId){
+  return projectsCache.find(project => project.id === projectId) || null;
+}
+
+function closeProjectActionMenu(){
+  if(projectActionMenu){
+    projectActionMenu.classList.remove("open");
+  }
+  projectActionMenuProjectId = "";
+}
+
+function getProjectActionMenu(){
+  if(projectActionMenu){
+    return projectActionMenu;
+  }
+  projectActionMenu = document.createElement("div");
+  projectActionMenu.className = "projectActionMenu";
+  projectActionMenu.setAttribute("role", "menu");
+  document.body.appendChild(projectActionMenu);
+  return projectActionMenu;
+}
+
+function appendProjectMenuItem(menu, label, handler){
+  const button = document.createElement("button");
+  button.type = "button";
+  button.setAttribute("role", "menuitem");
+  button.textContent = label;
+  button.addEventListener("click", event => {
+    event.stopPropagation();
+    closeProjectActionMenu();
+    Promise.resolve(handler()).catch(err => {
+      setProjectStatus(err.message || String(err));
+    });
+  });
+  menu.appendChild(button);
+}
+
+function openProjectMenu(projectId, anchorEl){
+  const project = projectById(projectId);
+  if(!project || project.id === DEFAULT_PROJECT_ID || project.is_default){
     return;
   }
-  const name = prompt("Project name", projectName(project));
+  const menu = getProjectActionMenu();
+  if(projectActionMenuProjectId === project.id && menu.classList.contains("open")){
+    closeProjectActionMenu();
+    return;
+  }
+  projectActionMenuProjectId = project.id;
+  menu.innerHTML = "";
+  appendProjectMenuItem(menu, "Rename", () => openRenameProjectDialog(project.id));
+  appendProjectMenuItem(menu, "New Chat", () => createConversationForProject(project.id));
+  appendProjectMenuItem(menu, "Settings", () => openProjectSettingsForProject(project.id));
+  appendProjectMenuItem(menu, "Delete", () => deleteProject(project.id));
+  const rect = anchorEl?.getBoundingClientRect?.();
+  if(rect){
+    menu.style.top = Math.round(rect.bottom + 6) + "px";
+    menu.style.left = Math.round(Math.max(8, rect.right - 132)) + "px";
+  }
+  menu.classList.add("open");
+}
+
+function openRenameProjectDialog(projectId){
+  const project = projectById(projectId) || activeProject();
+  if(!project || project.id === DEFAULT_PROJECT_ID || project.is_default){
+    return;
+  }
+  openProjectNameDialog({
+    title:"Rename project",
+    initialName:projectName(project),
+    onSave:name => renameProject(project.id, name)
+  });
+}
+
+async function renameProject(projectId, name){
+  const project = projectById(projectId) || activeProject();
+  if(!project || project.id === DEFAULT_PROJECT_ID || project.is_default){
+    return;
+  }
   if(!name || !name.trim()){
     return;
   }
@@ -8598,12 +9238,12 @@ async function renameProject(){
   }
 }
 
-async function archiveProject(){
-  const project = activeProject();
+async function archiveProject(projectId){
+  const project = projectById(projectId) || activeProject();
   if(!project || project.id === DEFAULT_PROJECT_ID || project.is_default){
     return;
   }
-  if(!confirm("Archive project \"" + projectName(project) + "\"?")){
+  if(!confirm("Archive project " + projectName(project) + "?")){
     return;
   }
   try{
@@ -8614,7 +9254,7 @@ async function archiveProject(){
     if(!res.ok || !data.ok){
       throw new Error(data.error || "archive project failed");
     }
-    persistActiveProject(DEFAULT_PROJECT_ID);
+    persistActiveWorkspace(COMMON_WORKSPACE_KEY);
     enterBlankChat();
     await loadProjects();
     await loadProjectOpenClawRuntimes();
@@ -8625,55 +9265,51 @@ async function archiveProject(){
   }
 }
 
+async function deleteProject(projectId){
+  const project = projectById(projectId) || activeProject();
+  if(!project || project.id === DEFAULT_PROJECT_ID || project.is_default){
+    return;
+  }
+  if(!confirm("Delete project " + projectName(project) + "? Project chats may be hidden with the project.")){
+    return;
+  }
+  try{
+    const res = await fetch("/api/projects/" + encodeURIComponent(project.id), {
+      method:"DELETE"
+    });
+    const data = await res.json();
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "delete project failed");
+    }
+    if(activeProjectId === project.id){
+      persistActiveWorkspace(COMMON_WORKSPACE_KEY);
+      enterBlankChat();
+    }
+    await loadProjects();
+    await loadProjectOpenClawRuntimes();
+    await loadConversations();
+    setProjectStatus("");
+  }catch(err){
+    setProjectStatus("Delete failed: " + (err.message || String(err)));
+  }
+}
+
 async function loadConversations(){
   try{
-    const params = new URLSearchParams({
-      project_id:activeProjectId || DEFAULT_PROJECT_ID
-    });
-    const res = await fetch("/api/conversations?" + params.toString());
-    const data = await res.json();
+    const commonConversations = await fetchConversationsForProject(DEFAULT_PROJECT_ID);
+    renderConversationRows(conversationList, commonConversations);
+    conversationList.hidden = false;
 
-    if(!res.ok || !data.ok){
-      throw new Error(data.error || "加载会话失败");
+    if(isCommonWorkspace()){
+      conversationsCache = commonConversations;
+    }else{
+      const projectConversations = await fetchConversationsForProject(activeProjectId || DEFAULT_PROJECT_ID);
+      conversationsCache = projectConversations;
+      const projectMount = document.getElementById("projectConversationMount");
+      if(projectMount){
+        renderConversationRows(projectMount, projectConversations);
+      }
     }
-
-    conversationsCache = data.conversations || [];
-    conversationList.innerHTML = "";
-
-    conversationsCache.forEach(item => {
-      const row = document.createElement("div");
-      row.className = "historyRow";
-      row.dataset.id = item.id;
-
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "historyItem";
-      btn.dataset.id = item.id;
-      btn.textContent = item.title || "New Chat";
-      btn.title = item.last_message_preview
-        ? btn.textContent + "\\n" + item.last_message_preview
-        : btn.textContent;
-      btn.addEventListener("click", () => loadConversationMessages(item.id));
-
-      const time = document.createElement("span");
-      time.className = "historyTime";
-      time.textContent = formatHistoryTime(item.updated_at || item.created_at);
-
-      const deleteBtn = document.createElement("button");
-      deleteBtn.type = "button";
-      deleteBtn.className = "deleteConversationBtn";
-      deleteBtn.textContent = "×";
-      deleteBtn.title = "删除会话";
-      deleteBtn.addEventListener("click", (event) => {
-        event.stopPropagation();
-        deleteConversation(item.id, item.title || "New Chat");
-      });
-
-      row.appendChild(btn);
-      row.appendChild(time);
-      row.appendChild(deleteBtn);
-      conversationList.appendChild(row);
-    });
 
     setActiveConversation();
     if(currentConversationId && !conversationsCache.some(item => item.id === currentConversationId)){
@@ -8686,12 +9322,111 @@ async function loadConversations(){
   }
 }
 
+async function fetchConversationsForProject(projectId){
+  const params = new URLSearchParams({
+    project_id:projectId || DEFAULT_PROJECT_ID
+  });
+  const res = await fetch("/api/conversations?" + params.toString());
+  const data = await res.json();
+  if(!res.ok || !data.ok){
+    throw new Error(data.error || "load conversations failed");
+  }
+  return data.conversations || [];
+}
+
+function renderConversationRows(targetList, conversations){
+  targetList.innerHTML = "";
+  conversations.forEach(item => {
+    const row = document.createElement("div");
+    row.className = "historyRow";
+    row.dataset.id = item.id;
+    row.dataset.title = item.title || "New Chat";
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "historyItem";
+    btn.dataset.id = item.id;
+    btn.textContent = item.title || "New Chat";
+    btn.title = item.last_message_preview
+      ? btn.textContent + "\\n" + item.last_message_preview
+      : btn.textContent;
+    btn.addEventListener("click", () => loadConversationMessages(item.id));
+
+    const time = document.createElement("span");
+    time.className = "historyTime";
+    time.textContent = formatHistoryTime(item.updated_at || item.created_at);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "deleteConversationBtn";
+    deleteBtn.textContent = "x";
+    deleteBtn.title = "Delete chat";
+    deleteBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteConversation(item.id, item.title || "New Chat");
+    });
+
+    row.appendChild(btn);
+    row.appendChild(time);
+    row.appendChild(deleteBtn);
+    targetList.appendChild(row);
+  });
+  applyChatSearchFilter();
+}
+
+function normalizedChatSearchQuery(){
+  return (chatSearchInput?.value || "").trim().toLowerCase();
+}
+
+function applyChatSearchFilter(){
+  const query = normalizedChatSearchQuery();
+  document.querySelectorAll("#conversationList .historyRow, #projectConversationMount .historyRow").forEach(row => {
+    const title = (row.dataset.title || row.textContent || "").toLowerCase();
+    row.hidden = Boolean(query && !title.includes(query));
+  });
+}
+
+async function createConversationForProject(projectId){
+  const targetProjectId = projectId || activeProjectId || DEFAULT_PROJECT_ID;
+  try{
+    if(targetProjectId !== DEFAULT_PROJECT_ID && targetProjectId !== activeProjectId){
+      persistActiveProject(targetProjectId);
+      setProjectExpanded(targetProjectId, true);
+      renderProjectSelector();
+      await loadProjectOpenClawRuntimes();
+    }
+    const res = await fetch("/api/conversations", {
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify({
+        title:"New Chat",
+        project_id:targetProjectId
+      })
+    });
+    const data = await res.json();
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "create conversation failed");
+    }
+    await loadConversations();
+    if(data.conversation?.id){
+      await loadConversationMessages(data.conversation.id);
+    }else{
+      enterBlankChat();
+    }
+  }catch(err){
+    console.warn("create conversation failed", err);
+    enterBlankChat();
+  }
+}
+
 async function createNewConversation(){
-  enterBlankChat();
+  await createConversationForProject(activeProjectId || DEFAULT_PROJECT_ID);
 }
 
 async function deleteConversation(conversationId, title){
-  if(!confirm("确定删除会话“" + title + "”吗？")){
+  if(!confirm("Delete chat " + title + "?")){
     return;
   }
 
@@ -8703,7 +9438,7 @@ async function deleteConversation(conversationId, title){
     const data = await res.json();
 
     if(!res.ok || !data.ok){
-      throw new Error(data.error || "删除会话失败");
+      throw new Error(data.error || "delete conversation failed");
     }
 
     const conversations = await loadConversations();
@@ -8718,7 +9453,7 @@ async function deleteConversation(conversationId, title){
       }
     }
   }catch(err){
-    alert("删除会话失败：" + err.message);
+    alert("Delete chat failed: " + err.message);
   }
 }
 
@@ -8741,7 +9476,7 @@ async function loadConversationMessages(conversationId){
     const data = await res.json();
 
     if(!res.ok || !data.ok){
-      throw new Error(data.error || "加载消息失败");
+      throw new Error(data.error || "鍔犺浇娑堟伅澶辫触");
     }
 
     currentConversationId = conversationId;
@@ -8767,7 +9502,7 @@ async function loadConversationMessages(conversationId){
     await loadSummaryStatus();
     scrollBottom();
   }catch(err){
-    alert("加载会话失败：" + err.message);
+    alert("Load conversation failed: " + err.message);
   }
 }
 
@@ -8825,7 +9560,7 @@ openClawTaskBanner.addEventListener("click", async event => {
     return;
   }
   if(action === "wait"){
-    setContextStatus("继续等待当前 OpenClaw 本地任务记录；如果连接已断开，页面无法恢复远端 stream。");
+    setContextStatus("Continuing to wait for the current OpenClaw local task record; remote stream cannot be restored if disconnected.");
     return;
   }
   if(action === "rerun"){
@@ -8859,11 +9594,11 @@ openClawTaskHistoryPanel.addEventListener("click", event => {
   loadOpenClawTaskHistory(view);
 });
 newChatBtn.addEventListener("click", createNewConversation);
-projectSelect.addEventListener("change", () => switchProject(projectSelect.value));
 createProjectBtn.addEventListener("click", createProject);
-renameProjectBtn.addEventListener("click", renameProject);
-archiveProjectBtn.addEventListener("click", archiveProject);
-projectStatus.addEventListener("click", event => {
+chatSearchInput.addEventListener("input", applyChatSearchFilter);
+projectSettingsCloseBtn.addEventListener("click", closeProjectSettingsPopover);
+projectSettingsPopover.addEventListener("click", event => {
+  event.stopPropagation();
   const defaultRuntimeId = event.target?.dataset?.runtimeDefault;
   if(defaultRuntimeId){
     setDefaultProjectRuntime(defaultRuntimeId);
@@ -8874,7 +9609,7 @@ projectStatus.addEventListener("click", event => {
     toggleProjectRuntimeBinding(toggleRuntimeId);
   }
 });
-projectStatus.addEventListener("change", event => {
+projectSettingsPopover.addEventListener("change", event => {
   const runtimeId = event.target?.dataset?.runtimeAgent;
   if(runtimeId){
     changeDefaultRuntimeAgent(runtimeId, event.target.value);
@@ -8943,10 +9678,14 @@ toolMenu.addEventListener("click", event => event.stopPropagation());
 document.addEventListener("click", () => {
   closeInputMenus();
   closeModelActionMenus();
+  closeProjectActionMenu();
+  closeProjectSettingsPopover();
 });
 document.addEventListener("keydown", event => {
   if(event.key === "Escape"){
     closeInputMenus();
+    closeProjectActionMenu();
+    closeProjectSettingsPopover();
   }
 });
 document.addEventListener("paste", event => {
@@ -9004,7 +9743,7 @@ async function copyText(text){
 
 function showCopiedFeedback(button){
   const original = button.textContent;
-  button.textContent = "已复制";
+  button.textContent = "Copied";
   window.setTimeout(() => {
     button.textContent = original;
   }, 1200);
@@ -9056,7 +9795,7 @@ function addUserMessage(text, imageDataUrl, fileInfo, attachments){
     const img = document.createElement("img");
     img.className = "userImage";
     img.src = imageDataUrl;
-    img.alt = "上传的图片";
+    img.alt = "Uploaded image";
     div.appendChild(img);
   }
 
@@ -9074,7 +9813,7 @@ function addUserMessage(text, imageDataUrl, fileInfo, attachments){
   if(fileInfo){
     const fileDiv = document.createElement("div");
     fileDiv.className = "fileInfo";
-    fileDiv.textContent = "?? " + fileInfo.name + " · " + fileInfo.chars + " 字符 · " + fileInfo.chunks + " 段";
+    fileDiv.textContent = "File " + fileInfo.name + " - " + fileInfo.chars + " chars - " + fileInfo.chunks + " chunks";
     div.appendChild(fileDiv);
   }
 
@@ -9386,7 +10125,7 @@ function enhanceCodeBlocks(container){
     const button = document.createElement("button");
     button.type = "button";
     button.className = "codeCopyBtn";
-    button.textContent = "复制";
+    button.textContent = "澶嶅埗";
     button.dataset.copyCode = "1";
     toolbar.appendChild(button);
     pre.parentNode.insertBefore(wrapper, pre);
@@ -9445,7 +10184,7 @@ function renderAssistantMarkdown(element, markdown){
   copyBtn.type = "button";
   copyBtn.className = "messageCopyBtn";
   copyBtn.dataset.copyMessage = "1";
-  copyBtn.textContent = "复制";
+  copyBtn.textContent = "澶嶅埗";
   const body = document.createElement("div");
   body.className = "assistantMessageBody";
   body.innerHTML = parseAssistantMarkdown(markdown || "");
@@ -9801,7 +10540,7 @@ async function sendMessage(){
 
 
   if(fileTextToSend && selectedFileChunks.length > 0){
-    const relevantChunks = pickRelevantChunks(message || "请总结这个文件", selectedFileChunks);
+    const relevantChunks = pickRelevantChunks(message || "璇锋€荤粨杩欎釜鏂囦欢", selectedFileChunks);
     lastRelevantChunkCount = relevantChunks.length;
     fileTextForAI = relevantChunks.join(String.fromCharCode(10, 10));
 
@@ -9818,22 +10557,22 @@ async function sendMessage(){
   if(webPageToSend && selectedWebPageChunks.length > 0){
 
     const relevantWebChunks = pickRelevantChunks(
-      message || "请总结这个网页",
+      message || "璇锋€荤粨杩欎釜缃戦〉",
       selectedWebPageChunks
     );
   
     lastWebRelevantChunkCount = relevantWebChunks.length;
   
     webTextForAI =
-      "网页标题：" + webPageToSend.title + String.fromCharCode(10) +
-      "网页 URL：" + webPageToSend.url + String.fromCharCode(10, 10) +
+      "Web page title: " + webPageToSend.title + String.fromCharCode(10) +
+      "Web page URL: " + webPageToSend.url + String.fromCharCode(10, 10) +
       relevantWebChunks.join(String.fromCharCode(10, 10));
   }
 
   if(webSearchContext){
 
     networkTextForAI =
-      "下面是联网搜索得到的多个网页内容，请优先依据这些来源回答问题，并尽量综合多个来源的信息。" +
+      "The following are web search page contents. Answer using these sources when relevant. " +
       String.fromCharCode(10, 10) +
       webSearchContext;
   }
@@ -9869,7 +10608,7 @@ async function sendMessage(){
 
   const isOpenClawRequest = isSelectedOpenClawRequest(modelSelect.value);
   if(openClawRepeatAllowed){
-    setContextStatus("已确认重新发起新的 OpenClaw 请求。");
+    setContextStatus("Confirmed: started a new OpenClaw request.");
   }
   if(isOpenClawRequest){
     stopOpenClawReconnectPolling();
@@ -9890,7 +10629,7 @@ async function sendMessage(){
   } : null);
 
   aiDiv.innerHTML =
-    "<span class='loading'>思考中...</span>";
+    "<span class='loading'>鎬濊€冧腑...</span>";
 
   if(isOpenClawRequest){
     startOpenClawWaitHints(aiDiv);
@@ -9902,7 +10641,7 @@ async function sendMessage(){
 
   if(fileToSend){
     aiDiv.innerHTML =
-      "<span class='loading'>正在基于 " + lastRelevantChunkCount + " 个相关片段回答...</span>";
+      "<span class='loading'>姝ｅ湪鍩轰簬 " + lastRelevantChunkCount + " 涓浉鍏崇墖娈靛洖绛?..</span>";
   }
 
   let openClawAsyncHandled = false;
@@ -9953,7 +10692,7 @@ async function sendMessage(){
           type:"webpage",
           text:webTextForAI
         } : (networkTextForAI ? {
-          name:"联网搜索结果",
+          name:"鑱旂綉鎼滅储缁撴灉",
           type:"web-search",
           text:networkTextForAI
         } : null))
@@ -9992,7 +10731,7 @@ async function sendMessage(){
           setContextStatus("OpenClaw task completed.");
           await loadConversationMessages(currentConversationId);
         }else{
-          renderAssistantMarkdown(aiDiv, "OpenClaw 任务已提交，正在后台执行。");
+          renderAssistantMarkdown(aiDiv, "OpenClaw task submitted and running in the background.");
           setContextStatus("OpenClaw task submitted. Waiting for remote result...");
           if(data.taskId){
             openClawReconnectTask = data.task || activeOpenClawTask;
@@ -10010,7 +10749,7 @@ async function sendMessage(){
       const reply = streamResult.reply || "";
 
       if(!reply && !streamResult.openClawAutoResume?.handled){
-        renderAssistantMarkdown(aiDiv, "没有返回内容");
+        renderAssistantMarkdown(aiDiv, "娌℃湁杩斿洖鍐呭");
       }
 
       if(!streamResult.openClawAutoResume?.handled){
@@ -10067,7 +10806,7 @@ async function sendMessage(){
 
     if(!openClawAutoResumeHandled){
       aiDiv.innerHTML =
-        isOpenClawRequest ? openClawFriendlyError(err) : "请求失败：" + err.message;
+        isOpenClawRequest ? openClawFriendlyError(err) : "Request failed: " + err.message;
     }
 
     if(isOpenClawRequest && !openClawAutoResumeHandled){
@@ -10101,3 +10840,4 @@ async function sendMessage(){
 </body>
 </html>`;
 }
+

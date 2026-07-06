@@ -1,6 +1,55 @@
 import { describe, expect, it } from "vitest";
 import { handleHistory } from "../src/api/history.js";
+import { resolveOpenClawRuntimeForProject } from "../src/api/openclawRuntimes.js";
 import { DEFAULT_PROJECT_ID, ensureDefaultProject, handleProjects } from "../src/api/projects.js";
+
+const HILLSBORO_RUNTIME = {
+  id: "hillsboro-openclaw",
+  display_name: "Hillsboro OpenClaw",
+  slug: "hillsboro-openclaw",
+  provider_id: "openclaw-hillsboro",
+  base_url: "https://hill.hnsnowground.cfd/v1",
+  callback_url: "",
+  capabilities_json: JSON.stringify({
+    bridge_callback: true,
+    progress_callback: true,
+    sse_events: true,
+    remote_console: true
+  }),
+  agents_json: JSON.stringify([
+    { agent_id: "main", display_name: "Main", verified: true },
+    { agent_id: "glm51", display_name: "GLM 5.1", verified: true }
+  ]),
+  bridge_mode: "bridge",
+  status: "verified",
+  is_enabled: 1,
+  last_verified_at: "2026-07-02T00:00:00.000Z",
+  created_at: "2026-07-05T00:00:00.000Z",
+  updated_at: "2026-07-05T00:00:00.000Z"
+};
+
+const SEATTLE_RUNTIME = {
+  id: "seattle-openclaw",
+  display_name: "Seattle OpenClaw",
+  slug: "seattle-openclaw",
+  provider_id: "openclaw-seattle",
+  base_url: "https://act.hnsnowground.cfd/v1",
+  callback_url: "",
+  capabilities_json: JSON.stringify({
+    bridge_callback: false,
+    progress_callback: false,
+    sse_events: false,
+    remote_console: false,
+    legacy_only: true
+  }),
+  agents_json: "[]",
+  bridge_mode: "legacy",
+  status: "unverified",
+  is_enabled: 0,
+  last_verified_at: null,
+  created_at: "2026-07-05T00:00:00.000Z",
+  updated_at: "2026-07-05T00:00:00.000Z"
+};
 
 class FakeStatement {
   constructor(db, sql) {
@@ -38,6 +87,11 @@ class FakeD1 {
     this.projects = new Map();
     this.conversations = new Map();
     this.messages = new Map();
+    this.runtimes = new Map([
+      [HILLSBORO_RUNTIME.id, { ...HILLSBORO_RUNTIME }],
+      [SEATTLE_RUNTIME.id, { ...SEATTLE_RUNTIME }]
+    ]);
+    this.bindings = new Map();
   }
 
   prepare(sql) {
@@ -55,6 +109,16 @@ class FakeD1 {
     }
     if (normalized.includes("from conversations") && normalized.includes("where id = ?")) {
       return this.conversations.get(bindings[0]) || null;
+    }
+    if (normalized.includes("from openclaw_runtimes") && normalized.includes("where id = ?")) {
+      return this.runtimes.get(bindings[0]) || null;
+    }
+    if (normalized.includes("from project_openclaw_runtime_bindings")) {
+      const binding = this.bindings.get(bindings[0] + ":" + bindings[1]);
+      if (!binding) {
+        return null;
+      }
+      return this.bindingRow(binding);
     }
     return null;
   }
@@ -90,7 +154,24 @@ class FakeD1 {
         .filter(message => message.conversation_id === bindings[0])
         .sort((left, right) => Number(left.created_at || 0) - Number(right.created_at || 0));
     }
+    if (normalized.includes("from project_openclaw_runtime_bindings")) {
+      return [...this.bindings.values()]
+        .filter(binding => binding.project_id === bindings[0])
+        .map(binding => this.bindingRow(binding));
+    }
     return [];
+  }
+
+  bindingRow(binding) {
+    const runtime = this.runtimes.get(binding.runtime_id);
+    return {
+      ...binding,
+      binding_is_default: binding.is_default,
+      binding_is_enabled: binding.is_enabled,
+      binding_created_at: binding.created_at,
+      binding_updated_at: binding.updated_at,
+      ...(runtime || {})
+    };
   }
 
   run(sql, bindings) {
@@ -134,6 +215,35 @@ class FakeD1 {
           updated_at: updatedAt
         });
       }
+      return;
+    }
+    if (normalized.startsWith("update project_openclaw_runtime_bindings") && normalized.includes("set is_default = 0")) {
+      const [updatedAt, projectId] = bindings;
+      for (const [key, binding] of this.bindings.entries()) {
+        if (binding.project_id === projectId) {
+          this.bindings.set(key, {
+            ...binding,
+            is_default: 0,
+            updated_at: updatedAt
+          });
+        }
+      }
+      return;
+    }
+    if (normalized.startsWith("insert into project_openclaw_runtime_bindings")) {
+      const [projectId, runtimeId, allowedAgentsJson, defaultAgentId, createdAt, updatedAt] = bindings;
+      const key = projectId + ":" + runtimeId;
+      const existing = this.bindings.get(key);
+      this.bindings.set(key, {
+        project_id: projectId,
+        runtime_id: runtimeId,
+        is_default: 1,
+        is_enabled: 1,
+        allowed_agents_json: allowedAgentsJson,
+        default_agent_id: defaultAgentId,
+        created_at: existing?.created_at || createdAt,
+        updated_at: updatedAt
+      });
       return;
     }
     if (normalized.startsWith("update projects") && normalized.includes("set name = ?")) {
@@ -348,6 +458,52 @@ describe("Project workspace foundation", () => {
     expect(withArchived.projects.map(project => project.id)).toContain("archive-me");
   });
 
+  it("soft-deletes real projects and rejects deleting Default Project", async () => {
+    const db = new FakeD1();
+    await ensureDefaultProject(db);
+    db.projects.set("delete-me", {
+      id: "delete-me",
+      name: "Delete Me",
+      slug: "delete-me",
+      description: "",
+      is_default: 0,
+      is_archived: 0,
+      created_at: "2026-07-05T00:00:00.000Z",
+      updated_at: "2026-07-05T00:00:00.000Z",
+      archived_at: null
+    });
+
+    const defaultDelete = await json(await handleProjects(
+      new Request("http://example.com/api/projects/default", { method: "DELETE" }),
+      env(db),
+      new URL("http://example.com/api/projects/default")
+    ));
+    const deleted = await json(await handleProjects(
+      new Request("http://example.com/api/projects/delete-me", { method: "DELETE" }),
+      env(db),
+      new URL("http://example.com/api/projects/delete-me")
+    ));
+    const normal = await json(await handleProjects(
+      new Request("http://example.com/api/projects"),
+      env(db),
+      new URL("http://example.com/api/projects")
+    ));
+
+    expect(defaultDelete).toMatchObject({
+      ok: false,
+      error: "default project cannot be deleted"
+    });
+    expect(deleted).toMatchObject({
+      ok: true,
+      delete_mode: "soft_delete",
+      project: {
+        id: "delete-me",
+        is_archived: true
+      }
+    });
+    expect(normal.projects.map(project => project.id)).not.toContain("delete-me");
+  });
+
   it("creates, reads, and updates projects through the project API", async () => {
     const db = new FakeD1();
     const createResponse = await handleProjects(
@@ -399,5 +555,65 @@ describe("Project workspace foundation", () => {
     const read = await json(readResponse);
 
     expect(read.project.name).toBe("Project API Updated");
+  });
+
+  it("binds newly created projects to Hillsboro as the default OpenClaw runtime", async () => {
+    const db = new FakeD1();
+
+    const response = await handleProjects(
+      new Request("http://example.com/api/projects", {
+        method: "POST",
+        body: JSON.stringify({
+          id: "openclaw-project",
+          name: "OpenClaw Project"
+        })
+      }),
+      env(db),
+      new URL("http://example.com/api/projects")
+    );
+    const body = await json(response);
+
+    expect(response.status).toBe(201);
+    expect(body.project.id).toBe("openclaw-project");
+    expect(db.bindings.get("openclaw-project:hillsboro-openclaw")).toMatchObject({
+      project_id: "openclaw-project",
+      runtime_id: "hillsboro-openclaw",
+      is_default: 1,
+      is_enabled: 1,
+      default_agent_id: "main"
+    });
+    expect(db.bindings.has("openclaw-project:seattle-openclaw")).toBe(false);
+  });
+
+  it("resolves OpenClaw tasks in newly created projects to Hillsboro", async () => {
+    const db = new FakeD1();
+    await handleProjects(
+      new Request("http://example.com/api/projects", {
+        method: "POST",
+        body: JSON.stringify({
+          id: "runtime-ready-project",
+          name: "Runtime Ready Project"
+        })
+      }),
+      env(db),
+      new URL("http://example.com/api/projects")
+    );
+
+    const result = await resolveOpenClawRuntimeForProject(env(db), {
+      projectId: "runtime-ready-project",
+      executionMode: "bridge",
+      modelAgentId: "glm51"
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      project_id: "runtime-ready-project",
+      runtime_id: "hillsboro-openclaw",
+      runtime_slug: "hillsboro-openclaw",
+      provider_id: "openclaw-hillsboro",
+      agent_id: "glm51",
+      execution_mode: "bridge",
+      resolution_source: "project_default"
+    });
   });
 });

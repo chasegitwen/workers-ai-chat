@@ -1,4 +1,5 @@
 import { jsonResponse } from "../utils/response.js";
+import { ensureHillsboroRuntimeBindingForProject } from "./openclawRuntimes.js";
 
 export const DEFAULT_PROJECT_ID = "default";
 export const DEFAULT_PROJECT_NAME = "Default Project";
@@ -159,6 +160,7 @@ export async function handleProjects(request, env, url) {
           updated_at
         ) VALUES (?, ?, ?, ?, 0, 0, ?, ?)`
       ).bind(id, name, slug, description, timestamp, timestamp).run();
+      await ensureHillsboroRuntimeBindingForProject(env.DB, id);
     } catch (err) {
       return jsonResponse({
         ok: false,
@@ -206,6 +208,38 @@ export async function handleProjects(request, env, url) {
   }
 
   const projectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
+  if (projectMatch && request.method === "DELETE") {
+    const projectId = decodeURIComponent(projectMatch[1]);
+    const project = await readProject(env.DB, projectId);
+    if (!project) {
+      return jsonResponse({
+        ok: false,
+        error: "project not found"
+      }, 404);
+    }
+    if (project.is_default) {
+      return jsonResponse({
+        ok: false,
+        error: "default project cannot be deleted"
+      }, 400);
+    }
+
+    const timestamp = isoNow();
+    await env.DB.prepare(
+      `UPDATE projects
+       SET is_archived = 1,
+         archived_at = ?,
+         updated_at = ?
+       WHERE id = ?`
+    ).bind(timestamp, timestamp, projectId).run();
+
+    return jsonResponse({
+      ok: true,
+      delete_mode: "soft_delete",
+      project: await readProject(env.DB, projectId)
+    });
+  }
+
   if (projectMatch && request.method === "GET") {
     const project = await readProject(env.DB, decodeURIComponent(projectMatch[1]));
     if (!project) {

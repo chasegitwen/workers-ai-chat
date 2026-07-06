@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  ensureHillsboroRuntimeBindingForProject,
   handleOpenClawRuntimes,
   resolveOpenClawRuntimeForProject
 } from "../src/api/openclawRuntimes.js";
@@ -231,7 +232,23 @@ class FakeD1 {
       return;
     }
     if (normalized.startsWith("insert into project_openclaw_runtime_bindings")) {
-      const [projectId, runtimeId, isDefault, isEnabled, allowedAgentsJson, defaultAgentId, createdAt, updatedAt] = bindings;
+      const helperInsert = normalized.includes("values (?, ?, 1, 1");
+      const [
+        projectId,
+        runtimeId,
+        isDefaultOrAllowedAgentsJson,
+        isEnabledOrDefaultAgentId,
+        allowedAgentsJsonOrCreatedAt,
+        defaultAgentIdOrUpdatedAt,
+        createdAtFromApi,
+        updatedAtFromApi
+      ] = bindings;
+      const isDefault = helperInsert ? 1 : isDefaultOrAllowedAgentsJson;
+      const isEnabled = helperInsert ? 1 : isEnabledOrDefaultAgentId;
+      const allowedAgentsJson = helperInsert ? isDefaultOrAllowedAgentsJson : allowedAgentsJsonOrCreatedAt;
+      const defaultAgentId = helperInsert ? isEnabledOrDefaultAgentId : defaultAgentIdOrUpdatedAt;
+      const createdAt = helperInsert ? allowedAgentsJsonOrCreatedAt : createdAtFromApi;
+      const updatedAt = helperInsert ? defaultAgentIdOrUpdatedAt : updatedAtFromApi;
       const key = projectId + ":" + runtimeId;
       const existing = this.bindings.get(key);
       this.bindings.set(key, {
@@ -379,6 +396,31 @@ describe("OpenClaw runtime registry", () => {
       is_enabled: 1
     });
     expect(db.bindings.has("default:seattle-openclaw")).toBe(false);
+  });
+
+  it("repairs an existing project without a runtime binding by adding Hillsboro only", async () => {
+    const db = new FakeD1();
+
+    const repair = await ensureHillsboroRuntimeBindingForProject(db, "existing-project");
+    const resolved = await resolveOpenClawRuntimeForProject(env(db), {
+      projectId: "existing-project",
+      executionMode: "bridge"
+    });
+
+    expect(repair.ok).toBe(true);
+    expect(db.bindings.get("existing-project:hillsboro-openclaw")).toMatchObject({
+      project_id: "existing-project",
+      runtime_id: "hillsboro-openclaw",
+      is_default: 1,
+      is_enabled: 1,
+      default_agent_id: "main"
+    });
+    expect(db.bindings.has("existing-project:seattle-openclaw")).toBe(false);
+    expect(resolved).toMatchObject({
+      ok: true,
+      runtime_id: "hillsboro-openclaw",
+      execution_mode: "bridge"
+    });
   });
 
   it("lists and updates project runtime bindings", async () => {

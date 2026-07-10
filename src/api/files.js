@@ -9,12 +9,257 @@ function createId() {
   return crypto.randomUUID();
 }
 
+export const NATIVE_ATTACHMENT_LIMITS = {
+  maxAttachments: 5,
+  maxImageBytes: 4 * 1024 * 1024,
+  maxFileBytes: 6 * 1024 * 1024,
+  maxTotalRawBytes: 16 * 1024 * 1024,
+  maxEstimatedPayloadBytes: 24 * 1024 * 1024
+};
+
+const NATIVE_ATTACHMENT_MIME_ALLOWLIST = new Set([
+  "application/pdf",
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "application/csv",
+  "application/json",
+  "application/zip",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+]);
+
+const NATIVE_ATTACHMENT_EXTENSION_MIME = new Map([
+  [".md", "text/markdown"],
+  [".markdown", "text/markdown"],
+  [".txt", "text/plain"],
+  [".csv", "text/csv"],
+  [".json", "application/json"],
+  [".zip", "application/zip"],
+  [".pdf", "application/pdf"],
+  [".doc", "application/msword"],
+  [".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  [".xls", "application/vnd.ms-excel"],
+  [".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+  [".ppt", "application/vnd.ms-powerpoint"],
+  [".pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"]
+]);
+
+function fileExtension(filename) {
+  const name = String(filename || "").toLowerCase();
+  const index = name.lastIndexOf(".");
+  return index >= 0 ? name.slice(index) : "";
+}
+
+function normalizeMimeForNativeAttachment(contentType, filename) {
+  const mime = String(contentType || "").split(";")[0].trim().toLowerCase();
+  if (mime) {
+    return mime;
+  }
+  return NATIVE_ATTACHMENT_EXTENSION_MIME.get(fileExtension(filename)) || "application/octet-stream";
+}
+
+function nativeAttachmentAllowed(mimeType) {
+  const mime = String(mimeType || "").toLowerCase();
+  if (mime.startsWith("video/")) {
+    return false;
+  }
+  return mime.startsWith("image/")
+    || mime.startsWith("audio/")
+    || mime.startsWith("text/")
+    || NATIVE_ATTACHMENT_MIME_ALLOWLIST.has(mime);
+}
+
+export function estimateBase64Length(byteLength) {
+  const size = Number(byteLength || 0);
+  return size > 0 ? 4 * Math.ceil(size / 3) : 0;
+}
+
+function estimateNativeAttachmentPayloadBytes(message, attachments) {
+  const encoder = new TextEncoder();
+  const messageBytes = encoder.encode(String(message || "")).length;
+  return (Array.isArray(attachments) ? attachments : []).reduce((total, attachment) => {
+    const filenameBytes = encoder.encode(String(attachment.fileName || "")).length;
+    const mimeBytes = encoder.encode(String(attachment.mimeType || "")).length;
+    return total + estimateBase64Length(attachment.size) + filenameBytes + mimeBytes + 256;
+  }, messageBytes + 2048);
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
 function sanitizeFilename(name) {
   return (name || "file")
     .replace(/[\\/:*?"<>|]+/g, "_")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 160) || "file";
+}
+
+export async function buildNativeOpenClawAttachments(env, fileIds = [], options = {}) {
+  const bindingError = requireFilesBindings(env);
+  if (bindingError) {
+    return {
+      ok: false,
+      error: bindingError,
+      code: "attachment_storage_unavailable"
+    };
+  }
+
+  const uniqueIds = [...new Set((Array.isArray(fileIds) ? fileIds : [])
+    .map(id => String(id || "").trim())
+    .filter(Boolean))];
+  if (!uniqueIds.length) {
+    return {
+      ok: true,
+      attachments: [],
+      totalBytes: 0,
+      estimatedPayloadBytes: estimateNativeAttachmentPayloadBytes(options.message || "", [])
+    };
+  }
+  if (uniqueIds.length > NATIVE_ATTACHMENT_LIMITS.maxAttachments) {
+    return {
+      ok: false,
+      error: "Too many native attachments",
+      code: "attachment_too_many"
+    };
+  }
+
+  const conversationId = String(options.conversationId || "").trim();
+  const attachments = [];
+  let totalBytes = 0;
+
+  for (const fileId of uniqueIds) {
+    const file = await env.DB.prepare(
+      `SELECT id, conversation_id, filename, content_type, size, r2_key, created_at
+       FROM files
+       WHERE id = ?`
+    ).bind(fileId).first();
+
+    if (!file) {
+      return {
+        ok: false,
+        error: "Attachment file not found",
+        code: "attachment_not_found",
+        file_id: fileId
+      };
+    }
+
+    const ownerConversationId = String(file.conversation_id || "").trim();
+    if (ownerConversationId && conversationId && ownerConversationId !== conversationId) {
+      return {
+        ok: false,
+        error: "Attachment is outside the current conversation scope",
+        code: "attachment_permission_denied",
+        file_id: fileId
+      };
+    }
+
+    const filename = sanitizeFilename(file.filename);
+    const mimeType = normalizeMimeForNativeAttachment(file.content_type, filename);
+    if (!nativeAttachmentAllowed(mimeType)) {
+      return {
+        ok: false,
+        error: "Attachment type is not supported",
+        code: "attachment_type_not_supported",
+        file_id: fileId,
+        mime_type: mimeType
+      };
+    }
+
+    const size = Number(file.size || 0);
+    const maxBytes = mimeType.startsWith("image/")
+      ? NATIVE_ATTACHMENT_LIMITS.maxImageBytes
+      : NATIVE_ATTACHMENT_LIMITS.maxFileBytes;
+    if (size > maxBytes) {
+      return {
+        ok: false,
+        error: "Attachment is too large",
+        code: "attachment_too_large",
+        file_id: fileId,
+        size,
+        max_size: maxBytes
+      };
+    }
+
+    totalBytes += size;
+    if (totalBytes > NATIVE_ATTACHMENT_LIMITS.maxTotalRawBytes) {
+      return {
+        ok: false,
+        error: "Native attachment total size is too large",
+        code: "attachment_total_too_large",
+        total_size: totalBytes,
+        max_total_size: NATIVE_ATTACHMENT_LIMITS.maxTotalRawBytes
+      };
+    }
+
+    const object = await env.FILES_BUCKET.get(file.r2_key);
+    if (!object) {
+      return {
+        ok: false,
+        error: "Attachment object not found",
+        code: "attachment_not_found",
+        file_id: fileId
+      };
+    }
+
+    let contentBase64 = "";
+    try {
+      contentBase64 = bytesToBase64(new Uint8Array(await object.arrayBuffer()));
+    } catch (err) {
+      return {
+        ok: false,
+        error: "Attachment base64 encoding failed",
+        code: "attachment_base64_failed",
+        file_id: fileId
+      };
+    }
+
+    attachments.push({
+      type: "file",
+      source: "web_ai_assistant_native_attachment",
+      fileId: file.id,
+      file_id: file.id,
+      fileName: filename,
+      file_name: filename,
+      filename,
+      mimeType,
+      mime_type: mimeType,
+      size,
+      contentBase64,
+      content_base64: contentBase64
+    });
+  }
+
+  const estimatedPayloadBytes = estimateNativeAttachmentPayloadBytes(options.message || "", attachments);
+  if (estimatedPayloadBytes > NATIVE_ATTACHMENT_LIMITS.maxEstimatedPayloadBytes) {
+    return {
+      ok: false,
+      error: "Estimated OpenClaw Gateway payload is too large",
+      code: "gateway_payload_too_large",
+      estimated_payload_bytes: estimatedPayloadBytes,
+      max_estimated_payload_bytes: NATIVE_ATTACHMENT_LIMITS.maxEstimatedPayloadBytes
+    };
+  }
+
+  return {
+    ok: true,
+    attachments,
+    totalBytes,
+    estimatedPayloadBytes,
+    mimeTypes: attachments.map(attachment => attachment.mimeType)
+  };
 }
 
 async function extractTextFromFile(file, providedText) {

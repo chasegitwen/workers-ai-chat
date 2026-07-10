@@ -82,6 +82,38 @@
     display:none;
   }
 
+  #fileModeSelector{
+    display:none;
+    gap:4px;
+    align-items:center;
+    background:#f3f4f6;
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:3px;
+  }
+
+  #fileModeSelector label{
+    display:flex;
+    align-items:center;
+    gap:4px;
+    border-radius:6px;
+    padding:5px 8px;
+    font-size:12px;
+    color:var(--muted);
+    cursor:pointer;
+    white-space:nowrap;
+  }
+
+  #fileModeSelector label.active{
+    background:white;
+    color:var(--text);
+    box-shadow:0 1px 2px rgba(15,23,42,.08);
+  }
+
+  #fileModeSelector input{
+    accent-color:var(--primary);
+  }
+
   #clearFileBtn{
     display:none;
     border:none;
@@ -2796,7 +2828,7 @@ body.dark .toolErrorNotice{
   <input
     id="fileInput"
     type="file"
-    accept=".txt,.md,.markdown,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    accept="image/*,audio/*,.txt,.md,.markdown,.csv,.json,.zip,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,text/*,application/pdf,application/json,application/zip,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
     hidden
   />
 
@@ -2870,6 +2902,17 @@ body.dark .toolErrorNotice{
     </div>
 
     <div id="fileStatus"></div>
+
+    <div id="fileModeSelector" role="radiogroup" aria-label="文件处理方式">
+      <label data-file-mode-option="native_attachment">
+        <input type="radio" name="fileContextMode" value="native_attachment" />
+        <span>阅读原文</span>
+      </label>
+      <label data-file-mode-option="retrieval">
+        <input type="radio" name="fileContextMode" value="retrieval" checked />
+        <span>智能检索</span>
+      </label>
+    </div>
 
     <button id="clearFileBtn" type="button">&#x6E05;&#x9664;</button>
 
@@ -3022,6 +3065,7 @@ const MAX_PASTED_IMAGES = 3;
 const fileBtn = document.getElementById("fileBtn");
 const fileInput = document.getElementById("fileInput");
 const fileStatus = document.getElementById("fileStatus");
+const fileModeSelector = document.getElementById("fileModeSelector");
 const clearFileBtn = document.getElementById("clearFileBtn");
 
 let selectedFile = null;
@@ -3031,6 +3075,7 @@ let selectedFileChunks = [];
 let lastRelevantChunkCount = 0;
 let filesLibrary = [];
 let selectedFileIds = [];
+let fileModeUserSelected = false;
 let fileLibraryQuery = "";
 let fileLibrarySort = "latest";
 let isFileLibraryExpanded = false;
@@ -3477,6 +3522,7 @@ function toggleInputMenu(menuName){
 function updateSelectedFilesStatus(){
   selectedFilesCount.textContent = "\u5df2\u9009\u62e9 " + selectedFileIds.length + " \u4e2a\u6587\u4ef6";
   clearSelectedFilesBtn.style.display = selectedFileIds.length ? "inline-block" : "none";
+  syncFileModeSelector();
 }
 
 function setSelectedFilesStatus(){
@@ -3655,6 +3701,7 @@ function searchFilesLibrary(){
 function clearSelectedLibraryFiles(){
   selectedFileIds = [];
   selectedFileId = null;
+  fileModeUserSelected = false;
   renderFilesLibrary();
   setSelectedFilesStatus();
 }
@@ -3705,6 +3752,9 @@ function toggleLibraryFile(fileId){
       selectedFileId = null;
     }
   }else{
+    if(selectedFileIds.length === 0){
+      fileModeUserSelected = false;
+    }
     selectedFileIds.push(fileId);
   }
 
@@ -3758,11 +3808,15 @@ function clearSelectedFile(){
   selectedFileText = "";
   selectedFileChunks = [];
   lastRelevantChunkCount = 0;
+  if(!selectedFileIds.length){
+    fileModeUserSelected = false;
+  }
   fileInput.value = "";
   fileStatus.textContent = "";
   renderFilesLibrary();
   setContextStatus(getCurrentContextStatus());
   clearFileBtn.style.display = "none";
+  syncFileModeSelector();
 }
 
 function clearSelectedImage(){
@@ -4625,14 +4679,30 @@ fileInput.addEventListener("change", async () => {
   const isTextFile =
     name.endsWith(".txt") ||
     name.endsWith(".md") ||
-    name.endsWith(".markdown");
+    name.endsWith(".markdown") ||
+    name.endsWith(".csv") ||
+    name.endsWith(".json") ||
+    file.type.startsWith("text/");
 
   const isPdfFile = name.endsWith(".pdf");
 
   const isDocxFile = name.endsWith(".docx");
 
-  if (!isTextFile && !isPdfFile && !isDocxFile) {
-    alert("当前支持 TXT / Markdown / PDF / DOCX 文件");
+  const isNativeFile =
+    file.type.startsWith("image/") ||
+    file.type.startsWith("audio/") ||
+    name.endsWith(".zip") ||
+    name.endsWith(".doc") ||
+    name.endsWith(".xls") ||
+    name.endsWith(".xlsx") ||
+    name.endsWith(".ppt") ||
+    name.endsWith(".pptx");
+
+  const isVideoFile = file.type.startsWith("video/") ||
+    [".avi",".m4v",".mov",".mp4",".mpeg",".mpg",".webm"].some(ext => name.endsWith(ext));
+
+  if (isVideoFile || (!isTextFile && !isPdfFile && !isDocxFile && !isNativeFile)) {
+    alert("当前支持 PDF / Word / Excel / PPT / TXT / Markdown / CSV / JSON / ZIP / 图片 / 音频文件");
     fileInput.value = "";
     return;
   }
@@ -4656,7 +4726,7 @@ fileInput.addEventListener("change", async () => {
 
     }else if(isDocxFile){
       selectedFileText = await extractDocxText(file);
-    }else{
+    }else if(isTextFile){
 
       selectedFileText = await new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -4666,11 +4736,10 @@ fileInput.addEventListener("change", async () => {
 
         reader.readAsText(file, "utf-8");
       });
+    }else{
+      selectedFileText = "";
     }
 
-    if(!selectedFileText.trim()){
-      throw new Error("No text content extracted");
-    }
     selectedFileChunks = splitTextIntoChunks(selectedFileText);
     const savedFile = await uploadFileToLibrary(file, selectedFileText);
     selectedFileId = savedFile.id;
@@ -4686,7 +4755,9 @@ fileInput.addEventListener("change", async () => {
       savedFile.id,
       ...selectedFileIds.filter(id => id !== savedFile.id)
     ];
+    fileModeUserSelected = false;
     renderFilesLibrary();
+    syncFileModeSelector();
     clearFileBtn.style.display = "inline-block";
     setContextStatus(
       "\u6587\u4ef6\u5df2\u4fdd\u5b58\u5230\u6587\u4ef6\u5e93\uff0c\u5e76\u5df2\u9009\u62e9"
@@ -7413,6 +7484,57 @@ function isSelectedOpenClawRequest(modelId){
   return isOpenClawModelTarget(modelOptions.find(item => item.id === modelId));
 }
 
+function selectedOpenClawRuntimeBinding(modelId = modelSelect.value){
+  const runtimeId = getOpenClawRuntimeIdForRequest(modelId);
+  if(!runtimeId){
+    return null;
+  }
+  return projectOpenClawRuntimes.find(binding => binding.runtime_id === runtimeId) || null;
+}
+
+function currentRuntimeSupportsNativeAttachment(modelId = modelSelect.value){
+  const binding = selectedOpenClawRuntimeBinding(modelId);
+  return Boolean(binding?.runtime?.capabilities?.nativeAttachment);
+}
+
+function currentFileContextMode(){
+  const selected = fileModeSelector?.querySelector("input[name='fileContextMode']:checked");
+  return selected?.value === "native_attachment" ? "native_attachment" : "retrieval";
+}
+
+function setFileContextMode(mode){
+  const next = mode === "native_attachment" ? "native_attachment" : "retrieval";
+  fileModeSelector?.querySelectorAll("input[name='fileContextMode']").forEach(inputEl => {
+    inputEl.checked = inputEl.value === next;
+    inputEl.closest("label")?.classList.toggle("active", inputEl.checked);
+  });
+}
+
+function syncFileModeSelector(){
+  if(!fileModeSelector){
+    return;
+  }
+  const hasFiles = selectedFileIds.length > 0;
+  const supportsNative = hasFiles && isSelectedOpenClawRequest(modelSelect.value) && currentRuntimeSupportsNativeAttachment(modelSelect.value);
+  fileModeSelector.style.display = hasFiles ? "flex" : "none";
+  const nativeInput = fileModeSelector.querySelector("input[value='native_attachment']");
+  const nativeLabel = nativeInput?.closest("label");
+  if(nativeInput){
+    nativeInput.disabled = !supportsNative;
+  }
+  if(nativeLabel){
+    nativeLabel.title = supportsNative ? "" : "当前模型不支持阅读原文";
+    nativeLabel.style.opacity = supportsNative ? "1" : ".55";
+  }
+  if(supportsNative && !fileModeUserSelected){
+    setFileContextMode("native_attachment");
+  }else if(!supportsNative && currentFileContextMode() === "native_attachment"){
+    setFileContextMode("retrieval");
+  }else{
+    setFileContextMode(currentFileContextMode());
+  }
+}
+
 function clearOpenClawWaitTimers(){
   openClawWaitTimers.forEach(timer => clearTimeout(timer));
   openClawWaitTimers = [];
@@ -8745,6 +8867,9 @@ function runtimeCapabilityLabel(binding){
   if(capabilities.remote_console){
     flags.push("Console");
   }
+  if(capabilities.nativeAttachment){
+    flags.push("Native files");
+  }
   if(capabilities.legacy_only){
     flags.push("Legacy only");
   }
@@ -8949,6 +9074,7 @@ function renderProjectRuntimeStatus(){
 async function loadProjectOpenClawRuntimes(){
   if(isCommonWorkspace()){
     projectOpenClawRuntimes = [];
+    syncFileModeSelector();
     renderProjectRuntimeStatus();
     return;
   }
@@ -8959,10 +9085,12 @@ async function loadProjectOpenClawRuntimes(){
       throw new Error(data.error || "load project runtimes failed");
     }
     projectOpenClawRuntimes = Array.isArray(data.runtimes) ? data.runtimes : [];
+    syncFileModeSelector();
     renderProjectRuntimeStatus();
   }catch(err){
     console.warn("load project OpenClaw runtimes failed", err);
     projectOpenClawRuntimes = [];
+    syncFileModeSelector();
     setProjectStatus("OpenClaw runtimes unavailable.");
     renderProjectSettingsPopover();
   }
@@ -9664,6 +9792,11 @@ modelSelect.addEventListener("change", () => {
     writeSettingsCache(modelSettingsState);
     syncSettingsToServer(modelSettingsState);
   }
+  syncFileModeSelector();
+});
+fileModeSelector?.addEventListener("change", () => {
+  fileModeUserSelected = true;
+  setFileContextMode(currentFileContextMode());
 });
 modelSettingsBtn.addEventListener("click", openSettings);
 closeSettingsBtn.addEventListener("click", closeSettings);
@@ -10755,9 +10888,14 @@ async function sendMessage(){
     setContextStatus("\u56fe\u7247\u4e0a\u4f20\u4e2d...");
   }
 
-  if(fileToSend){
+  const fileContextModeToSend = currentFileContextMode();
+
+  if(fileToSend && fileContextModeToSend !== "native_attachment"){
     aiDiv.innerHTML =
       "<span class='loading'>正在基于 " + lastRelevantChunkCount + " 个相关片段回答...</span>";
+  }else if(selectedFileIds.length && fileContextModeToSend === "native_attachment"){
+    aiDiv.innerHTML =
+      "<span class='loading'>正在读取原文附件...</span>";
   }
 
   let openClawAsyncHandled = false;
@@ -10801,6 +10939,8 @@ async function sendMessage(){
         image:legacyImageToSend,
         attachments:extraAttachmentsToSend.length ? extraAttachmentsToSend : undefined,
         fileIds:selectedFileIds,
+        fileContextMode:fileContextModeToSend,
+        attachmentFileIds:fileContextModeToSend === "native_attachment" ? selectedFileIds : undefined,
         file:fileToSend ? {
           id:selectedFileId || undefined,
           name:fileToSend.name,

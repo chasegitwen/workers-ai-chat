@@ -212,4 +212,14 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("if(projectMount){");
     expect(page).toContain("newChatBtn.addEventListener(\"click\", createNewConversation)");
   });
+
+  it("exposes native attachment file mode controls and request fields", () => {
+    const page = htmlPage();
+
+    expect(page).toContain("fileModeSelector");
+    expect(page).toContain("native_attachment");
+    expect(page).toContain("currentRuntimeSupportsNativeAttachment");
+    expect(page).toContain("fileContextMode:fileContextModeToSend");
+    expect(page).toContain("attachmentFileIds:fileContextModeToSend === \"native_attachment\" ? selectedFileIds : undefined");
+  });
 });

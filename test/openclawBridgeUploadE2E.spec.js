@@ -4,7 +4,11 @@ import {
   buildOpenClawBridgeMessageWithFiles
 } from "../src/api/chat.js";
 import { openclawBridgeClient } from "../src/api/openclawBridgeClient.js";
-import { getRelevantFileChunksByIds, handleFiles } from "../src/api/files.js";
+import {
+  buildNativeOpenClawAttachments,
+  getRelevantFileChunksByIds,
+  handleFiles
+} from "../src/api/files.js";
 
 class FileStatement {
   constructor(db, sql) {
@@ -110,11 +114,23 @@ class MemoryR2Bucket {
   }
 
   async put(key, value, options = {}) {
-    const text = await new Response(value).text();
+    const arrayBuffer = await new Response(value).arrayBuffer();
+    const text = new TextDecoder().decode(arrayBuffer);
     this.objects.set(key, {
+      arrayBuffer,
       text,
       options
     });
+  }
+
+  async get(key) {
+    const object = this.objects.get(key);
+    if (!object) {
+      return null;
+    }
+    return {
+      arrayBuffer: async () => object.arrayBuffer
+    };
   }
 }
 
@@ -200,5 +216,73 @@ describe("Native Bridge uploaded document visibility", () => {
     expect(body.message).toContain("cloudflare-upload.txt");
     expect(body.message).toContain("Cloudflare-side uploaded document");
     expect(body.prompt).toBe(body.message);
+  });
+
+  it("builds native OpenClaw attachments from the original R2 object", async () => {
+    const db = new FileD1();
+    const bucket = new MemoryR2Bucket();
+    const env = {
+      DB: db,
+      FILES_BUCKET: bucket
+    };
+
+    const content = "OPENCLAW_NATIVE_ATTACHMENT_BEGIN\nNATIVE_ATTACHMENT_PROBE_OK\nOPENCLAW_NATIVE_ATTACHMENT_END";
+    const form = new FormData();
+    form.set("file", new File([content], "native-probe.txt", { type: "text/plain" }));
+    form.set("conversation_id", "conversation-native");
+
+    const uploadResponse = await handleFiles(new Request("http://example.com/api/files/upload", {
+      method: "POST",
+      body: form
+    }), env, new URL("http://example.com/api/files/upload"));
+    const upload = await uploadResponse.json();
+
+    const result = await buildNativeOpenClawAttachments(env, [upload.file.id], {
+      conversationId: "conversation-native",
+      projectId: "default",
+      runtimeId: "hillsboro-openclaw",
+      message: "read original"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.attachments[0]).toMatchObject({
+      type: "file",
+      source: "web_ai_assistant_native_attachment",
+      fileId: upload.file.id,
+      fileName: "native-probe.txt",
+      mimeType: "text/plain",
+      size: content.length
+    });
+    expect(atob(result.attachments[0].contentBase64)).toBe(content);
+    expect(result.attachments[0].contentBase64).not.toContain("NATIVE_ATTACHMENT_PROBE_OK");
+  });
+
+  it("rejects unsupported video native attachments", async () => {
+    const db = new FileD1();
+    const bucket = new MemoryR2Bucket();
+    const env = {
+      DB: db,
+      FILES_BUCKET: bucket
+    };
+
+    const form = new FormData();
+    form.set("file", new File(["not really video"], "clip.mp4", { type: "video/mp4" }));
+    form.set("conversation_id", "conversation-native");
+    const uploadResponse = await handleFiles(new Request("http://example.com/api/files/upload", {
+      method: "POST",
+      body: form
+    }), env, new URL("http://example.com/api/files/upload"));
+    const upload = await uploadResponse.json();
+
+    const result = await buildNativeOpenClawAttachments(env, [upload.file.id], {
+      conversationId: "conversation-native",
+      message: "read original"
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: "attachment_type_not_supported",
+      mime_type: "video/mp4"
+    });
   });
 });

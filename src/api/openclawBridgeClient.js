@@ -545,9 +545,11 @@ export function openclawBridgeClient(env) {
       agentId,
       attachments,
       fileAttachments,
+      nativeAttachments,
       idempotencyKey
     }) {
       const files = Array.isArray(fileAttachments) ? fileAttachments : [];
+      const nativeFiles = Array.isArray(nativeAttachments) ? nativeAttachments : [];
       return bridgeRequest(env, "/v1/openclaw/tasks", {
         method: "POST",
         body: {
@@ -562,7 +564,8 @@ export function openclawBridgeClient(env) {
           session_key: sessionKey,
           session_id: sessionId,
           agent_id: agentId,
-          attachments: Array.isArray(attachments) ? attachments : [],
+          attachments: nativeFiles.length ? nativeFiles : (Array.isArray(attachments) ? attachments : []),
+          native_attachments: nativeFiles,
           files,
           file_ids: files.map(file => file.file_id).filter(Boolean),
           local_task_id: idempotencyKey,

@@ -53,6 +53,14 @@ function normalizeBoolean(value, fallback = false) {
   return value === true || value === 1 || value === "1" || value === "true";
 }
 
+function normalizeRuntimeCapabilities(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    ...source,
+    nativeAttachment: source.nativeAttachment === true || source.native_attachment === true
+  };
+}
+
 function normalizeStringListJson(value) {
   if (value === undefined) {
     return undefined;
@@ -70,6 +78,7 @@ function serializeRuntime(row) {
   }
   const capabilitiesJson = String(row.capabilities_json || "{}");
   const agentsJson = String(row.agents_json || "[]");
+  const capabilities = normalizeRuntimeCapabilities(safeJsonParse(capabilitiesJson, {}));
   return {
     id: row.id,
     display_name: row.display_name,
@@ -78,7 +87,7 @@ function serializeRuntime(row) {
     base_url: row.base_url || "",
     callback_url: row.callback_url || "",
     capabilities_json: capabilitiesJson,
-    capabilities: safeJsonParse(capabilitiesJson, {}),
+    capabilities,
     agents_json: agentsJson,
     agents: safeJsonParse(agentsJson, []),
     bridge_mode: row.bridge_mode || "",
@@ -480,6 +489,8 @@ export async function resolveOpenClawRuntimeForProject(env, options = {}) {
       provider_id: binding.runtime?.provider_id || cleanText(options.providerId || options.provider_id, 160),
       agent_id: agentFromBinding(binding, requestedAgentId, modelAgentId),
       execution_mode: executionMode,
+      transport: binding.runtime?.bridge_mode || "",
+      capabilities: binding.runtime?.capabilities || {},
       resolution_source: resolutionSource,
       warnings
     };

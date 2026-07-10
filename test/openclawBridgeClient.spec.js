@@ -240,6 +240,48 @@ describe("openclawBridgeClient", () => {
     expect(body.prompt).toBe(body.message);
   });
 
+  it("sends native OpenClaw attachments without legacy chunk files", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      task_id: "bridge-task-1",
+      run_id: "run-1",
+      status: "running"
+    }), {
+      status: 202,
+      headers: {
+        "Content-Type": "application/json"
+      }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const nativeAttachments = [{
+      type: "file",
+      fileId: "file-native-1",
+      fileName: "paper.pdf",
+      mimeType: "application/pdf",
+      size: 12,
+      contentBase64: "cHJvYmU="
+    }];
+
+    await openclawBridgeClient(env).createTask({
+      conversationId: "conversation-1",
+      projectId: "default",
+      runtimeId: "hillsboro-openclaw",
+      message: "read the original file",
+      sessionKey: "agent:main:conversation-1",
+      sessionId: "agent:main:conversation-1",
+      agentId: "main",
+      nativeAttachments,
+      idempotencyKey: "local-task-1"
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.attachments).toEqual(nativeAttachments);
+    expect(body.native_attachments).toEqual(nativeAttachments);
+    expect(body.files).toEqual([]);
+    expect(body.file_ids).toEqual([]);
+    expect(body.message).toBe("read the original file");
+  });
+
   it("returns structured errors for non-2xx bridge responses", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       error: "Bridge exploded"

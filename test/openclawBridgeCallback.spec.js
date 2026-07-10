@@ -51,7 +51,8 @@ async function postCallback(payload, options = {}) {
   const rawBody = JSON.stringify(payload);
   const timestamp = options.timestamp || String(Date.now());
   const signature = options.signature || await signCallback(timestamp, rawBody, options.secret || CALLBACK_SECRET);
-  const response = await worker.fetch(new Request("http://example.com/api/openclaw/bridge/callback", {
+  const path = options.path || "/api/openclaw/bridge/callback";
+  const response = await worker.fetch(new Request("http://example.com" + path, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -367,6 +368,22 @@ describe("OpenClaw bridge callback endpoint", () => {
     expect(body).toMatchObject({ ok: true, applied: true, duplicate: false });
     expect(task.status).toBe("running");
     expect(task.remote_message).toBe("started");
+  });
+
+  it.each([
+    "/api/openclaw/bridge/callback",
+    "/api/openclaw/callback",
+    "/api/bridge/callback"
+  ])("accepts callback route alias %s", async path => {
+    const payload = basePayload({
+      event_type: "bridge.started",
+      event_id: "evt_alias_" + path.replace(/[^a-z0-9]+/gi, "_"),
+      sequence: 1
+    });
+    const response = await postCallback(payload, { path });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.ok).toBe(true);
   });
 
   it("logs diagnostics for legacy callbacks resolved to unscoped tasks", async () => {

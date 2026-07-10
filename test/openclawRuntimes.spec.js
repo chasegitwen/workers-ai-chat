@@ -17,6 +17,7 @@ const HILLSBORO_RUNTIME = {
     progress_callback: true,
     sse_events: true,
     remote_console: true,
+    nativeAttachment: true,
     production_validated: true
   }),
   agents_json: JSON.stringify([
@@ -43,6 +44,7 @@ const SEATTLE_RUNTIME = {
     progress_callback: false,
     sse_events: false,
     remote_console: false,
+    nativeAttachment: false,
     legacy_only: true,
     production_validated: false
   }),
@@ -332,8 +334,28 @@ describe("OpenClaw runtime registry", () => {
       bridge_callback: true,
       progress_callback: true,
       sse_events: true,
-      remote_console: true
+      remote_console: true,
+      nativeAttachment: true
     });
+  });
+
+  it("defaults missing native attachment capability to false", async () => {
+    const db = new FakeD1();
+    db.runtimes.set("minimal-openclaw", {
+      ...HILLSBORO_RUNTIME,
+      id: "minimal-openclaw",
+      slug: "minimal-openclaw",
+      capabilities_json: JSON.stringify({
+        bridge_callback: true
+      })
+    });
+    const body = await json(await handleOpenClawRuntimes(
+      new Request("http://example.com/api/openclaw/runtimes/minimal-openclaw"),
+      env(db),
+      new URL("http://example.com/api/openclaw/runtimes/minimal-openclaw")
+    ));
+
+    expect(body.runtime.capabilities.nativeAttachment).toBe(false);
   });
 
   it("does not mark Seattle Bridge-enabled by default", async () => {
@@ -353,6 +375,7 @@ describe("OpenClaw runtime registry", () => {
     expect(body.runtime.capabilities.bridge_callback).toBe(false);
     expect(body.runtime.capabilities.sse_events).toBe(false);
     expect(body.runtime.capabilities.remote_console).toBe(false);
+    expect(body.runtime.capabilities.nativeAttachment).toBe(false);
   });
 
   it("updates runtime metadata without touching provider settings", async () => {

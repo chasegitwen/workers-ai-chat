@@ -25,7 +25,7 @@ export default {
       });
     }
 
-    if (url.pathname === "/api/openclaw/bridge/callback") {
+    if (isOpenClawBridgeCallbackPath(url.pathname)) {
       if (request.method !== "POST") {
         return jsonResponse({
           ok: false,
@@ -241,3 +241,11 @@ export default {
     return handleChat(request, env, ctx);
   }
 };
+
+function isOpenClawBridgeCallbackPath(pathname) {
+  return [
+    "/api/openclaw/bridge/callback",
+    "/api/openclaw/callback",
+    "/api/bridge/callback"
+  ].includes(String(pathname || "").replace(/\/+$/g, ""));
+}

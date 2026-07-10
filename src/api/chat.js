@@ -1,5 +1,8 @@
 import { corsHeaders, jsonResponse } from "../utils/response.js";
-import { getRelevantFileChunksByIds } from "./files.js";
+import {
+  buildNativeOpenClawAttachments,
+  getRelevantFileChunksByIds
+} from "./files.js";
 import {
   ensureConversation,
   saveMessage,
@@ -532,6 +535,23 @@ function openClawCallbackAllowedBridgeIds(env) {
     .split(",")
     .map(value => value.trim())
     .filter(Boolean);
+}
+
+function normalizeFileContextMode(value) {
+  const mode = String(value || "").trim().toLowerCase();
+  return mode === "native_attachment" ? "native_attachment" : "retrieval";
+}
+
+function runtimeSupportsNativeAttachment(runtimeResolution) {
+  return runtimeResolution?.capabilities?.nativeAttachment === true;
+}
+
+function isOpenClawBridgeCallbackPath(pathname) {
+  return [
+    "/api/openclaw/bridge/callback",
+    "/api/openclaw/callback",
+    "/api/bridge/callback"
+  ].includes(String(pathname || "").replace(/\/+$/g, ""));
 }
 
 function normalizeRuntimeEnvKey(runtimeId) {
@@ -4613,6 +4633,7 @@ async function submitOpenClawBridgeTask({
   sessionId,
   attachments = [],
   fileAttachments = [],
+  nativeAttachments = [],
   projectId = "",
   runtimeId = ""
 }) {
@@ -4625,13 +4646,17 @@ async function submitOpenClawBridgeTask({
   }
 
   const bridge = openclawBridgeClient(env);
-  const bridgeMessage = buildOpenClawBridgeMessageWithFiles(userContent, fileAttachments);
+  const bridgeMessage = nativeAttachments.length
+    ? String(userContent || "")
+    : buildOpenClawBridgeMessageWithFiles(userContent, fileAttachments);
   const bridgeFiles = Array.isArray(fileAttachments) ? fileAttachments : [];
+  const bridgeNativeAttachments = Array.isArray(nativeAttachments) ? nativeAttachments : [];
   logOpenClawAsync("bridge-submit", {
     localTaskId: openClawTask.id,
     conversationId,
     agentId,
-    sessionKey
+    sessionKey,
+    nativeAttachmentCount: bridgeNativeAttachments.length
   });
   console.info("[openclaw-bridge-submit-payload]", {
     localTaskId: openClawTask.id,
@@ -4639,8 +4664,12 @@ async function submitOpenClawBridgeTask({
     projectId,
     runtimeId,
     hasFiles: bridgeFiles.length > 0,
+    hasNativeAttachments: bridgeNativeAttachments.length > 0,
     fileIds: bridgeFiles.map(file => file.file_id).filter(Boolean),
+    nativeAttachmentFileIds: bridgeNativeAttachments.map(file => file.fileId || file.file_id).filter(Boolean),
     filenames: bridgeFiles.map(file => file.filename || file.name || "").filter(Boolean),
+    nativeAttachmentMimeTypes: bridgeNativeAttachments.map(file => file.mimeType || file.mime_type || "").filter(Boolean),
+    nativeAttachmentTotalBytes: bridgeNativeAttachments.reduce((sum, file) => sum + Number(file.size || 0), 0),
     attachmentCount: Array.isArray(attachments) ? attachments.length : 0,
     fileCount: bridgeFiles.length,
     hasInlineFileText: bridgeFiles.some(file => Boolean(file.content_text || file.text)),
@@ -4661,6 +4690,7 @@ async function submitOpenClawBridgeTask({
     agentId,
     attachments,
     fileAttachments,
+    nativeAttachments: bridgeNativeAttachments,
     idempotencyKey: openClawTask.id
   });
 
@@ -5067,7 +5097,7 @@ async function prepareConversation(env, conversationId, userContent, projectId =
 
 export async function handleChat(request, env, ctx) {
   const url = new URL(request.url);
-  if (url.pathname === "/api/openclaw/bridge/callback") {
+  if (isOpenClawBridgeCallbackPath(url.pathname)) {
     return handleOpenClawBridgeCallbackRequest(request, env);
   }
 
@@ -5098,6 +5128,8 @@ export async function handleChat(request, env, ctx) {
     attachments,
     file,
     fileIds = [],
+    attachmentFileIds = [],
+    fileContextMode,
     conversationId,
     project_id: projectId,
     projectId: camelProjectId,
@@ -5238,6 +5270,11 @@ export async function handleChat(request, env, ctx) {
   const ragFiles = [];
   let ragSources = [];
   let selectedFileChunks = [];
+  const requestedFileContextMode = normalizeFileContextMode(fileContextMode);
+  const nativeAttachmentFileIds = [...new Set([
+    ...(Array.isArray(attachmentFileIds) ? attachmentFileIds : []),
+    ...(requestedFileContextMode === "native_attachment" && Array.isArray(fileIds) ? fileIds : [])
+  ].map(id => String(id || "").trim()).filter(Boolean))];
   const isOpenClawRequest = isOpenClawRequestTarget(providerCatalog, provider, model || DEFAULT_TEXT_MODEL);
   const openClawTarget = isOpenClawRequest
     ? resolveOpenClawProviderModel(providerCatalog, provider, model || DEFAULT_TEXT_MODEL)
@@ -5283,6 +5320,39 @@ export async function handleChat(request, env, ctx) {
       }
     });
   }
+  if (requestedFileContextMode === "native_attachment" && nativeAttachmentFileIds.length) {
+    if (!isOpenClawRequest) {
+      return new Response(JSON.stringify({
+        ok: false,
+        error: "native_attachment_requires_openclaw",
+        message: "原文附件只能发送给支持 Native Attachment 的 OpenClaw runtime。"
+      }), {
+        status: 400,
+        headers: {
+          ...corsHeaders(),
+          "X-Conversation-Id": conversation.id,
+          "Content-Type": "application/json; charset=utf-8"
+        }
+      });
+    }
+    if (!runtimeSupportsNativeAttachment(runtimeResolution)) {
+      return new Response(JSON.stringify({
+        ok: false,
+        error: "native_attachment_unsupported",
+        message: "当前 OpenClaw runtime 不支持原文附件，请切换到支持 Native Attachment 的 runtime，或改用文件检索模式。",
+        project_id: runtimeResolution?.project_id || conversation.project_id || "",
+        runtime_id: runtimeResolution?.runtime_id || "",
+        fileContextMode: requestedFileContextMode
+      }), {
+        status: 400,
+        headers: {
+          ...corsHeaders(),
+          "X-Conversation-Id": conversation.id,
+          "Content-Type": "application/json; charset=utf-8"
+        }
+      });
+    }
+  }
   const resolvedOpenClawBridgeEnabled = isOpenClawRequest
     ? runtimeResolution?.execution_mode === "bridge"
     : false;
@@ -5314,7 +5384,7 @@ export async function handleChat(request, env, ctx) {
     ragFiles.push(file);
   }
 
-  if (Array.isArray(fileIds) && fileIds.length) {
+  if (requestedFileContextMode !== "native_attachment" && Array.isArray(fileIds) && fileIds.length) {
     const fileChunks = await getRelevantFileChunksByIds(env, fileIds, userContent, {
       perFileLimit: 5,
       totalLimit: 14
@@ -5375,9 +5445,68 @@ export async function handleChat(request, env, ctx) {
     });
 
     if (resolvedOpenClawBridgeEnabled) {
+      if (requestedFileContextMode === "native_attachment" && nativeAttachmentFileIds.length && !runtimeSupportsNativeAttachment(runtimeResolution)) {
+        return new Response(JSON.stringify({
+          ok: false,
+          error: "native_attachment_unsupported",
+          message: "当前 OpenClaw runtime 不支持原文附件，请切换到支持 Native Attachment 的 runtime，或改用文件检索模式。",
+          project_id: runtimeResolution?.project_id || conversation.project_id || "",
+          runtime_id: runtimeResolution?.runtime_id || "",
+          fileContextMode: requestedFileContextMode
+        }), {
+          status: 400,
+          headers: {
+            ...corsHeaders(),
+            "X-Conversation-Id": conversation.id,
+            "Content-Type": "application/json; charset=utf-8"
+          }
+        });
+      }
       const openClawAgentId = runtimeResolution?.agent_id || requestedOpenClawAgentId;
       const openClawSessionKey = "agent:" + openClawAgentId + ":" + conversation.id;
-      const bridgeFileAttachments = buildOpenClawBridgeFileAttachments({
+      const nativeAttachmentResult = requestedFileContextMode === "native_attachment" && nativeAttachmentFileIds.length
+        ? await buildNativeOpenClawAttachments(env, nativeAttachmentFileIds, {
+          conversationId: conversation.id,
+          projectId: runtimeResolution?.project_id || conversation.project_id || "",
+          runtimeId: runtimeResolution?.runtime_id || "",
+          message: userContent
+        })
+        : { ok: true, attachments: [] };
+      if (!nativeAttachmentResult.ok) {
+        return new Response(JSON.stringify({
+          ok: false,
+          error: nativeAttachmentResult.code || "native_attachment_failed",
+          message: nativeAttachmentResult.error || "Native attachment preparation failed",
+          project_id: runtimeResolution?.project_id || conversation.project_id || "",
+          runtime_id: runtimeResolution?.runtime_id || "",
+          file_id: nativeAttachmentResult.file_id || "",
+          mime_type: nativeAttachmentResult.mime_type || "",
+          size: nativeAttachmentResult.size,
+          max_size: nativeAttachmentResult.max_size,
+          total_size: nativeAttachmentResult.total_size,
+          max_total_size: nativeAttachmentResult.max_total_size,
+          estimated_payload_bytes: nativeAttachmentResult.estimated_payload_bytes
+        }), {
+          status: 400,
+          headers: {
+            ...corsHeaders(),
+            "X-Conversation-Id": conversation.id,
+            "Content-Type": "application/json; charset=utf-8"
+          }
+        });
+      }
+      const nativeAttachments = nativeAttachmentResult.attachments || [];
+      console.info("[openclaw-native-attachment]", {
+        runtime_id: runtimeResolution?.runtime_id || "",
+        transport: runtimeResolution?.transport || runtimeResolution?.execution_mode || "",
+        native_attachment_requested: requestedFileContextMode === "native_attachment",
+        native_attachment_supported: runtimeSupportsNativeAttachment(runtimeResolution),
+        attachment_count: nativeAttachments.length,
+        attachment_total_bytes: nativeAttachmentResult.totalBytes || 0,
+        estimated_gateway_payload_bytes: nativeAttachmentResult.estimatedPayloadBytes || 0,
+        attachment_mime_types: nativeAttachmentResult.mimeTypes || []
+      });
+      const bridgeFileAttachments = nativeAttachments.length ? [] : buildOpenClawBridgeFileAttachments({
         file: file && file.text ? file : null,
         fileChunks: selectedFileChunks,
         conversationId: conversation.id,
@@ -5394,9 +5523,10 @@ export async function handleChat(request, env, ctx) {
         sessionId: openClawSessionKey,
         attachments: [
           ...allImageAttachments,
-          ...bridgeFileAttachments
+          ...(nativeAttachments.length ? nativeAttachments : bridgeFileAttachments)
         ],
         fileAttachments: bridgeFileAttachments,
+        nativeAttachments,
         projectId: runtimeResolution?.project_id || conversation.project_id || "",
         runtimeId: runtimeResolution?.runtime_id || ""
       });

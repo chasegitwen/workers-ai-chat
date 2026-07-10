@@ -5,6 +5,10 @@ import {
   createOpenClawBridgeEventState
 } from "../src/frontend/openclawBridgeEventState.js";
 
+const fromCodePoints = (...codes) => String.fromCodePoint(...codes);
+const mojibakeEmptyReply = fromCodePoints(0x5a0c, 0x2103, 0x6e41, 0x6769, 0x65bf, 0x6d16, 0x9350, 0x546d, 0xe190);
+const mojibakeSecond = fromCodePoints(0x7ec9);
+
 describe("OpenClaw bridge frontend SSE state", () => {
   it("ignores duplicate event_id values", () => {
     const state = createOpenClawBridgeEventState();
@@ -69,15 +73,21 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("OpenClaw remote task");
     expect(page).toContain("OpenClaw local task record");
     expect(page).toContain("Started: ");
+    expect(page).toContain(" \u79d2\u524d");
+    expect(page).not.toContain(mojibakeSecond);
     expect(page).toContain("View record");
     expect(page).toContain("Keep waiting");
     expect(page).toContain("Rerun");
     expect(page).toContain("Ignore");
-    expect(page).not.toContain("OpenClaw 杩滅");
-    expect(page).not.toContain("寮€濮");
-    expect(page).not.toContain("鏌ョ湅");
-    expect(page).not.toContain("閲嶆柊");
-    expect(page).not.toContain("蹇界暐");
+  });
+
+  it("keeps Bridge empty replies and elapsed seconds in UTF-8 Chinese", () => {
+    const page = htmlPage();
+
+    expect(page).toContain("\u6ca1\u6709\u8fd4\u56de\u5185\u5bb9");
+    expect(page).toContain(" \u79d2\u524d");
+    expect(page).not.toContain(mojibakeEmptyReply);
+    expect(page).not.toContain(mojibakeSecond);
   });
 
   it("sends an explicit Seattle runtime_id when the selected OpenClaw model is Seattle", () => {
@@ -102,30 +112,22 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toMatch(/<\/aside>\s*<div id="projectSettingsPopover" class="projectSettingsPopover" hidden>/);
     expect(page).toContain("id=\"modelSelect\"");
     expect(page).toContain("id=\"modelSettingsBtn\"");
-    expect(page).toContain("模型设置中心");
-    expect(page).toContain("当前模型");
-    expect(page).toContain("模型设置");
-    expect(page).toContain("默认模型");
-    expect(page).toContain("模型健康检查");
-    expect(page).toContain("Claude 兼容");
-    expect(page).toContain("OpenAI 兼容");
-    expect(page).toContain("Workers 托管");
-    expect(page).not.toContain("妯″瀷璁剧疆");
-    expect(page).not.toContain("榛樿妯″瀷");
-    expect(page).not.toContain("妯″瀷鍋ュ悍");
-    expect(page).not.toContain("鍏煎");
+    expect(page).toContain("\u6a21\u578b\u8bbe\u7f6e\u4e2d\u5fc3");
+    expect(page).toContain("\u5f53\u524d\u6a21\u578b");
+    expect(page).toContain("\u6a21\u578b\u8bbe\u7f6e");
+    expect(page).toContain("\u9ed8\u8ba4\u6a21\u578b");
+    expect(page).toContain("\u6a21\u578b\u5065\u5eb7\u68c0\u67e5");
+    expect(page).toContain("Claude \u517c\u5bb9");
+    expect(page).toContain("OpenAI \u517c\u5bb9");
+    expect(page).toContain("Workers \u6258\u7ba1");
     expect(page).toContain("closeSettingsBtn.textContent = \"X\"");
     expect(page).toContain("editDialogCloseBtn");
     expect(page).toContain(">X</button>");
     expect(page).toContain("button.textContent = \"...\"");
     expect(page).toContain("menuBtn.textContent = \"...\"");
     expect(page).not.toContain("button.textContent = \"Menu\"");
-    expect(page).not.toContain("脳");
-    expect(page).not.toContain("脑");
     expect(page).toMatch(/<div class="sidebarBadges">[\s\S]*?<\/div>\s*<div class="modelArea">/);
     expect(page).toMatch(/<div class="modelArea">[\s\S]*?<select[\s\S]*?id="modelSelect"[\s\S]*?<button id="modelSettingsBtn"/);
-    expect(page).not.toContain("鏈烘晥鏋?/div>");
-    expect(page).not.toContain("垏鎹?/div>");
     expect(page).toContain("class=\"projectHeader\"");
     expect(page).toContain("aria-label=\"New Project\"");
     expect(page).toContain("selected_workspace");

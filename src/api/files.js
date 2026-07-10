@@ -118,7 +118,7 @@ export async function getRelevantFileChunksByIds(env, fileIds = [], query = "", 
 
   for (const fileId of uniqueIds) {
     const file = await env.DB.prepare(
-      `SELECT id, filename, content_type, text_content
+      `SELECT id, conversation_id, filename, content_type, size, r2_key, text_content
        FROM files
        WHERE id = ?`
     ).bind(fileId).first();
@@ -141,6 +141,9 @@ export async function getRelevantFileChunksByIds(env, fileIds = [], query = "", 
           id: file.id,
           name: file.filename,
           type: file.content_type || "stored-file",
+          size: file.size || null,
+          r2Key: file.r2_key || "",
+          conversationId: file.conversation_id || "",
           text: file.text_content || ""
         });
       }
@@ -154,6 +157,9 @@ export async function getRelevantFileChunksByIds(env, fileIds = [], query = "", 
         fileId: file.id,
         filename: file.filename,
         contentType: file.content_type || "stored-file",
+        size: file.size || null,
+        r2Key: file.r2_key || "",
+        conversationId: file.conversation_id || "",
         chunkIndex: chunk.chunk_index,
         content: chunk.content,
         score: terms.length ? scoreChunk(chunk.content, terms) : 0
@@ -196,6 +202,9 @@ export async function getRelevantFileChunksByIds(env, fileIds = [], query = "", 
         fileId: file.id,
         filename: file.name,
         contentType: file.type,
+        size: file.size || null,
+        r2Key: file.r2Key || "",
+        conversationId: file.conversationId || "",
         chunkIndex: 0,
         content: file.text.slice(0, 5000),
         score: 0,

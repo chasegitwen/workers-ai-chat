@@ -2653,7 +2653,7 @@ body.dark .toolErrorNotice{
     <div class="brand">Workers <span>AI</span> Assistant</div>
     <div class="topbarActions">
       <button id="logoutBtn" class="themeBtn" type="button">Logout</button>
-      <button class="themeBtn" onclick="toggleTheme()">娣辫壊 / 娴呰壊</button>
+      <button class="themeBtn" onclick="toggleTheme()">深色 / 浅色</button>
     </div>
   </div>
 
@@ -2719,16 +2719,16 @@ body.dark .toolErrorNotice{
       </div>
 
       <p class="sidebarIntro">
-        杩欐槸閮ㄧ讲鍦?Cloudflare Workers 涓婄殑 AI 缃戦〉鍔╂墜銆?
-        涓嶄緷璧?VPS锛屼笉闇€瑕佹湰鍦?GPU锛岀洿鎺ヨ皟鐢?Workers AI銆?
+        这是部署在 Cloudflare Workers 上的 AI 网页助手。
+        不依赖 VPS，不需要本地 GPU，直接调用 Workers AI。
       </p>
 
       <div class="sidebarBadges">
-        <div class="badge">澶氳疆瀵硅瘽</div>
+        <div class="badge">多轮对话</div>
         <div class="badge">Markdown</div>
-        <div class="badge">妯″瀷鍒囨崲</div>
-        <div class="badge">鎵撳瓧鏈烘晥鏋?</div>
-        <div class="badge">娣辨祬鑹插垏鎹?</div>
+        <div class="badge">模型切换</div>
+        <div class="badge">打字机效果</div>
+        <div class="badge">深浅色切换</div>
       </div>
 
       <div class="modelArea">
@@ -2774,15 +2774,15 @@ body.dark .toolErrorNotice{
 
         <div id="welcomeCard" class="msg ai welcomeMsg">
           <div class="welcomeText">
-            浣犲ソ锛屾垜鏄熀浜?Cloudflare Workers AI 鐨勭綉椤靛姪鎵嬨€?
-            浣犲彲浠ラ棶鎴戦棶棰橈紝涔熷彲浠ヨ鎴戝啓浠ｇ爜銆佹€荤粨銆佺炕璇戞垨鍒嗘瀽鍐呭銆?
+            你好，我是基于 Cloudflare Workers AI 的网页助手。
+            你可以问我问题，也可以让我写代码、总结、翻译或分析内容。
           </div>
           <div class="welcomeActions">
             <label class="welcomeNeverShow">
               <input id="welcomeNeverShowInput" type="checkbox" />
-              <span>涓嶅啀鏄剧ず</span>
+              <span>不再显示</span>
             </label>
-            <button class="welcomeCloseBtn" type="button" aria-label="鍏抽棴娆㈣繋鎻愮ず">&times;</button>
+            <button class="welcomeCloseBtn" type="button" aria-label="关闭欢迎提示">&times;</button>
           </div>
         </div>
         <div id="searchResults"></div>
@@ -2809,7 +2809,7 @@ body.dark .toolErrorNotice{
   <div id="openClawTaskHistoryPanel" class="openClawTaskHistory" hidden>
     <div class="openClawTaskHistoryHeader">
       <strong>Task History</strong>
-      <button id="openClawTaskHistoryRefresh" type="button">鍒锋柊</button>
+      <button id="openClawTaskHistoryRefresh" type="button">刷新</button>
     </div>
     <div class="openClawTaskHistoryTabs">
       <button type="button" data-openclaw-task-view="recent" class="active">Recent</button>
@@ -3079,7 +3079,7 @@ async function login(event){
     const res = await fetch("/api/auth/login", {
       method:"POST",
       headers:{
-        "Content-Type":"application/json"
+        "Content-Type":"application/json; charset=utf-8"
       },
       body:JSON.stringify({
         username:loginUsername.value.trim(),
@@ -3137,7 +3137,7 @@ async function loadModels(){
       .forEach(model => {
         const option = document.createElement("option");
         option.value = model.id;
-        option.textContent = (model.label || model.id) + (model.recommended ? " 路 鎺ㄨ崘" : "");
+        option.textContent = (model.label || model.id) + (model.recommended ? " / 推荐" : "");
         option.dataset.provider = model.provider || "workers-ai";
         modelSelect.appendChild(option);
       });
@@ -3252,14 +3252,14 @@ async function syncSettingsToServer(settings){
   try{
     const res = await fetch("/api/settings", {
       method:"POST",
-      headers:{ "Content-Type":"application/json" },
+      headers:{ "Content-Type":"application/json; charset=utf-8" },
       body:JSON.stringify({ settings })
     });
     if(!res.ok) throw new Error(await res.text());
     settingsSyncStatus.textContent = "Synced";
   }catch(err){
     console.warn("settings sync failed", err);
-    settingsSyncStatus.textContent = "璁剧疆宸叉湰鍦颁繚瀛橈紝浜戠鍚屾澶辫触";
+    settingsSyncStatus.textContent = "设置已本地保存，云端同步失败";
   }
 }
 
@@ -3303,7 +3303,7 @@ function renderModelOptions(){
     }
     const option = document.createElement("option");
     option.value = model.id;
-    option.textContent = (model.label || model.id) + (model.recommended ? " / 鎺ㄨ崘" : "");
+    option.textContent = (model.label || model.id) + (model.recommended ? " / 推荐" : "");
     option.dataset.provider = model.provider || "";
     option.dataset.providerType = model.providerType || "";
     groups.get(groupLabel).appendChild(option);
@@ -3920,7 +3920,7 @@ imageInput.addEventListener("change", () => {
   if (!file) return;
 
   if (!file.type.startsWith("image/")) {
-    alert("璇烽€夋嫨鍥剧墖鏂囦欢");
+    alert("请选择图片文件");
     return;
   }
 
@@ -3952,7 +3952,7 @@ async function searchWeb(){
   const query = input.value.trim();
 
   if(!query){
-    alert("璇疯緭鍏ユ悳绱㈠叧閿瘝");
+    alert("请输入搜索关键词");
     return;
   }
 
@@ -3965,7 +3965,7 @@ async function searchWeb(){
     const res = await fetch("/search-web", {
       method:"POST",
       headers:{
-        "Content-Type":"application/json"
+        "Content-Type":"application/json; charset=utf-8"
       },
       body:JSON.stringify({
         query:query
@@ -3975,7 +3975,7 @@ async function searchWeb(){
     const data = await res.json();
 
     if(!res.ok || !data.ok){
-      throw new Error(data.error || "鎼滅储澶辫触");
+      throw new Error(data.error || "搜索失败");
     }
 
     renderSearchResults(data.results || [], data);
@@ -4012,7 +4012,7 @@ function renderSearchResults(results, meta){
 
   if(!results.length){
     searchResults.innerHTML =
-      "<div class='msg ai'>娌℃湁鎵惧埌鎼滅储缁撴灉銆?/div>";
+      "<div class='msg ai'>没有找到搜索结果。</div>";
     return;
   }
 
@@ -4023,7 +4023,7 @@ function renderSearchResults(results, meta){
   const title = document.createElement("div");
   title.style.fontWeight = "700";
   title.style.marginBottom = "10px";
-  title.textContent = "鎼滅储缁撴灉";
+  title.textContent = "搜索结果";
   box.appendChild(title);
 
   const debugMeta = document.createElement("div");
@@ -4275,7 +4275,7 @@ async function runBrowserTool(){
     const res = await fetch("/api/browser", {
       method:"POST",
       headers:{
-        "Content-Type":"application/json"
+        "Content-Type":"application/json; charset=utf-8"
       },
       body:JSON.stringify({
         url,
@@ -4363,7 +4363,7 @@ async function webAnswer(){
   return;
 
   if(!query){
-    alert("璇峰厛鍦ㄨ亰澶╂鎴栨悳绱㈡杈撳叆闂");
+    alert("请先在聊天框或搜索框输入问题");
     return;
   }
 
@@ -4376,7 +4376,7 @@ async function webAnswer(){
     const res = await fetch("/search-and-fetch", {
       method:"POST",
       headers:{
-        "Content-Type":"application/json"
+        "Content-Type":"application/json; charset=utf-8"
       },
       body:JSON.stringify({
         query:query
@@ -4386,7 +4386,7 @@ async function webAnswer(){
     const data = await res.json();
 
     if(!res.ok || !data.ok){
-      throw new Error(data.error || "鑱旂綉鎼滅储澶辫触");
+      throw new Error(data.error || "联网搜索失败");
     }
 
     webSearchSources = data.pages || [];
@@ -4434,7 +4434,7 @@ async function fetchWebPage(pageUrlFromResult){
   const pageUrl = (typeof pageUrlFromResult === "string" ? pageUrlFromResult : input.value).trim();
 
   if(!pageUrl){
-    alert("璇峰厛杈撳叆缃戦〉 URL");
+    alert("请输入网页 URL");
     return;
   }
 
@@ -4452,7 +4452,7 @@ async function fetchWebPage(pageUrlFromResult){
     const res = await fetch("/fetch-url", {
       method:"POST",
       headers:{
-        "Content-Type":"application/json"
+        "Content-Type":"application/json; charset=utf-8"
       },
       body:JSON.stringify({
         pageUrl
@@ -4462,7 +4462,7 @@ async function fetchWebPage(pageUrlFromResult){
     const data = await res.json();
 
     if(!res.ok || !data.ok){
-      throw new Error(data.error || "缃戦〉鎶撳彇澶辫触");
+      throw new Error(data.error || "网页抓取失败");
     }
 
     selectedWebPage = {
@@ -4510,7 +4510,7 @@ async function extractPdfText(file){
       .map(item => item.str)
       .join(" ");
 
-    fullText += String.fromCharCode(10, 10) + "--- 绗?" + pageNum + " 椤?---" + String.fromCharCode(10) + pageText;
+    fullText += String.fromCharCode(10, 10) + "--- 第" + pageNum + " 页 ---" + String.fromCharCode(10) + pageText;
   }
 
   return fullText.trim();
@@ -4608,7 +4608,7 @@ async function uploadFileToLibrary(file, textContent){
   const data = await res.json();
 
   if(!res.ok || !data.ok){
-    throw new Error(data.error || "鏂囦欢涓婁紶澶辫触");
+    throw new Error(data.error || "文件上传失败");
   }
 
   return data.file;
@@ -4632,7 +4632,7 @@ fileInput.addEventListener("change", async () => {
   const isDocxFile = name.endsWith(".docx");
 
   if (!isTextFile && !isPdfFile && !isDocxFile) {
-    alert("褰撳墠鏀寔 TXT / Markdown / PDF / DOCX 鏂囦欢");
+    alert("当前支持 TXT / Markdown / PDF / DOCX 文件");
     fileInput.value = "";
     return;
   }
@@ -4662,7 +4662,7 @@ fileInput.addEventListener("change", async () => {
         const reader = new FileReader();
 
         reader.onload = () => resolve(reader.result || "");
-        reader.onerror = () => reject(new Error("鏂囦欢璇诲彇澶辫触"));
+        reader.onerror = () => reject(new Error("文件读取失败"));
 
         reader.readAsText(file, "utf-8");
       });
@@ -4970,7 +4970,7 @@ function addProvider(){
   const apiKeyEnv = providerApiKeyEnvInput.value.trim();
 
   if(!label){
-    settingsSyncStatus.textContent = "璇峰～鍐?provider 鍚嶇О";
+    settingsSyncStatus.textContent = "请填写 provider 名称";
     return;
   }
 
@@ -4993,7 +4993,7 @@ function addProvider(){
   providerLabelInput.value = "";
   providerBaseUrlInput.value = "";
   providerApiKeyEnvInput.value = "";
-  saveCurrentSettings("宸叉坊鍔?provider");
+  saveCurrentSettings("已添加 provider");
 }
 
 function addProviderModel(){
@@ -5003,7 +5003,7 @@ function addProviderModel(){
   const modelName = modelNameInput.value.trim() || id;
 
   if(!provider || !id){
-    settingsSyncStatus.textContent = "璇烽€夋嫨 provider 骞跺～鍐欐ā鍨?ID";
+    settingsSyncStatus.textContent = "请选择 provider 并填写模型 ID";
     return;
   }
 
@@ -5026,7 +5026,7 @@ function addProviderModel(){
 
 function removeProvider(providerId){
   modelProviders = modelProviders.filter(provider => provider.id !== providerId);
-  saveCurrentSettings("宸插垹闄?provider");
+  saveCurrentSettings("已删除 provider");
 }
 
 function removeProviderModel(providerId, modelId){
@@ -5050,7 +5050,7 @@ function renderProvidersList(){
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
       removeBtn.className = "settingsBtn";
-      removeBtn.textContent = "鍒犻櫎 provider";
+      removeBtn.textContent = "删除 provider";
       removeBtn.addEventListener("click", () => removeProvider(provider.id));
       header.appendChild(removeBtn);
     }
@@ -5063,7 +5063,7 @@ function renderProvidersList(){
       const removeModelBtn = document.createElement("button");
       removeModelBtn.type = "button";
       removeModelBtn.className = "settingsBtn";
-      removeModelBtn.textContent = "鍒犻櫎";
+      removeModelBtn.textContent = "删除";
       removeModelBtn.addEventListener("click", () => removeProviderModel(provider.id, model.id));
       modelRow.appendChild(name);
       modelRow.appendChild(removeModelBtn);
@@ -5108,7 +5108,7 @@ function pruneInvalidModelReferences(){
 function editProvider(providerId){
   const provider = getProvider(providerId);
   if(!provider || !providerEditable(provider)){
-    settingsSyncStatus.textContent = "褰撳墠 provider 涓嶅彲缂栬緫";
+    settingsSyncStatus.textContent = "当前 provider 不可编辑";
     return;
   }
   editingProviderId = provider.id;
@@ -5117,7 +5117,7 @@ function editProvider(providerId){
   providerTypeSelect.value = provider.providerType || "openai-compatible";
   providerBaseUrlInput.value = provider.apiBase || "";
   providerApiKeyEnvInput.value = provider.apiKeyEnv || "";
-  addProviderBtn.textContent = "淇濆瓨 provider 淇敼";
+  addProviderBtn.textContent = "保存 provider 修改";
   cancelProviderEditBtn.style.display = "inline-block";
 }
 
@@ -5125,7 +5125,7 @@ function editProviderModel(providerId, modelId){
   const provider = getProvider(providerId);
   const model = provider?.models?.find(item => item.id === modelId);
   if(!provider || !model || !modelEditable(model)){
-    settingsSyncStatus.textContent = "褰撳墠妯″瀷涓嶅彲缂栬緫";
+    settingsSyncStatus.textContent = "当前模型不可编辑";
     return;
   }
   editingModelRef = { providerId, modelId };
@@ -5133,7 +5133,7 @@ function editProviderModel(providerId, modelId){
   modelLabelInput.value = model.label || model.id;
   modelIdInput.value = model.id;
   modelNameInput.value = model.modelName || model.id;
-  addProviderModelBtn.textContent = "淇濆瓨妯″瀷淇敼";
+  addProviderModelBtn.textContent = "保存模型修改";
   cancelModelEditBtn.style.display = "inline-block";
 }
 
@@ -5172,7 +5172,7 @@ function addProvider(){
   if(editingProviderId){
     const provider = getProvider(editingProviderId);
     if(!provider || !providerEditable(provider)){
-      settingsSyncStatus.textContent = "褰撳墠 provider 涓嶅彲缂栬緫";
+      settingsSyncStatus.textContent = "当前 provider 不可编辑";
       return;
     }
     provider.id = id;
@@ -5187,7 +5187,7 @@ function addProvider(){
       apiKeyEnv:provider.apiKeyEnv
     }));
     clearProviderForm();
-    refreshDraftSettings("宸叉洿鏂?provider");
+    refreshDraftSettings("已更新 provider");
     return;
   }
 
@@ -5202,7 +5202,7 @@ function addProvider(){
     models:[]
   });
   clearProviderForm();
-  refreshDraftSettings("宸叉坊鍔?provider");
+  refreshDraftSettings("已添加 provider");
 }
 
 function addProviderModel(){
@@ -5212,11 +5212,11 @@ function addProviderModel(){
   const modelName = modelNameInput.value.trim() || id;
 
   if(!provider || !id || !label){
-    settingsSyncStatus.textContent = "璇烽€夋嫨 provider 骞跺～鍐欐ā鍨?id/name";
+    settingsSyncStatus.textContent = "请选择 provider 并填写模型 id/name";
     return;
   }
   if((provider.models || []).some(model => model.id === id && !(editingModelRef && editingModelRef.providerId === provider.id && editingModelRef.modelId === model.id))){
-    settingsSyncStatus.textContent = "鍚屼竴 provider 涓?model id 涓嶈兘閲嶅";
+    settingsSyncStatus.textContent = "同一 provider 中 model id 不能重复";
     return;
   }
 
@@ -5224,7 +5224,7 @@ function addProviderModel(){
     const originalProvider = getProvider(editingModelRef.providerId);
     const originalModel = originalProvider?.models?.find(model => model.id === editingModelRef.modelId);
     if(!originalProvider || !originalModel || !modelEditable(originalModel)){
-      settingsSyncStatus.textContent = "褰撳墠妯″瀷涓嶅彲缂栬緫";
+      settingsSyncStatus.textContent = "当前模型不可编辑";
       return;
     }
     originalProvider.models = (originalProvider.models || []).filter(model => model.id !== editingModelRef.modelId);
@@ -5250,10 +5250,10 @@ function addProviderModel(){
 function removeProvider(providerId){
   const provider = getProvider(providerId);
   if(!provider || !providerEditable(provider)){
-    settingsSyncStatus.textContent = "褰撳墠 provider 涓嶅彲鍒犻櫎";
+    settingsSyncStatus.textContent = "当前 provider 不可删除";
     return;
   }
-  if(!confirm("纭畾鍒犻櫎 provider " + provider.label + " 鍚楋紵")){
+  if(!confirm("确定删除 provider " + provider.label + " 吗？")){
     return;
   }
   if(editingProviderId === providerId){
@@ -5264,17 +5264,17 @@ function removeProvider(providerId){
   }
   modelProviders = modelProviders.filter(provider => provider.id !== providerId);
   pruneInvalidModelReferences();
-  refreshDraftSettings("宸插垹闄?provider");
+  refreshDraftSettings("已删除 provider");
 }
 
 function removeProviderModel(providerId, modelId){
   const provider = getProvider(providerId);
   const targetModel = provider?.models?.find(model => model.id === modelId);
   if(!provider || !targetModel || !modelEditable(targetModel)){
-    settingsSyncStatus.textContent = "褰撳墠妯″瀷涓嶅彲鍒犻櫎";
+    settingsSyncStatus.textContent = "当前模型不可删除";
     return;
   }
-  if(!confirm("纭畾鍒犻櫎妯″瀷 " + (targetModel.label || targetModel.id) + " 鍚楋紵")){
+  if(!confirm("确定删除模型 " + (targetModel.label || targetModel.id) + " 吗？")){
     return;
   }
   if(editingModelRef?.providerId === providerId && editingModelRef?.modelId === modelId){
@@ -5299,7 +5299,7 @@ function renderProvidersList(){
       const editBtn = document.createElement("button");
       editBtn.type = "button";
       editBtn.className = "settingsBtn";
-      editBtn.textContent = "缂栬緫";
+      editBtn.textContent = "编辑";
       editBtn.addEventListener("click", () => editProvider(provider.id));
       header.appendChild(editBtn);
     }
@@ -5307,7 +5307,7 @@ function renderProvidersList(){
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
       removeBtn.className = "settingsBtn";
-      removeBtn.textContent = "鍒犻櫎 provider";
+      removeBtn.textContent = "删除 provider";
       removeBtn.addEventListener("click", () => removeProvider(provider.id));
       header.appendChild(removeBtn);
     }
@@ -5321,14 +5321,14 @@ function renderProvidersList(){
         const editModelBtn = document.createElement("button");
         editModelBtn.type = "button";
         editModelBtn.className = "settingsBtn";
-        editModelBtn.textContent = "缂栬緫";
+        editModelBtn.textContent = "编辑";
         editModelBtn.addEventListener("click", () => editProviderModel(provider.id, model.id));
         modelRow.appendChild(editModelBtn);
       }
       const removeModelBtn = document.createElement("button");
       removeModelBtn.type = "button";
       removeModelBtn.className = "settingsBtn";
-      removeModelBtn.textContent = "鍒犻櫎";
+      removeModelBtn.textContent = "删除";
       removeModelBtn.addEventListener("click", () => removeProviderModel(provider.id, model.id));
       modelRow.prepend(name);
       modelRow.appendChild(removeModelBtn);
@@ -5346,7 +5346,7 @@ async function syncSettingsToServer(settings){
     };
     const res = await fetch("/api/settings", {
       method:"POST",
-      headers:{ "Content-Type":"application/json" },
+      headers:{ "Content-Type":"application/json; charset=utf-8" },
       body:JSON.stringify({ settings:payload })
     });
     if(!res.ok){
@@ -5368,7 +5368,7 @@ async function syncSettingsToServer(settings){
     return true;
   }catch(err){
     console.warn("settings sync failed", err);
-    settingsSyncStatus.textContent = "宸叉湰鍦颁繚瀛橈紝浜戠鍚屾澶辫触";
+    settingsSyncStatus.textContent = "已本地保存，云端同步失败";
     return false;
   }
 }
@@ -5426,7 +5426,7 @@ function addProvider(){
   if(editingProviderId){
     const provider = getProvider(editingProviderId);
     if(!provider || !providerEditable(provider)){
-      settingsSyncStatus.textContent = "褰撳墠 provider 涓嶅彲缂栬緫";
+      settingsSyncStatus.textContent = "当前 provider 不可编辑";
       return;
     }
     provider.id = id;
@@ -5441,7 +5441,7 @@ function addProvider(){
       apiKeyEnv:provider.apiKeyEnv
     }));
     clearProviderForm();
-    refreshDraftSettings("宸叉洿鏂?provider");
+    refreshDraftSettings("已更新 provider");
     return;
   }
   modelProviders.push({
@@ -5455,7 +5455,7 @@ function addProvider(){
     models:[]
   });
   clearProviderForm();
-  refreshDraftSettings("宸叉坊鍔?provider");
+  refreshDraftSettings("已添加 provider");
 }
 
 function addProviderModel(){
@@ -5465,18 +5465,18 @@ function addProviderModel(){
   const modelName = modelNameInput.value.trim() || id;
   const wasEditing = Boolean(editingModelRef);
   if(!provider || !id || !label){
-    settingsSyncStatus.textContent = "璇烽€夋嫨 provider 骞跺～鍐欐ā鍨?id/name";
+    settingsSyncStatus.textContent = "请选择 provider 并填写模型 id/name";
     return;
   }
   if((provider.models || []).some(model => model.id === id && !(editingModelRef && editingModelRef.providerId === provider.id && editingModelRef.modelId === model.id))){
-    settingsSyncStatus.textContent = "鍚屼竴 provider 涓?model id 涓嶈兘閲嶅";
+    settingsSyncStatus.textContent = "同一 provider 中 model id 不能重复";
     return;
   }
   if(editingModelRef){
     const originalProvider = getProvider(editingModelRef.providerId);
     const originalModel = originalProvider?.models?.find(model => model.id === editingModelRef.modelId);
     if(!originalProvider || !originalModel || !modelEditable(originalModel)){
-      settingsSyncStatus.textContent = "褰撳墠妯″瀷涓嶅彲缂栬緫";
+      settingsSyncStatus.textContent = "当前模型不可编辑";
       return;
     }
     originalProvider.models = (originalProvider.models || []).filter(model => model.id !== editingModelRef.modelId);
@@ -5501,10 +5501,10 @@ function addProviderModel(){
 function removeProvider(providerId){
   const provider = getProvider(providerId);
   if(!provider || !providerEditable(provider)){
-    settingsSyncStatus.textContent = "褰撳墠 provider 涓嶅彲鍒犻櫎";
+    settingsSyncStatus.textContent = "当前 provider 不可删除";
     return;
   }
-  if(!confirm("纭畾鍒犻櫎 provider " + provider.label + " 鍚楋紵")){
+  if(!confirm("确定删除 provider " + provider.label + " 吗？")){
     return;
   }
   if(editingProviderId === providerId){
@@ -5515,17 +5515,17 @@ function removeProvider(providerId){
   }
   modelProviders = modelProviders.filter(provider => provider.id !== providerId);
   pruneInvalidModelReferences();
-  refreshDraftSettings("宸插垹闄?provider");
+  refreshDraftSettings("已删除 provider");
 }
 
 function removeProviderModel(providerId, modelId){
   const provider = getProvider(providerId);
   const targetModel = provider?.models?.find(model => model.id === modelId);
   if(!provider || !targetModel || !modelEditable(targetModel)){
-    settingsSyncStatus.textContent = "褰撳墠妯″瀷涓嶅彲鍒犻櫎";
+    settingsSyncStatus.textContent = "当前模型不可删除";
     return;
   }
-  if(!confirm("纭畾鍒犻櫎妯″瀷 " + (targetModel.label || targetModel.id) + " 鍚楋紵")){
+  if(!confirm("确定删除模型 " + (targetModel.label || targetModel.id) + " 吗？")){
     return;
   }
   if(editingModelRef?.providerId === providerId && editingModelRef?.modelId === modelId){
@@ -5550,7 +5550,7 @@ function renderProvidersList(){
       const editBtn = document.createElement("button");
       editBtn.type = "button";
       editBtn.className = "settingsBtn";
-      editBtn.textContent = "缂栬緫";
+      editBtn.textContent = "编辑";
       editBtn.addEventListener("click", () => editProvider(provider.id));
       header.appendChild(editBtn);
     }
@@ -5558,7 +5558,7 @@ function renderProvidersList(){
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
       removeBtn.className = "settingsBtn";
-      removeBtn.textContent = "鍒犻櫎 provider";
+      removeBtn.textContent = "删除 provider";
       removeBtn.addEventListener("click", () => removeProvider(provider.id));
       header.appendChild(removeBtn);
     }
@@ -5573,14 +5573,14 @@ function renderProvidersList(){
         const editModelBtn = document.createElement("button");
         editModelBtn.type = "button";
         editModelBtn.className = "settingsBtn";
-        editModelBtn.textContent = "缂栬緫";
+        editModelBtn.textContent = "编辑";
         editModelBtn.addEventListener("click", () => editProviderModel(provider.id, model.id));
         modelRow.appendChild(editModelBtn);
       }
       const removeModelBtn = document.createElement("button");
       removeModelBtn.type = "button";
       removeModelBtn.className = "settingsBtn";
-      removeModelBtn.textContent = "鍒犻櫎";
+      removeModelBtn.textContent = "删除";
       removeModelBtn.addEventListener("click", () => removeProviderModel(provider.id, model.id));
       modelRow.appendChild(removeModelBtn);
       row.appendChild(modelRow);
@@ -5629,12 +5629,12 @@ function addProviderModel(){
   const modelName = modelNameInput.value.trim() || id;
 
   if(!provider || !id || !label){
-    settingsSyncStatus.textContent = "璇烽€夋嫨 provider 骞跺～鍐欐ā鍨?id/name";
+    settingsSyncStatus.textContent = "请选择 provider 并填写模型 id/name";
     return;
   }
 
   if((provider.models || []).some(model => model.id === id)){
-    settingsSyncStatus.textContent = "鍚屼竴 provider 涓?model id 涓嶈兘閲嶅";
+    settingsSyncStatus.textContent = "同一 provider 中 model id 不能重复";
     return;
   }
 
@@ -5658,14 +5658,14 @@ function editProvider(providerId){
   const provider = getProvider(providerId);
 
   if(!provider || !providerEditable(provider)){
-    settingsSyncStatus.textContent = "褰撳墠 provider 涓嶅彲缂栬緫";
+    settingsSyncStatus.textContent = "当前 provider 不可编辑";
     return;
   }
 
   const dialog = createEditDialog();
   dialog.mode = "provider";
   dialog.providerId = providerId;
-  dialog.title.textContent = "缂栬緫 provider";
+  dialog.title.textContent = "编辑 provider";
   dialog.body.innerHTML = [
     "<label class='settingsField'>Name<input id='editProviderLabel' /></label>",
     "<label class='settingsField'>Provider ID<input id='editProviderId' /></label>",
@@ -5681,7 +5681,7 @@ function editProvider(providerId){
   dialog.deleteBtn.style.display = provider.builtin ? "none" : "inline-block";
   dialog.saveBtn.onclick = () => saveProviderDialog(providerId);
   dialog.deleteBtn.onclick = () => {
-    if(confirm("纭畾鍒犻櫎 provider " + (provider.label || provider.id) + " 鍚楋紵")){
+    if(confirm("确定删除 provider " + (provider.label || provider.id) + " 吗？")){
       removeProvider(providerId);
       closeEditDialog();
     }
@@ -5699,7 +5699,7 @@ function saveProviderDialog(originalId){
   const apiKeyEnv = dialog.body.querySelector("#editProviderApiKeyEnv").value.trim();
 
   if(!provider || !label || !id){
-    settingsSyncStatus.textContent = "provider id 鍜?name 涓嶈兘涓虹┖";
+    settingsSyncStatus.textContent = "provider id 和 name 不能为空";
     return;
   }
 
@@ -5720,7 +5720,7 @@ function saveProviderDialog(originalId){
     apiKeyEnv:provider.apiKeyEnv || ""
   }));
   closeEditDialog();
-  persistSettings("宸叉洿鏂?provider", false);
+  persistSettings("已更新 provider", false);
 }
 
 function editProviderModel(providerId, modelId){
@@ -5728,7 +5728,7 @@ function editProviderModel(providerId, modelId){
   const model = provider?.models?.find(item => item.id === modelId);
 
   if(!provider || !model || !modelEditable(model)){
-    settingsSyncStatus.textContent = "褰撳墠妯″瀷涓嶅彲缂栬緫";
+    settingsSyncStatus.textContent = "当前模型不可编辑";
     return;
   }
 
@@ -5736,7 +5736,7 @@ function editProviderModel(providerId, modelId){
   dialog.mode = "model";
   dialog.providerId = providerId;
   dialog.modelId = modelId;
-  dialog.title.textContent = "缂栬緫 model";
+  dialog.title.textContent = "编辑 model";
   dialog.body.innerHTML = [
     "<label class='settingsField'>Name<input id='editModelLabel' /></label>",
     "<label class='settingsField'>Model ID<input id='editModelId' /></label>",
@@ -5748,7 +5748,7 @@ function editProviderModel(providerId, modelId){
   dialog.deleteBtn.style.display = "inline-block";
   dialog.saveBtn.onclick = () => saveModelDialog(providerId, modelId);
   dialog.deleteBtn.onclick = () => {
-    if(confirm("纭畾鍒犻櫎妯″瀷 " + (model.label || model.id) + " 鍚楋紵")){
+    if(confirm("确定删除模型 " + (model.label || model.id) + " 吗？")){
       removeProviderModel(providerId, modelId);
       closeEditDialog();
     }
@@ -5765,12 +5765,12 @@ function saveModelDialog(providerId, originalModelId){
   const model = provider?.models?.find(item => item.id === originalModelId);
 
   if(!provider || !model || !label || !id){
-    settingsSyncStatus.textContent = "model id 鍜?name 涓嶈兘涓虹┖";
+    settingsSyncStatus.textContent = "model id 和 name 不能为空";
     return;
   }
 
   if((provider.models || []).some(item => item.id === id && item.id !== originalModelId)){
-    settingsSyncStatus.textContent = "鍚屼竴 provider 涓?model id 涓嶈兘閲嶅";
+    settingsSyncStatus.textContent = "同一 provider 中 model id 不能重复";
     return;
   }
 
@@ -5786,13 +5786,13 @@ function removeProvider(providerId){
   const provider = getProvider(providerId);
 
   if(!provider || !providerEditable(provider)){
-    settingsSyncStatus.textContent = "褰撳墠 provider 涓嶅彲鍒犻櫎";
+    settingsSyncStatus.textContent = "当前 provider 不可删除";
     return;
   }
 
   modelProviders = modelProviders.filter(item => item.id !== providerId);
   pruneInvalidModelReferences();
-  persistSettings("宸插垹闄?provider", false);
+  persistSettings("已删除 provider", false);
 }
 
 function removeProviderModel(providerId, modelId){
@@ -5829,7 +5829,7 @@ function renderProvidersList(){
       const editBtn = document.createElement("button");
       editBtn.type = "button";
       editBtn.className = "settingsBtn";
-      editBtn.textContent = "缂栬緫";
+      editBtn.textContent = "编辑";
       editBtn.addEventListener("click", () => editProvider(provider.id));
       actions.appendChild(editBtn);
     }
@@ -5855,7 +5855,7 @@ function renderProvidersList(){
         const editModelBtn = document.createElement("button");
         editModelBtn.type = "button";
         editModelBtn.className = "settingsBtn";
-        editModelBtn.textContent = "缂栬緫";
+        editModelBtn.textContent = "编辑";
         editModelBtn.addEventListener("click", () => editProviderModel(provider.id, model.id));
         modelActions.appendChild(editModelBtn);
       }
@@ -6439,7 +6439,7 @@ function addProvider(){
     models:[]
   });
   clearProviderForm();
-  persistSettings("宸叉坊鍔?provider", false);
+  persistSettings("已添加 provider", false);
 }
 
 function addProviderModel(){
@@ -6997,7 +6997,7 @@ function saveNewModelDialog(providerId){
       return;
     }
     if((found.provider.models || []).some(item => item.modelId === modelId)){
-      settingsSyncStatus.textContent = "鍚屼竴 provider 涓?model id 涓嶈兘閲嶅";
+      settingsSyncStatus.textContent = "同一 provider 中 model id 不能重复";
       return;
     }
     found.provider.models = found.provider.models || [];
@@ -7101,7 +7101,7 @@ function renderProvidersList(){
         const removeBtn = document.createElement("button");
         removeBtn.type = "button";
         removeBtn.className = "settingsBtn";
-        removeBtn.textContent = "鍒犻櫎";
+        removeBtn.textContent = "删除";
         removeBtn.addEventListener("click", () => removeProvider(provider.providerId));
         const addBtn = document.createElement("button");
         addBtn.type = "button";
@@ -7436,8 +7436,8 @@ function startOpenClawWaitHints(aiDiv){
     }
     if(delay >= 90000){
       sendBtn.disabled = false;
-      sendBtn.textContent = "鍋滄";
-      sendBtn.title = "鍋滄鏈 OpenClaw 璇锋眰";
+      sendBtn.textContent = "停止";
+      sendBtn.title = "停止本次 OpenClaw 请求";
     }
   }, delay));
 }
@@ -7511,14 +7511,14 @@ function openClawTaskStatusLabel(status){
     running:"Local record: still waiting",
     pending:"Pending",
     completed:"Completed",
-    failed:"璇锋眰澶辫触",
+    failed:"请求失败",
     aborted:"Stopped local wait",
     cancelled:"Cancelled",
     cancel_requested:"Cancel requested",
     disconnected:"Disconnected",
     expired:"Local record expired"
   };
-  return labels[status] || status || "鏈煡";
+  return labels[status] || status || "未知";
 }
 
 function openClawTaskRemoteStatus(task){
@@ -7613,7 +7613,7 @@ function formatOpenClawTaskTime(value){
   }
   const seconds = Math.max(1, Math.round((Date.now() - time) / 1000));
   if(seconds < 60){
-    return seconds + " 绉掑墠";
+    return seconds + " 秒前";
   }
   const minutes = Math.round(seconds / 60);
   if(minutes < 60){
@@ -7720,7 +7720,7 @@ function progressQuestionLooksLikeLocalTaskStatus(message){
   if(!text || text.length > 80){
     return false;
   }
-  return /杩涘睍|鎬庝箞鏍穦濡備綍浜唡瀹屾垚浜嗗悧|缁撴潫浜嗗悧|杩樺湪杩愯|鐘舵€亅杩涘害|status|progress|done|finished|running/i.test(text);
+  return /进展|怎么样|如何|完成了吗|结束了吗|还在运行|状态|进度|status|progress|done|finished|running/i.test(text);
 }
 
 function openClawTaskHasRemoteId(task){
@@ -8399,12 +8399,12 @@ function renderOpenClawTaskHistory(tasks){
       "<div class='openClawTaskHistoryPreview'>" + escapeHtml(prompt || "No summary") + "</div>",
       "<div class='openClawTaskHistoryMeta'>",
       escapeHtml(model || "model --"),
-      " 路 ",
+      " / ",
       escapeHtml(taskConversationLabel(task)),
       "<br />Started: " + escapeHtml(formatTaskAbsoluteTime(task.created_at || task.started_at || task.startedAt)),
       task.finished_at || task.completedAt ? "<br />Completed: " + escapeHtml(formatTaskAbsoluteTime(task.finished_at || task.completedAt)) : "",
       "</div>",
-      error ? "<details class='openClawTaskHistoryError'><summary>閿欒鎽樿</summary><div>" + escapeHtml(error) + "</div></details>" : ""
+      error ? "<details class='openClawTaskHistoryError'><summary>错误摘要</summary><div>" + escapeHtml(error) + "</div></details>" : ""
     ].join("");
     openClawTaskHistoryList.appendChild(item);
   });
@@ -8420,7 +8420,7 @@ async function loadOpenClawTaskHistory(view = openClawTaskHistoryView){
     renderOpenClawTaskHistory([]);
     return;
   }
-  openClawTaskHistoryList.innerHTML = "<div class='openClawTaskHistoryItem'>姝ｅ湪鍔犺浇...</div>";
+  openClawTaskHistoryList.innerHTML = "<div class='openClawTaskHistoryItem'>正在加载...</div>";
   try{
     const res = await fetch("/api/openclaw/tasks?" + params.toString(), {
       credentials:"include"
@@ -8477,10 +8477,10 @@ function renderWelcomeCard(){
 
   return [
     "<div id='welcomeCard' class='msg ai welcomeMsg'>",
-    "<div class='welcomeText'>浣犲ソ锛屾垜鏄熀浜?Cloudflare Workers AI 鐨勭綉椤靛姪鎵嬨€備綘鍙互闂垜闂锛屼篃鍙互璁╂垜鍐欎唬鐮併€佹€荤粨銆佺炕璇戞垨鍒嗘瀽鍐呭銆?/div>",
+    "<div class='welcomeText'>你好，我是基于 Cloudflare Workers AI 的网页助手。你可以问我问题，也可以让我写代码、总结、翻译或分析内容。</div>",
     "<div class='welcomeActions'>",
-    "<label class='welcomeNeverShow'><input id='welcomeNeverShowInput' type='checkbox' /><span>涓嶅啀鏄剧ず</span></label>",
-    "<button class='welcomeCloseBtn' type='button' aria-label='鍏抽棴娆㈣繋鎻愮ず'>&times;</button>",
+    "<label class='welcomeNeverShow'><input id='welcomeNeverShowInput' type='checkbox' /><span>不再显示</span></label>",
+    "<button class='welcomeCloseBtn' type='button' aria-label='关闭欢迎提示'>&times;</button>",
     "</div>",
     "</div>"
   ].join("");
@@ -8535,7 +8535,7 @@ async function loadSummaryStatus(){
     const data = await res.json();
 
     if(!res.ok || !data.ok){
-      throw new Error(data.error || "鍔犺浇鎽樿澶辫触");
+      throw new Error(data.error || "加载摘要失败");
     }
 
     setSummaryStatus(Boolean((data.summary || "").trim()));
@@ -8977,7 +8977,7 @@ async function updateProjectRuntimeBinding(runtimeId, patch){
     {
       method:"PATCH",
       headers:{
-        "Content-Type":"application/json"
+        "Content-Type":"application/json; charset=utf-8"
       },
       body:JSON.stringify(patch || {})
     }
@@ -9132,7 +9132,7 @@ async function createProjectWithName(name){
     const res = await fetch("/api/projects", {
       method:"POST",
       headers:{
-        "Content-Type":"application/json"
+        "Content-Type":"application/json; charset=utf-8"
       },
       body:JSON.stringify({
         name:name.trim()
@@ -9248,7 +9248,7 @@ async function renameProject(projectId, name){
     const res = await fetch("/api/projects/" + encodeURIComponent(project.id), {
       method:"PATCH",
       headers:{
-        "Content-Type":"application/json"
+        "Content-Type":"application/json; charset=utf-8"
       },
       body:JSON.stringify({
         name:name.trim()
@@ -9426,7 +9426,7 @@ async function createConversationForProject(projectId){
     const res = await fetch("/api/conversations", {
       method:"POST",
       headers:{
-        "Content-Type":"application/json"
+        "Content-Type":"application/json; charset=utf-8"
       },
       body:JSON.stringify({
         title:"New Chat",
@@ -9511,7 +9511,7 @@ async function loadConversationMessages(conversationId){
     const data = await res.json();
 
     if(!res.ok || !data.ok){
-      throw new Error(data.error || "鍔犺浇娑堟伅澶辫触");
+      throw new Error(data.error || "加载消息失败");
     }
 
     currentConversationId = conversationId;
@@ -10160,7 +10160,7 @@ function enhanceCodeBlocks(container){
     const button = document.createElement("button");
     button.type = "button";
     button.className = "codeCopyBtn";
-    button.textContent = "澶嶅埗";
+    button.textContent = "复制";
     button.dataset.copyCode = "1";
     toolbar.appendChild(button);
     pre.parentNode.insertBefore(wrapper, pre);
@@ -10219,7 +10219,7 @@ function renderAssistantMarkdown(element, markdown){
   copyBtn.type = "button";
   copyBtn.className = "messageCopyBtn";
   copyBtn.dataset.copyMessage = "1";
-  copyBtn.textContent = "澶嶅埗";
+  copyBtn.textContent = "复制";
   const body = document.createElement("div");
   body.className = "assistantMessageBody";
   body.innerHTML = parseAssistantMarkdown(markdown || "");
@@ -10280,6 +10280,91 @@ async function typeWriter(element, text){
   }
 }
 
+function streamTextCandidate(value){
+  if(typeof value === "string"){
+    return value;
+  }
+  if(Array.isArray(value)){
+    return value.map(streamTextCandidate).filter(Boolean).join("");
+  }
+  if(value && typeof value === "object"){
+    if(typeof value.text === "string"){
+      return value.text;
+    }
+    if(typeof value.content === "string"){
+      return value.content;
+    }
+    if(typeof value.output_text === "string"){
+      return value.output_text;
+    }
+    if(typeof value.delta === "string"){
+      return value.delta;
+    }
+  }
+  return "";
+}
+
+function looksLikeOpenClawTaskMetadata(data){
+  if(!data || typeof data !== "object" || Array.isArray(data)){
+    return false;
+  }
+  return Boolean(
+    data.task_id ||
+    data.taskId ||
+    data.remote_task_id ||
+    data.remoteTaskId ||
+    data.task?.id ||
+    data.task?.task_id ||
+    data.status ||
+    data.progress !== undefined ||
+    data.remote_status ||
+    data.remote_progress
+  );
+}
+
+function extractStreamTextFromData(data){
+  if(!data || typeof data !== "object"){
+    return "";
+  }
+
+  const choices = Array.isArray(data.choices)
+    ? data.choices
+    : Array.isArray(data.data?.choices)
+      ? data.data.choices
+      : [];
+  for(const choice of choices){
+    const text = streamTextCandidate(choice?.delta?.content)
+      || streamTextCandidate(choice?.message?.content)
+      || streamTextCandidate(choice?.text)
+      || streamTextCandidate(choice?.delta)
+      || streamTextCandidate(choice?.content);
+    if(text){
+      return text;
+    }
+  }
+
+  const direct = streamTextCandidate(data.response)
+    || streamTextCandidate(data.output_text)
+    || streamTextCandidate(data.text)
+    || streamTextCandidate(data.content)
+    || streamTextCandidate(data.delta);
+  if(direct){
+    return direct;
+  }
+
+  const nested = data.result || data.data || data.message || data.event;
+  const nestedText = nested && typeof nested === "object" ? extractStreamTextFromData(nested) : "";
+  if(nestedText){
+    return nestedText;
+  }
+
+  if(typeof data.message === "string" && !looksLikeOpenClawTaskMetadata(data)){
+    return data.message;
+  }
+
+  return "";
+}
+
 function readStreamChunk(value){
 
   if(value === "[DONE]"){
@@ -10290,15 +10375,7 @@ function readStreamChunk(value){
     const data = JSON.parse(value);
     return {
       done:false,
-      text:
-        data.response ||
-        data.result?.response ||
-        data.output_text ||
-        data.text ||
-        data.choices?.[0]?.delta?.content ||
-        data.choices?.[0]?.message?.content ||
-        data.choices?.[0]?.text ||
-        ""
+      text:extractStreamTextFromData(data)
     };
   }catch(err){
     return { done:false, text:"" };
@@ -10471,6 +10548,10 @@ async function handleStreamEvent(eventText, state, element){
     try{
       const data = JSON.parse(event.data || "{}");
       state.diagnostics.done = data;
+      const chunk = readStreamChunk(event.data);
+      if(chunk.text && !state.openClawFriendlyError){
+        state.reply += chunk.text;
+      }
       renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug, state.diagnostics);
     }catch(err){
       console.log("parse done failed", err);
@@ -10575,7 +10656,7 @@ async function sendMessage(){
 
 
   if(fileTextToSend && selectedFileChunks.length > 0){
-    const relevantChunks = pickRelevantChunks(message || "璇锋€荤粨杩欎釜鏂囦欢", selectedFileChunks);
+    const relevantChunks = pickRelevantChunks(message || "请总结这个文件", selectedFileChunks);
     lastRelevantChunkCount = relevantChunks.length;
     fileTextForAI = relevantChunks.join(String.fromCharCode(10, 10));
 
@@ -10592,7 +10673,7 @@ async function sendMessage(){
   if(webPageToSend && selectedWebPageChunks.length > 0){
 
     const relevantWebChunks = pickRelevantChunks(
-      message || "璇锋€荤粨杩欎釜缃戦〉",
+      message || "请总结这个网页",
       selectedWebPageChunks
     );
   
@@ -10664,7 +10745,7 @@ async function sendMessage(){
   } : null);
 
   aiDiv.innerHTML =
-    "<span class='loading'>鎬濊€冧腑...</span>";
+    "<span class='loading'>思考中...</span>";
 
   if(isOpenClawRequest){
     startOpenClawWaitHints(aiDiv);
@@ -10676,7 +10757,7 @@ async function sendMessage(){
 
   if(fileToSend){
     aiDiv.innerHTML =
-      "<span class='loading'>姝ｅ湪鍩轰簬 " + lastRelevantChunkCount + " 涓浉鍏崇墖娈靛洖绛?..</span>";
+      "<span class='loading'>正在基于 " + lastRelevantChunkCount + " 个相关片段回答...</span>";
   }
 
   let openClawAsyncHandled = false;
@@ -10693,7 +10774,7 @@ async function sendMessage(){
       method:"POST",
 
       headers:{
-        "Content-Type":"application/json"
+        "Content-Type":"application/json; charset=utf-8"
       },
 
       signal:activeChatAbortController?.signal,
@@ -10721,6 +10802,7 @@ async function sendMessage(){
         attachments:extraAttachmentsToSend.length ? extraAttachmentsToSend : undefined,
         fileIds:selectedFileIds,
         file:fileToSend ? {
+          id:selectedFileId || undefined,
           name:fileToSend.name,
           type:fileToSend.type,
           text:fileTextForAI
@@ -10729,7 +10811,7 @@ async function sendMessage(){
           type:"webpage",
           text:webTextForAI
         } : (networkTextForAI ? {
-          name:"鑱旂綉鎼滅储缁撴灉",
+          name:"联网搜索结果",
           type:"web-search",
           text:networkTextForAI
         } : null))
@@ -10786,7 +10868,7 @@ async function sendMessage(){
       const reply = streamResult.reply || "";
 
       if(!reply && !streamResult.openClawAutoResume?.handled){
-        renderAssistantMarkdown(aiDiv, "娌℃湁杩斿洖鍐呭");
+        renderAssistantMarkdown(aiDiv, "没有返回内容");
       }
 
       if(!streamResult.openClawAutoResume?.handled){

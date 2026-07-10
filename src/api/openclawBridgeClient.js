@@ -451,7 +451,7 @@ function bridgeConfig(env) {
 
 function bridgeHeaders(token) {
   const headers = {
-    "Content-Type": "application/json"
+    "Content-Type": "application/json; charset=utf-8"
   };
   if (token) {
     headers.Authorization = "Bearer " + token;
@@ -537,18 +537,25 @@ export function openclawBridgeClient(env) {
   return {
     createTask({
       conversationId,
+      projectId,
+      runtimeId,
       message,
       sessionKey,
       sessionId,
       agentId,
       attachments,
+      fileAttachments,
       idempotencyKey
     }) {
+      const files = Array.isArray(fileAttachments) ? fileAttachments : [];
       return bridgeRequest(env, "/v1/openclaw/tasks", {
         method: "POST",
         body: {
           conversation_id: conversationId,
+          project_id: projectId || "",
+          runtime_id: runtimeId || "",
           message,
+          prompt: message,
           sessionKey,
           sessionId,
           agentId,
@@ -556,6 +563,9 @@ export function openclawBridgeClient(env) {
           session_id: sessionId,
           agent_id: agentId,
           attachments: Array.isArray(attachments) ? attachments : [],
+          files,
+          file_ids: files.map(file => file.file_id).filter(Boolean),
+          local_task_id: idempotencyKey,
           idempotencyKey
         }
       });

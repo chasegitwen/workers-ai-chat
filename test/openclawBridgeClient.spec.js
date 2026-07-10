@@ -12,6 +12,7 @@ import {
   shouldRecoverOpenClawBridgeCompletedStatus,
   shouldUseOpenClawBridge
 } from "../src/api/openclawBridgeClient.js";
+import { buildOpenClawBridgeMessageWithFiles } from "../src/api/chat.js";
 
 const env = {
   OPENCLAW_BRIDGE_MODE: "true",
@@ -175,6 +176,68 @@ describe("openclawBridgeClient", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("https://bridge.example.test/v1/openclaw/tasks");
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer secret-token");
     expect(fetchMock.mock.calls[0][0]).not.toContain("/v1/chat/completions");
+  });
+
+  it("includes uploaded file metadata and readable content in bridge task payload", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      task_id: "bridge-task-1",
+      run_id: "run-1",
+      status: "running"
+    }), {
+      status: 202,
+      headers: {
+        "Content-Type": "application/json"
+      }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const fileAttachments = [{
+      type: "file",
+      file_id: "file-1",
+      filename: "report.md",
+      mime_type: "text/markdown",
+      r2_key: "files/file-1/report.md",
+      chunks: [{
+        chunk_index: 0,
+        content: "Bridge-readable report content"
+      }]
+    }];
+    const bridgeMessage = buildOpenClawBridgeMessageWithFiles("analyze the uploaded file", fileAttachments);
+
+    await openclawBridgeClient(env).createTask({
+      conversationId: "conversation-1",
+      projectId: "default",
+      runtimeId: "hillsboro-openclaw",
+      message: bridgeMessage,
+      sessionKey: "agent:main:conversation-1",
+      sessionId: "agent:main:conversation-1",
+      agentId: "main",
+      attachments: fileAttachments,
+      fileAttachments,
+      idempotencyKey: "local-task-1"
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    expect(body).toMatchObject({
+      conversation_id: "conversation-1",
+      project_id: "default",
+      runtime_id: "hillsboro-openclaw",
+      local_task_id: "local-task-1",
+      file_ids: ["file-1"]
+    });
+    expect(body.files[0]).toMatchObject({
+      file_id: "file-1",
+      filename: "report.md",
+      mime_type: "text/markdown",
+      r2_key: "files/file-1/report.md"
+    });
+    expect(body.files[0].chunks[0].content).toBe("Bridge-readable report content");
+    expect(body.attachments[0].chunks[0].content).toBe("Bridge-readable report content");
+    expect(body.message).toContain("The following uploaded files are attached to this task");
+    expect(body.message).toContain("report.md");
+    expect(body.message).toContain("Bridge-readable report content");
+    expect(body.prompt).toBe(body.message);
   });
 
   it("returns structured errors for non-2xx bridge responses", async () => {

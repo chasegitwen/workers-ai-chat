@@ -1387,7 +1387,7 @@ async function openClawRemoteTaskRequestConfig(env, task) {
 
 function openClawRemoteTaskHeaders(token) {
   const headers = {
-    "Content-Type": "application/json"
+    "Content-Type": "application/json; charset=utf-8"
   };
   if (token) {
     headers.Authorization = "Bearer " + token;
@@ -2455,7 +2455,7 @@ async function callBrowserTool(env, payload) {
 
   const token = String(env.BROWSER_TOOL_TOKEN || "").trim();
   const headers = {
-    "Content-Type": "application/json"
+    "Content-Type": "application/json; charset=utf-8"
   };
 
   if (token && authMode === "x-browser-token") {
@@ -2539,7 +2539,7 @@ async function inspectBrowserToolEndpoint(env) {
   const token = String(env.BROWSER_TOOL_TOKEN || "").trim();
   const authMode = String(env.BROWSER_TOOL_AUTH_MODE || "").trim().toLowerCase();
   const headers = {
-    "Content-Type": "application/json"
+    "Content-Type": "application/json; charset=utf-8"
   };
 
   if (token && authMode === "x-browser-token") {
@@ -2737,24 +2737,99 @@ function getAutoSearchToolCall(userContent) {
   };
 }
 
-function readStreamText(value) {
+function streamTextCandidate(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(streamTextCandidate).filter(Boolean).join("");
+  }
+  if (value && typeof value === "object") {
+    if (typeof value.text === "string") {
+      return value.text;
+    }
+    if (typeof value.content === "string") {
+      return value.content;
+    }
+    if (typeof value.output_text === "string") {
+      return value.output_text;
+    }
+    if (typeof value.delta === "string") {
+      return value.delta;
+    }
+  }
+  return "";
+}
+
+function looksLikeOpenClawTaskMetadata(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return false;
+  }
+  return Boolean(
+    data.task_id ||
+    data.taskId ||
+    data.remote_task_id ||
+    data.remoteTaskId ||
+    data.task?.id ||
+    data.task?.task_id ||
+    data.status ||
+    data.progress !== undefined ||
+    data.remote_status ||
+    data.remote_progress
+  );
+}
+
+function extractStreamTextFromData(data) {
+  if (!data || typeof data !== "object") {
+    return "";
+  }
+
+  const choices = Array.isArray(data.choices)
+    ? data.choices
+    : Array.isArray(data.data?.choices)
+      ? data.data.choices
+      : [];
+  for (const choice of choices) {
+    const text = streamTextCandidate(choice?.delta?.content)
+      || streamTextCandidate(choice?.message?.content)
+      || streamTextCandidate(choice?.text)
+      || streamTextCandidate(choice?.delta)
+      || streamTextCandidate(choice?.content);
+    if (text) {
+      return text;
+    }
+  }
+
+  const direct = streamTextCandidate(data.response)
+    || streamTextCandidate(data.output_text)
+    || streamTextCandidate(data.text)
+    || streamTextCandidate(data.content)
+    || streamTextCandidate(data.delta);
+  if (direct) {
+    return direct;
+  }
+
+  const nested = data.result || data.data || data.message || data.event;
+  const nestedText = nested && typeof nested === "object" ? extractStreamTextFromData(nested) : "";
+  if (nestedText) {
+    return nestedText;
+  }
+
+  if (typeof data.message === "string" && !looksLikeOpenClawTaskMetadata(data)) {
+    return data.message;
+  }
+
+  return "";
+}
+
+export function readStreamText(value) {
   if (value === "[DONE]") {
     return "";
   }
 
   try {
     const data = JSON.parse(value);
-
-    return (
-      data.response ||
-      data.result?.response ||
-      data.output_text ||
-      data.text ||
-      data.choices?.[0]?.delta?.content ||
-      data.choices?.[0]?.message?.content ||
-      data.choices?.[0]?.text ||
-      ""
-    );
+    return extractStreamTextFromData(data);
   } catch (err) {
     return "";
   }
@@ -3391,6 +3466,144 @@ function buildFileSources(fileChunks) {
       return Number(a.chunk_index || 0) - Number(b.chunk_index || 0);
     })
     .slice(0, 8);
+}
+
+function compactTextForBridge(value, limit = 12000) {
+  const text = String(value || "");
+  return {
+    text: text.slice(0, limit),
+    truncated: text.length > limit,
+    chars: text.length
+  };
+}
+
+export function buildOpenClawBridgeFileAttachments({
+  file = null,
+  fileChunks = [],
+  conversationId = "",
+  projectId = "",
+  runtimeId = ""
+} = {}) {
+  const attachments = [];
+
+  if (file?.text) {
+    const content = compactTextForBridge(file.text);
+    attachments.push({
+      type: "file",
+      source: "web_ai_assistant_inline_upload",
+      file_id: file.id || file.file_id || "",
+      name: file.name || file.filename || "uploaded-file",
+      filename: file.name || file.filename || "uploaded-file",
+      mime_type: file.type || file.mime_type || file.content_type || "application/octet-stream",
+      content_type: file.type || file.mime_type || file.content_type || "application/octet-stream",
+      conversation_id: conversationId,
+      project_id: projectId,
+      runtime_id: runtimeId,
+      access: {
+        mode: "inline_text"
+      },
+      text: content.text,
+      content_text: content.text,
+      text_truncated: content.truncated,
+      text_chars: content.chars
+    });
+  }
+
+  const grouped = new Map();
+  (Array.isArray(fileChunks) ? fileChunks : []).forEach(chunk => {
+    const fileId = String(chunk.fileId || chunk.file_id || "").trim();
+    if (!fileId) {
+      return;
+    }
+
+    if (!grouped.has(fileId)) {
+      const r2Key = chunk.r2Key || chunk.r2_key || "";
+      grouped.set(fileId, {
+        type: "file",
+        source: "web_ai_assistant_file_library",
+        file_id: fileId,
+        name: chunk.filename || "selected-file",
+        filename: chunk.filename || "selected-file",
+        mime_type: chunk.contentType || chunk.content_type || "application/octet-stream",
+        content_type: chunk.contentType || chunk.content_type || "application/octet-stream",
+        size: chunk.size ?? null,
+        r2_key: r2Key,
+        conversation_id: chunk.conversationId || chunk.conversation_id || conversationId,
+        project_id: projectId,
+        runtime_id: runtimeId,
+        access: {
+          mode: "inline_chunks",
+          r2_key: r2Key
+        },
+        chunks: []
+      });
+    }
+
+    grouped.get(fileId).chunks.push({
+      chunk_id: chunk.id || "",
+      chunk_index: Number(chunk.chunkIndex ?? chunk.chunk_index ?? 0),
+      content: String(chunk.content || ""),
+      score: Number(chunk.score || 0),
+      fallback: Boolean(chunk.fallback)
+    });
+  });
+
+  grouped.forEach(item => {
+    item.chunks.sort((a, b) => a.chunk_index - b.chunk_index);
+    attachments.push(item);
+  });
+
+  return attachments;
+}
+
+export function buildOpenClawBridgeMessageWithFiles(message, fileAttachments = []) {
+  const files = Array.isArray(fileAttachments)
+    ? fileAttachments.filter(file => file && file.type === "file")
+    : [];
+
+  if (!files.length) {
+    return String(message || "");
+  }
+
+  const fileBlocks = files.map((file, index) => {
+    const name = file.filename || file.name || file.file_id || "attached-file";
+    const mimeType = file.mime_type || file.content_type || "application/octet-stream";
+    const location = file.r2_key ? "\nR2 object key: " + file.r2_key : "";
+    const scope = [
+      file.project_id ? "project_id=" + file.project_id : "",
+      file.runtime_id ? "runtime_id=" + file.runtime_id : "",
+      file.conversation_id ? "conversation_id=" + file.conversation_id : ""
+    ].filter(Boolean).join(", ");
+
+    const chunks = Array.isArray(file.chunks) && file.chunks.length
+      ? file.chunks.map(chunk => [
+        "Chunk " + Number(chunk.chunk_index ?? 0) + ":",
+        String(chunk.content || "").slice(0, 8000)
+      ].join("\n")).join("\n\n")
+      : "";
+    const inlineText = String(file.content_text || file.text || "").slice(0, 12000);
+    const content = chunks || inlineText || "[No extracted text was available for this file.]";
+
+    return [
+      "File " + (index + 1) + ": " + name,
+      "MIME type: " + mimeType,
+      file.file_id ? "File ID: " + file.file_id : "",
+      location.trim(),
+      scope ? "Scope: " + scope : "",
+      "",
+      content
+    ].filter(line => line !== "").join("\n");
+  }).join("\n\n---\n\n");
+
+  return [
+    String(message || "").trim(),
+    "",
+    "The following uploaded files are attached to this task by Web AI Assistant.",
+    "They are stored in Cloudflare D1/R2, not in the OpenClaw workspace. Do not scan the local workspace for them; use the attached content below.",
+    "",
+    "Attached files:",
+    fileBlocks
+  ].filter(Boolean).join("\n");
 }
 
 function formatToolContext(toolCall) {
@@ -4136,6 +4349,34 @@ function appendReplyFromSseBuffer(bufferState, replyState) {
   }
 }
 
+function logOpenClawLegacySseRawEventOnce(state, chunkText, task) {
+  if (!state || state.logged || !chunkText) {
+    return;
+  }
+  state.buffer = (state.buffer + chunkText).slice(-12000);
+  const events = state.buffer.split("\n\n");
+  state.buffer = events.pop() || "";
+  const rawEvent = events.find(event => event.trim() && !event.includes("event: openclaw_task"));
+  if (!rawEvent) {
+    return;
+  }
+  state.logged = true;
+  console.info("[openclaw-legacy-sse-raw-event]", {
+    provider: task?.provider || "",
+    model: task?.model || "",
+    runtimeId: task?.runtimeId || task?.runtime_id || "",
+    localTaskId: task?.id || "",
+    rawEvent: previewOpenClawSubmitText(rawEvent).slice(0, 4000),
+    extractedTextPreview: previewOpenClawSubmitText(
+      rawEvent
+        .split("\n")
+        .filter(line => line.startsWith("data:"))
+        .map(line => readStreamText(line.slice(5).trimStart()))
+        .join("")
+    ).slice(0, 600)
+  });
+}
+
 function appendToolContext(modelMessages, executedToolCall) {
   if (!executedToolCall) {
     return;
@@ -4370,7 +4611,10 @@ async function submitOpenClawBridgeTask({
   agentId,
   sessionKey,
   sessionId,
-  attachments = []
+  attachments = [],
+  fileAttachments = [],
+  projectId = "",
+  runtimeId = ""
 }) {
   if (!openClawTask?.id) {
     return {
@@ -4381,19 +4625,42 @@ async function submitOpenClawBridgeTask({
   }
 
   const bridge = openclawBridgeClient(env);
+  const bridgeMessage = buildOpenClawBridgeMessageWithFiles(userContent, fileAttachments);
+  const bridgeFiles = Array.isArray(fileAttachments) ? fileAttachments : [];
   logOpenClawAsync("bridge-submit", {
     localTaskId: openClawTask.id,
     conversationId,
     agentId,
     sessionKey
   });
+  console.info("[openclaw-bridge-submit-payload]", {
+    localTaskId: openClawTask.id,
+    conversationId,
+    projectId,
+    runtimeId,
+    hasFiles: bridgeFiles.length > 0,
+    fileIds: bridgeFiles.map(file => file.file_id).filter(Boolean),
+    filenames: bridgeFiles.map(file => file.filename || file.name || "").filter(Boolean),
+    attachmentCount: Array.isArray(attachments) ? attachments.length : 0,
+    fileCount: bridgeFiles.length,
+    hasInlineFileText: bridgeFiles.some(file => Boolean(file.content_text || file.text)),
+    chunkCount: bridgeFiles.reduce((count, file) => count + (Array.isArray(file.chunks) ? file.chunks.length : 0), 0),
+    chunkContentChars: bridgeFiles.reduce((count, file) => count + (Array.isArray(file.chunks)
+      ? file.chunks.reduce((sum, chunk) => sum + String(chunk.content || "").length, 0)
+      : 0), 0),
+    messageChars: bridgeMessage.length,
+    messageHasAttachedFilesBlock: bridgeMessage.includes("The following uploaded files are attached to this task")
+  });
   const result = await bridge.createTask({
     conversationId,
-    message: userContent,
+    projectId,
+    runtimeId,
+    message: bridgeMessage,
     sessionKey,
     sessionId,
     agentId,
     attachments,
+    fileAttachments,
     idempotencyKey: openClawTask.id
   });
 
@@ -4454,6 +4721,7 @@ function streamChatWithToolStatus({
     async start(controller) {
       const bufferState = { value: "" };
       const replyState = { value: "" };
+      const openClawLegacyRawEventLogState = { buffer: "", logged: false };
       let toolSources = [];
 
       const enqueueText = text => controller.enqueue(encoder.encode(text));
@@ -4597,6 +4865,12 @@ function streamChatWithToolStatus({
 
           controller.enqueue(value);
           const chunkText = decoder.decode(value, { stream: true });
+          if (activeOpenClawTask || /openclaw/i.test(String(provider || "") + " " + String(model || ""))) {
+            logOpenClawLegacySseRawEventOnce(openClawLegacyRawEventLogState, chunkText, activeOpenClawTask || {
+              provider,
+              model
+            });
+          }
           if (activeOpenClawTask && !activeOpenClawTask.remoteTaskId && remoteTaskIdScanBytes < 65536) {
             remoteTaskIdScanBytes += chunkText.length;
             remoteTaskIdScanText = (remoteTaskIdScanText + chunkText).slice(-65536);
@@ -4963,6 +5237,7 @@ export async function handleChat(request, env, ctx) {
 
   const ragFiles = [];
   let ragSources = [];
+  let selectedFileChunks = [];
   const isOpenClawRequest = isOpenClawRequestTarget(providerCatalog, provider, model || DEFAULT_TEXT_MODEL);
   const openClawTarget = isOpenClawRequest
     ? resolveOpenClawProviderModel(providerCatalog, provider, model || DEFAULT_TEXT_MODEL)
@@ -5044,6 +5319,7 @@ export async function handleChat(request, env, ctx) {
       perFileLimit: 5,
       totalLimit: 14
     });
+    selectedFileChunks = fileChunks;
 
     console.log("[file-rag]", "selected files:", fileIds.length, "retrieved chunks:", fileChunks.length);
     ragSources = buildFileSources(fileChunks);
@@ -5101,6 +5377,13 @@ export async function handleChat(request, env, ctx) {
     if (resolvedOpenClawBridgeEnabled) {
       const openClawAgentId = runtimeResolution?.agent_id || requestedOpenClawAgentId;
       const openClawSessionKey = "agent:" + openClawAgentId + ":" + conversation.id;
+      const bridgeFileAttachments = buildOpenClawBridgeFileAttachments({
+        file: file && file.text ? file : null,
+        fileChunks: selectedFileChunks,
+        conversationId: conversation.id,
+        projectId: runtimeResolution?.project_id || conversation.project_id || "",
+        runtimeId: runtimeResolution?.runtime_id || ""
+      });
       const bridgeResult = await submitOpenClawBridgeTask({
         env,
         conversationId: conversation.id,
@@ -5109,7 +5392,13 @@ export async function handleChat(request, env, ctx) {
         agentId: openClawAgentId,
         sessionKey: openClawSessionKey,
         sessionId: openClawSessionKey,
-        attachments: allImageAttachments
+        attachments: [
+          ...allImageAttachments,
+          ...bridgeFileAttachments
+        ],
+        fileAttachments: bridgeFileAttachments,
+        projectId: runtimeResolution?.project_id || conversation.project_id || "",
+        runtimeId: runtimeResolution?.runtime_id || ""
       });
       return new Response(JSON.stringify({
         ok: Boolean(bridgeResult.ok),

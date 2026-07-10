@@ -10941,7 +10941,7 @@ async function sendMessage(){
         fileIds:selectedFileIds,
         fileContextMode:fileContextModeToSend,
         attachmentFileIds:fileContextModeToSend === "native_attachment" ? selectedFileIds : undefined,
-        file:fileToSend ? {
+        file:fileToSend && fileContextModeToSend !== "native_attachment" ? {
           id:selectedFileId || undefined,
           name:fileToSend.name,
           type:fileToSend.type,

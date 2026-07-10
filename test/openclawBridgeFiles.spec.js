@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildOpenClawBridgeFileAttachments,
-  buildOpenClawBridgeMessageWithFiles
+  buildOpenClawBridgeMessageWithFiles,
+  buildOpenClawBridgeMessageWithNativeAttachments
 } from "../src/api/chat.js";
 
 const storedChunk = {
@@ -98,5 +99,38 @@ describe("OpenClaw Bridge file attachments", () => {
       runtime_id: "hillsboro-openclaw"
     });
     expect(files[1].chunks[0].content).toContain("uploaded report content");
+  });
+
+  it("builds native attachment messages without legacy chunk or storage metadata", () => {
+    const message = buildOpenClawBridgeMessageWithNativeAttachments(
+      "Read the last page marker.",
+      [{
+        type: "file",
+        fileId: "file-1",
+        fileName: "vehicle-dynamics.pdf",
+        mimeType: "application/pdf",
+        size: 123,
+        contentBase64: "cGRm"
+      }, {
+        type: "file",
+        fileId: "file-1",
+        fileName: "vehicle-dynamics.pdf",
+        mimeType: "application/pdf",
+        size: 123,
+        contentBase64: "cGRm"
+      }]
+    );
+
+    expect(message).toContain("vehicle-dynamics.pdf");
+    expect(message).toContain("Read the original attachment directly");
+    expect(message).toContain("Read the last page marker.");
+    expect(message).not.toContain("File 1");
+    expect(message).not.toContain("File 2");
+    expect(message).not.toContain("Chunk 0");
+    expect(message).not.toContain("Chunk 4");
+    expect(message).not.toContain("R2 object key");
+    expect(message).not.toContain("MIME type");
+    expect(message).not.toContain("OpenClaw must be able to read this uploaded report content.");
+    expect((message.match(/vehicle-dynamics\.pdf/g) || [])).toHaveLength(1);
   });
 });

@@ -221,5 +221,6 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("currentRuntimeSupportsNativeAttachment");
     expect(page).toContain("fileContextMode:fileContextModeToSend");
     expect(page).toContain("attachmentFileIds:fileContextModeToSend === \"native_attachment\" ? selectedFileIds : undefined");
+    expect(page).toContain("file:fileToSend && fileContextModeToSend !== \"native_attachment\"");
   });
 });

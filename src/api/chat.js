@@ -3626,6 +3626,29 @@ export function buildOpenClawBridgeMessageWithFiles(message, fileAttachments = [
   ].filter(Boolean).join("\n");
 }
 
+export function buildOpenClawBridgeMessageWithNativeAttachments(message, nativeAttachments = []) {
+  const files = Array.isArray(nativeAttachments)
+    ? nativeAttachments.filter(file => file && file.type === "file")
+    : [];
+  const names = [...new Set(files
+    .map(file => String(file.fileName || file.file_name || file.filename || file.fileId || file.file_id || "").trim())
+    .filter(Boolean))];
+
+  if (!names.length) {
+    return String(message || "");
+  }
+
+  return [
+    "The user supplied the following original attachments through OpenClaw native attachments:",
+    names.map(name => "- " + name).join("\n"),
+    "",
+    "Read the original attachment directly before answering.",
+    "",
+    "User request:",
+    String(message || "").trim()
+  ].filter(Boolean).join("\n");
+}
+
 function formatToolContext(toolCall) {
   if (!toolCall) {
     return "";
@@ -4647,7 +4670,7 @@ async function submitOpenClawBridgeTask({
 
   const bridge = openclawBridgeClient(env);
   const bridgeMessage = nativeAttachments.length
-    ? String(userContent || "")
+    ? buildOpenClawBridgeMessageWithNativeAttachments(userContent, nativeAttachments)
     : buildOpenClawBridgeMessageWithFiles(userContent, fileAttachments);
   const bridgeFiles = Array.isArray(fileAttachments) ? fileAttachments : [];
   const bridgeNativeAttachments = Array.isArray(nativeAttachments) ? nativeAttachments : [];
@@ -5353,6 +5376,9 @@ export async function handleChat(request, env, ctx) {
       });
     }
   }
+  const useNativeAttachment = requestedFileContextMode === "native_attachment"
+    && nativeAttachmentFileIds.length > 0
+    && runtimeSupportsNativeAttachment(runtimeResolution);
   const resolvedOpenClawBridgeEnabled = isOpenClawRequest
     ? runtimeResolution?.execution_mode === "bridge"
     : false;
@@ -5380,11 +5406,11 @@ export async function handleChat(request, env, ctx) {
       ? withToolTrigger(autoFetchToolCall, "auto_url")
       : withToolTrigger(autoSearchToolCall, "auto_search"));
 
-  if (file && file.text) {
+  if (!useNativeAttachment && file && file.text) {
     ragFiles.push(file);
   }
 
-  if (requestedFileContextMode !== "native_attachment" && Array.isArray(fileIds) && fileIds.length) {
+  if (!useNativeAttachment && requestedFileContextMode !== "native_attachment" && Array.isArray(fileIds) && fileIds.length) {
     const fileChunks = await getRelevantFileChunksByIds(env, fileIds, userContent, {
       perFileLimit: 5,
       totalLimit: 14
@@ -5464,7 +5490,7 @@ export async function handleChat(request, env, ctx) {
       }
       const openClawAgentId = runtimeResolution?.agent_id || requestedOpenClawAgentId;
       const openClawSessionKey = "agent:" + openClawAgentId + ":" + conversation.id;
-      const nativeAttachmentResult = requestedFileContextMode === "native_attachment" && nativeAttachmentFileIds.length
+      const nativeAttachmentResult = useNativeAttachment
         ? await buildNativeOpenClawAttachments(env, nativeAttachmentFileIds, {
           conversationId: conversation.id,
           projectId: runtimeResolution?.project_id || conversation.project_id || "",

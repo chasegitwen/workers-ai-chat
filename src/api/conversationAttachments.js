@@ -595,3 +595,181 @@ export async function buildNativeOpenClawConversationAttachments(env, attachment
     mimeTypes: attachments.map(attachment => attachment.mimeType)
   };
 }
+
+export async function readConversationAttachmentObjects(env, attachmentIds = [], options = {}) {
+  const bindingError = requireBucket(env);
+  if (bindingError) {
+    return {
+      ok: false,
+      error: bindingError,
+      code: "attachment_storage_unavailable"
+    };
+  }
+
+  const uniqueIds = [...new Set((Array.isArray(attachmentIds) ? attachmentIds : [])
+    .map(id => String(id || "").trim())
+    .filter(Boolean))];
+  if (!uniqueIds.length) {
+    return {
+      ok: true,
+      attachments: [],
+      totalBytes: 0
+    };
+  }
+
+  const maxAttachments = Number(options.maxAttachments || NATIVE_ATTACHMENT_LIMITS.maxAttachments);
+  if (uniqueIds.length > maxAttachments) {
+    return {
+      ok: false,
+      error: "Too many attachments",
+      code: "attachment_too_many"
+    };
+  }
+
+  const conversationId = cleanId(options.conversationId);
+  const draftId = cleanId(options.draftId);
+  const maxFileBytes = Number(options.maxFileBytes || NATIVE_ATTACHMENT_LIMITS.maxFileBytes);
+  const maxTotalBytes = Number(options.maxTotalBytes || NATIVE_ATTACHMENT_LIMITS.maxTotalRawBytes);
+  const attachments = [];
+  let totalBytes = 0;
+
+  for (const attachmentId of uniqueIds) {
+    const decoded = await decodeAttachmentId(env, attachmentId);
+    if (!decoded.ok) {
+      return decoded;
+    }
+
+    const descriptor = decoded.descriptor || {};
+    const descriptorConversationId = cleanId(descriptor.conversation_id);
+    const descriptorDraftId = cleanId(descriptor.draft_id);
+    const conversationMatches = descriptorConversationId && conversationId && descriptorConversationId === conversationId;
+    const draftMatches = descriptorDraftId && draftId && descriptorDraftId === draftId;
+    if (!conversationMatches && !draftMatches) {
+      return {
+        ok: false,
+        error: "Attachment is outside the current conversation scope",
+        code: "attachment_permission_denied",
+        attachment_id: descriptor.id || ""
+      };
+    }
+
+    const filename = sanitizeFilename(descriptor.filename);
+    const mimeType = normalizeMime(descriptor.normalized_mime_type || descriptor.content_type, filename);
+    const r2Key = String(descriptor.r2_key || "");
+    if (!r2Key.startsWith(R2_PREFIX)) {
+      return {
+        ok: false,
+        error: "Attachment object key is outside the controlled prefix",
+        code: "attachment_r2_key_invalid",
+        attachment_id: descriptor.id || ""
+      };
+    }
+
+    const declaredSize = Number(descriptor.size || 0);
+    if (declaredSize > maxFileBytes) {
+      return {
+        ok: false,
+        error: "Attachment is too large",
+        code: "attachment_too_large",
+        attachment_id: descriptor.id || "",
+        size: declaredSize,
+        max_size: maxFileBytes
+      };
+    }
+
+    const object = await env.FILES_BUCKET.get(r2Key);
+    if (!object) {
+      return {
+        ok: false,
+        error: "Attachment object not found",
+        code: "attachment_not_found",
+        attachment_id: descriptor.id || ""
+      };
+    }
+
+    const metadataSize = objectSize(object);
+    if (metadataSize !== null && metadataSize !== declaredSize) {
+      return {
+        ok: false,
+        error: "Attachment object size does not match the signed descriptor",
+        code: "attachment_size_mismatch",
+        attachment_id: descriptor.id || "",
+        size: metadataSize,
+        expected_size: declaredSize
+      };
+    }
+
+    const metadataContentType = objectContentType(object);
+    if (metadataContentType && metadataContentType !== mimeType) {
+      return {
+        ok: false,
+        error: "Attachment object content type does not match the signed descriptor",
+        code: "attachment_type_mismatch",
+        attachment_id: descriptor.id || "",
+        mime_type: metadataContentType,
+        expected_mime_type: mimeType
+      };
+    }
+
+    let bytes;
+    try {
+      bytes = new Uint8Array(await object.arrayBuffer());
+    } catch (err) {
+      return {
+        ok: false,
+        error: "Attachment object read failed",
+        code: "attachment_r2_read_failed",
+        attachment_id: descriptor.id || ""
+      };
+    }
+
+    const actualSize = bytes.byteLength;
+    if (actualSize > maxFileBytes) {
+      return {
+        ok: false,
+        error: "Attachment is too large",
+        code: "attachment_too_large",
+        attachment_id: descriptor.id || "",
+        size: actualSize,
+        max_size: maxFileBytes
+      };
+    }
+    if (actualSize !== declaredSize) {
+      return {
+        ok: false,
+        error: "Attachment object size does not match the signed descriptor",
+        code: "attachment_size_mismatch",
+        attachment_id: descriptor.id || "",
+        size: actualSize,
+        expected_size: declaredSize
+      };
+    }
+
+    totalBytes += actualSize;
+    if (totalBytes > maxTotalBytes) {
+      return {
+        ok: false,
+        error: "Attachment total size is too large",
+        code: "attachment_total_too_large",
+        total_size: totalBytes,
+        max_total_size: maxTotalBytes
+      };
+    }
+
+    attachments.push({
+      id: descriptor.id || "",
+      attachmentId,
+      filename,
+      mimeType,
+      size: actualSize,
+      r2Key,
+      bytes
+    });
+  }
+
+  return {
+    ok: true,
+    attachments,
+    totalBytes
+  };
+}

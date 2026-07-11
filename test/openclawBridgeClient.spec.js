@@ -280,6 +280,10 @@ describe("openclawBridgeClient", () => {
     expect(body.files).toEqual([]);
     expect(body.file_ids).toEqual([]);
     expect(body.message).toBe("read the original file");
+    expect(body.message).not.toContain("Chunk 0");
+    expect(body.message).not.toContain("File ID");
+    expect(body.message).not.toContain("R2");
+    expect(body.message).not.toContain("application/pdf");
   });
 
   it("returns structured errors for non-2xx bridge responses", async () => {

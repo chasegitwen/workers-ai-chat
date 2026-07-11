@@ -152,6 +152,10 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).not.toContain("prompt(");
     expect(page).toContain("if(isCommonWorkspace()){");
     expect(page).toContain("projectOpenClawRuntimes = [];");
+    expect(page).toContain("await loadOpenClawRuntimeRegistry();");
+    expect(page).toContain("openClawRuntimeRegistry = [];");
+    expect(page).toContain("if(isCommonWorkspace()){");
+    expect(page).toContain("const runtime = openClawRuntimeRegistry.find(item => item.id === runtimeId);");
     expect(page).toContain("persistActiveWorkspace(COMMON_WORKSPACE_KEY)");
     expect(page).toContain("fetch(\"/api/projects\"");
     expect(page).toContain("\"/openclaw-runtimes\"");
@@ -213,14 +217,27 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("newChatBtn.addEventListener(\"click\", createNewConversation)");
   });
 
-  it("exposes native attachment file mode controls and request fields", () => {
+  it("exposes conversation attachment controls and request fields", () => {
     const page = htmlPage();
 
-    expect(page).toContain("fileModeSelector");
-    expect(page).toContain("native_attachment");
+    expect(page).not.toContain("fileModeSelector");
+    expect(page).not.toContain("<span>阅读原文</span>");
+    expect(page).not.toContain("<span>智能检索</span>");
+    expect(page).toContain("conversationAttachmentList");
+    expect(page).toContain("pendingConversationAttachments");
+    expect(page).toContain("conversationAttachmentDraftId");
+    expect(page).toContain("/api/conversation-attachments/upload");
+    expect(page).toContain("conversationAttachmentIds:conversationAttachmentIdsToSend.length ? conversationAttachmentIdsToSend : undefined");
+    expect(page).toContain("draftId:conversationAttachmentIdsToSend.length ? conversationAttachmentDraftId : undefined");
+    expect(page).toContain("原文附件与知识库文件暂不能在同一条消息中同时使用。");
     expect(page).toContain("currentRuntimeSupportsNativeAttachment");
-    expect(page).toContain("fileContextMode:fileContextModeToSend");
-    expect(page).toContain("attachmentFileIds:fileContextModeToSend === \"native_attachment\" ? selectedFileIds : undefined");
-    expect(page).toContain("file:fileToSend && fileContextModeToSend !== \"native_attachment\"");
+    expect(page).toContain("fileIds:retrievalFileIdsToSend.length ? retrievalFileIdsToSend : undefined");
+    expect(page).toContain("clearSelectedFile();");
+    expect(page).toContain("原文附件发送失败");
+    expect(page).toContain("await attachConversationFiles(fileInput.files)");
+    expect(page).toContain("inputShell?.addEventListener(\"drop\"");
+    expect(page).toContain("handleConversationFilePaste(event)");
+    expect(page).toContain("await handleImagePaste(event)");
+    expect(page).toContain("!String(file.type || \"\").startsWith(\"image/\")");
   });
 });

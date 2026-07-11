@@ -1,8 +1,6 @@
 import { corsHeaders, jsonResponse } from "../utils/response.js";
-import {
-  buildNativeOpenClawAttachments,
-  getRelevantFileChunksByIds
-} from "./files.js";
+import { buildNativeOpenClawConversationAttachments } from "./conversationAttachments.js";
+import { getRelevantFileChunksByIds } from "./files.js";
 import {
   ensureConversation,
   saveMessage,
@@ -3627,26 +3625,7 @@ export function buildOpenClawBridgeMessageWithFiles(message, fileAttachments = [
 }
 
 export function buildOpenClawBridgeMessageWithNativeAttachments(message, nativeAttachments = []) {
-  const files = Array.isArray(nativeAttachments)
-    ? nativeAttachments.filter(file => file && file.type === "file")
-    : [];
-  const names = [...new Set(files
-    .map(file => String(file.fileName || file.file_name || file.filename || file.fileId || file.file_id || "").trim())
-    .filter(Boolean))];
-
-  if (!names.length) {
-    return String(message || "");
-  }
-
-  return [
-    "The user supplied the following original attachments through OpenClaw native attachments:",
-    names.map(name => "- " + name).join("\n"),
-    "",
-    "Read the original attachment directly before answering.",
-    "",
-    "User request:",
-    String(message || "").trim()
-  ].filter(Boolean).join("\n");
+  return String(message || "");
 }
 
 function formatToolContext(toolCall) {
@@ -5151,8 +5130,9 @@ export async function handleChat(request, env, ctx) {
     attachments,
     file,
     fileIds = [],
-    attachmentFileIds = [],
-    fileContextMode,
+    conversationAttachmentIds = [],
+    draft_id: draftId,
+    draftId: camelDraftId,
     conversationId,
     project_id: projectId,
     projectId: camelProjectId,
@@ -5293,11 +5273,12 @@ export async function handleChat(request, env, ctx) {
   const ragFiles = [];
   let ragSources = [];
   let selectedFileChunks = [];
-  const requestedFileContextMode = normalizeFileContextMode(fileContextMode);
-  const nativeAttachmentFileIds = [...new Set([
-    ...(Array.isArray(attachmentFileIds) ? attachmentFileIds : []),
-    ...(requestedFileContextMode === "native_attachment" && Array.isArray(fileIds) ? fileIds : [])
-  ].map(id => String(id || "").trim()).filter(Boolean))];
+  const requestedConversationAttachmentIds = [...new Set((Array.isArray(conversationAttachmentIds) ? conversationAttachmentIds : [])
+    .map(id => String(id || "").trim())
+    .filter(Boolean))];
+  const requestedDraftId = String(draftId || camelDraftId || "").trim();
+  const hasConversationAttachments = requestedConversationAttachmentIds.length > 0;
+  const hasKnowledgeBaseFiles = Array.isArray(fileIds) && fileIds.length > 0;
   const isOpenClawRequest = isOpenClawRequestTarget(providerCatalog, provider, model || DEFAULT_TEXT_MODEL);
   const openClawTarget = isOpenClawRequest
     ? resolveOpenClawProviderModel(providerCatalog, provider, model || DEFAULT_TEXT_MODEL)
@@ -5343,29 +5324,31 @@ export async function handleChat(request, env, ctx) {
       }
     });
   }
-  if (requestedFileContextMode === "native_attachment" && nativeAttachmentFileIds.length) {
-    if (!isOpenClawRequest) {
-      return new Response(JSON.stringify({
-        ok: false,
-        error: "native_attachment_requires_openclaw",
-        message: "原文附件只能发送给支持 Native Attachment 的 OpenClaw runtime。"
-      }), {
-        status: 400,
-        headers: {
-          ...corsHeaders(),
-          "X-Conversation-Id": conversation.id,
-          "Content-Type": "application/json; charset=utf-8"
-        }
-      });
-    }
-    if (!runtimeSupportsNativeAttachment(runtimeResolution)) {
+  if (hasConversationAttachments && hasKnowledgeBaseFiles) {
+    return new Response(JSON.stringify({
+      ok: false,
+      error: "conversation_attachment_kb_mix_unsupported",
+      message: "原文附件与知识库文件暂不能在同一条消息中同时使用。"
+    }), {
+      status: 400,
+      headers: {
+        ...corsHeaders(),
+        "X-Conversation-Id": conversation.id,
+        "Content-Type": "application/json; charset=utf-8"
+      }
+    });
+  }
+  const resolvedOpenClawBridgeEnabled = isOpenClawRequest
+    ? runtimeResolution?.execution_mode === "bridge"
+    : false;
+  if (hasConversationAttachments) {
+    if (!isOpenClawRequest || !resolvedOpenClawBridgeEnabled || !runtimeSupportsNativeAttachment(runtimeResolution)) {
       return new Response(JSON.stringify({
         ok: false,
         error: "native_attachment_unsupported",
-        message: "当前 OpenClaw runtime 不支持原文附件，请切换到支持 Native Attachment 的 runtime，或改用文件检索模式。",
+        message: "当前模型不支持原文附件。",
         project_id: runtimeResolution?.project_id || conversation.project_id || "",
-        runtime_id: runtimeResolution?.runtime_id || "",
-        fileContextMode: requestedFileContextMode
+        runtime_id: runtimeResolution?.runtime_id || ""
       }), {
         status: 400,
         headers: {
@@ -5376,12 +5359,9 @@ export async function handleChat(request, env, ctx) {
       });
     }
   }
-  const useNativeAttachment = requestedFileContextMode === "native_attachment"
-    && nativeAttachmentFileIds.length > 0
+  const useNativeAttachment = hasConversationAttachments
+    && resolvedOpenClawBridgeEnabled
     && runtimeSupportsNativeAttachment(runtimeResolution);
-  const resolvedOpenClawBridgeEnabled = isOpenClawRequest
-    ? runtimeResolution?.execution_mode === "bridge"
-    : false;
   const openClawTask = isOpenClawRequest
     ? await createOpenClawTask(env, {
       conversationId: conversation.id,
@@ -5410,7 +5390,7 @@ export async function handleChat(request, env, ctx) {
     ragFiles.push(file);
   }
 
-  if (!useNativeAttachment && requestedFileContextMode !== "native_attachment" && Array.isArray(fileIds) && fileIds.length) {
+  if (!useNativeAttachment && Array.isArray(fileIds) && fileIds.length) {
     const fileChunks = await getRelevantFileChunksByIds(env, fileIds, userContent, {
       perFileLimit: 5,
       totalLimit: 14
@@ -5471,28 +5451,12 @@ export async function handleChat(request, env, ctx) {
     });
 
     if (resolvedOpenClawBridgeEnabled) {
-      if (requestedFileContextMode === "native_attachment" && nativeAttachmentFileIds.length && !runtimeSupportsNativeAttachment(runtimeResolution)) {
-        return new Response(JSON.stringify({
-          ok: false,
-          error: "native_attachment_unsupported",
-          message: "当前 OpenClaw runtime 不支持原文附件，请切换到支持 Native Attachment 的 runtime，或改用文件检索模式。",
-          project_id: runtimeResolution?.project_id || conversation.project_id || "",
-          runtime_id: runtimeResolution?.runtime_id || "",
-          fileContextMode: requestedFileContextMode
-        }), {
-          status: 400,
-          headers: {
-            ...corsHeaders(),
-            "X-Conversation-Id": conversation.id,
-            "Content-Type": "application/json; charset=utf-8"
-          }
-        });
-      }
       const openClawAgentId = runtimeResolution?.agent_id || requestedOpenClawAgentId;
       const openClawSessionKey = "agent:" + openClawAgentId + ":" + conversation.id;
       const nativeAttachmentResult = useNativeAttachment
-        ? await buildNativeOpenClawAttachments(env, nativeAttachmentFileIds, {
+        ? await buildNativeOpenClawConversationAttachments(env, requestedConversationAttachmentIds, {
           conversationId: conversation.id,
+          draftId: requestedDraftId,
           projectId: runtimeResolution?.project_id || conversation.project_id || "",
           runtimeId: runtimeResolution?.runtime_id || "",
           message: userContent
@@ -5502,10 +5466,11 @@ export async function handleChat(request, env, ctx) {
         return new Response(JSON.stringify({
           ok: false,
           error: nativeAttachmentResult.code || "native_attachment_failed",
-          message: nativeAttachmentResult.error || "Native attachment preparation failed",
+          message: "Native attachment requested but no valid attachment could be built",
+          detail: nativeAttachmentResult.error || "Native attachment preparation failed",
           project_id: runtimeResolution?.project_id || conversation.project_id || "",
           runtime_id: runtimeResolution?.runtime_id || "",
-          file_id: nativeAttachmentResult.file_id || "",
+          attachment_id: nativeAttachmentResult.attachment_id || "",
           mime_type: nativeAttachmentResult.mime_type || "",
           size: nativeAttachmentResult.size,
           max_size: nativeAttachmentResult.max_size,
@@ -5522,10 +5487,26 @@ export async function handleChat(request, env, ctx) {
         });
       }
       const nativeAttachments = nativeAttachmentResult.attachments || [];
+      if (useNativeAttachment && !nativeAttachments.length) {
+        return new Response(JSON.stringify({
+          ok: false,
+          error: "native_attachment_empty",
+          message: "Native attachment requested but no valid attachment could be built",
+          project_id: runtimeResolution?.project_id || conversation.project_id || "",
+          runtime_id: runtimeResolution?.runtime_id || ""
+        }), {
+          status: 400,
+          headers: {
+            ...corsHeaders(),
+            "X-Conversation-Id": conversation.id,
+            "Content-Type": "application/json; charset=utf-8"
+          }
+        });
+      }
       console.info("[openclaw-native-attachment]", {
         runtime_id: runtimeResolution?.runtime_id || "",
         transport: runtimeResolution?.transport || runtimeResolution?.execution_mode || "",
-        native_attachment_requested: requestedFileContextMode === "native_attachment",
+        native_attachment_requested: hasConversationAttachments,
         native_attachment_supported: runtimeSupportsNativeAttachment(runtimeResolution),
         attachment_count: nativeAttachments.length,
         attachment_total_bytes: nativeAttachmentResult.totalBytes || 0,

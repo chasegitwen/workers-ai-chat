@@ -1,5 +1,6 @@
 ﻿import { handleAuth } from "./api/auth.js";
 import { handleChat } from "./api/chat.js";
+import { handleConversationAttachments } from "./api/conversationAttachments.js";
 import { handleFiles } from "./api/files.js";
 import { handleFetchUrl } from "./api/fetchUrl.js";
 import { handleHistory } from "./api/history.js";
@@ -143,6 +144,14 @@ export default {
 
       if (filesResponse) {
         return filesResponse;
+      }
+    }
+
+    if (url.pathname.startsWith("/api/conversation-attachments")) {
+      const attachmentsResponse = await handleConversationAttachments(request, env, url);
+
+      if (attachmentsResponse) {
+        return attachmentsResponse;
       }
     }
 

@@ -121,16 +121,17 @@ describe("OpenClaw Bridge file attachments", () => {
       }]
     );
 
-    expect(message).toContain("vehicle-dynamics.pdf");
-    expect(message).toContain("Read the original attachment directly");
-    expect(message).toContain("Read the last page marker.");
+    expect(message).toBe("Read the last page marker.");
+    expect(message).not.toContain("vehicle-dynamics.pdf");
     expect(message).not.toContain("File 1");
     expect(message).not.toContain("File 2");
+    expect(message).not.toContain("File ID");
     expect(message).not.toContain("Chunk 0");
     expect(message).not.toContain("Chunk 4");
+    expect(message).not.toContain("R2");
     expect(message).not.toContain("R2 object key");
     expect(message).not.toContain("MIME type");
+    expect(message).not.toContain("application/pdf");
     expect(message).not.toContain("OpenClaw must be able to read this uploaded report content.");
-    expect((message.match(/vehicle-dynamics\.pdf/g) || [])).toHaveLength(1);
   });
 });

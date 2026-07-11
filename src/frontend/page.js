@@ -82,36 +82,39 @@
     display:none;
   }
 
-  #fileModeSelector{
+  #conversationAttachmentList{
     display:none;
-    gap:4px;
-    align-items:center;
-    background:#f3f4f6;
-    border:1px solid var(--border);
-    border-radius:8px;
-    padding:3px;
+    flex-wrap:wrap;
+    gap:6px;
+    width:100%;
   }
 
-  #fileModeSelector label{
+  .conversationAttachmentChip{
     display:flex;
     align-items:center;
-    gap:4px;
-    border-radius:6px;
-    padding:5px 8px;
+    gap:6px;
+    max-width:260px;
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:5px 7px;
+    background:#f9fafb;
+    color:var(--text);
     font-size:12px;
-    color:var(--muted);
-    cursor:pointer;
+  }
+
+  .conversationAttachmentName{
+    overflow:hidden;
+    text-overflow:ellipsis;
     white-space:nowrap;
   }
 
-  #fileModeSelector label.active{
-    background:white;
-    color:var(--text);
-    box-shadow:0 1px 2px rgba(15,23,42,.08);
-  }
-
-  #fileModeSelector input{
-    accent-color:var(--primary);
+  .conversationAttachmentRemove{
+    border:none;
+    background:transparent;
+    color:var(--muted);
+    cursor:pointer;
+    font-size:14px;
+    line-height:1;
   }
 
   #clearFileBtn{
@@ -2829,6 +2832,7 @@ body.dark .toolErrorNotice{
     id="fileInput"
     type="file"
     accept="image/*,audio/*,.txt,.md,.markdown,.csv,.json,.zip,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,text/*,application/pdf,application/json,application/zip,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    multiple
     hidden
   />
 
@@ -2862,7 +2866,7 @@ body.dark .toolErrorNotice{
       <div class="inputMenuWrap">
         <button id="attachmentMenuBtn" class="menuButton" type="button" aria-haspopup="menu" aria-expanded="false" title="&#x6DFB;&#x52A0;&#x9644;&#x4EF6;">+</button>
         <div id="attachmentMenu" class="inputMenu" role="menu">
-          <button id="fileBtn" type="button" role="menuitem">&#x4E0A;&#x4F20;&#x6587;&#x4EF6;</button>
+          <button id="fileBtn" type="button" role="menuitem">Attach</button>
           <button id="imageBtn" type="button" role="menuitem">&#x4E0A;&#x4F20;&#x56FE;&#x7247;</button>
         </div>
       </div>
@@ -2903,16 +2907,7 @@ body.dark .toolErrorNotice{
 
     <div id="fileStatus"></div>
 
-    <div id="fileModeSelector" role="radiogroup" aria-label="文件处理方式">
-      <label data-file-mode-option="native_attachment">
-        <input type="radio" name="fileContextMode" value="native_attachment" />
-        <span>阅读原文</span>
-      </label>
-      <label data-file-mode-option="retrieval">
-        <input type="radio" name="fileContextMode" value="retrieval" checked />
-        <span>智能检索</span>
-      </label>
-    </div>
+    <div id="conversationAttachmentList"></div>
 
     <button id="clearFileBtn" type="button">&#x6E05;&#x9664;</button>
 
@@ -2966,6 +2961,7 @@ const summaryStatus = document.getElementById("summaryStatus");
 const viewSummaryBtn = document.getElementById("viewSummaryBtn");
 
 const input = document.getElementById("input");
+const inputShell = document.querySelector(".inputShell");
 const attachmentMenuBtn = document.getElementById("attachmentMenuBtn");
 const attachmentMenu = document.getElementById("attachmentMenu");
 
@@ -2990,6 +2986,7 @@ let currentConversationId = null;
 let conversationsCache = [];
 let projectsCache = [];
 let projectOpenClawRuntimes = [];
+let openClawRuntimeRegistry = [];
 let projectActionMenu = null;
 let projectActionMenuProjectId = "";
 const DEFAULT_PROJECT_ID = "default";
@@ -3065,7 +3062,7 @@ const MAX_PASTED_IMAGES = 3;
 const fileBtn = document.getElementById("fileBtn");
 const fileInput = document.getElementById("fileInput");
 const fileStatus = document.getElementById("fileStatus");
-const fileModeSelector = document.getElementById("fileModeSelector");
+const conversationAttachmentList = document.getElementById("conversationAttachmentList");
 const clearFileBtn = document.getElementById("clearFileBtn");
 
 let selectedFile = null;
@@ -3073,9 +3070,10 @@ let selectedFileId = null;
 let selectedFileText = "";
 let selectedFileChunks = [];
 let lastRelevantChunkCount = 0;
+let pendingConversationAttachments = [];
+let conversationAttachmentDraftId = crypto.randomUUID();
 let filesLibrary = [];
 let selectedFileIds = [];
-let fileModeUserSelected = false;
 let fileLibraryQuery = "";
 let fileLibrarySort = "latest";
 let isFileLibraryExpanded = false;
@@ -3432,6 +3430,10 @@ function getCurrentContextStatus(){
     contexts.push("\u6587\u4ef6\uff1a" + selectedFile.name);
   }
 
+  if(pendingConversationAttachments.length){
+    contexts.push("Attachments: " + pendingConversationAttachments.map(item => item.filename || "file").join(", "));
+  }
+
   if(selectedWebPage){
     contexts.push("\u7f51\u9875\uff1a" + selectedWebPage.title);
   }
@@ -3522,7 +3524,6 @@ function toggleInputMenu(menuName){
 function updateSelectedFilesStatus(){
   selectedFilesCount.textContent = "\u5df2\u9009\u62e9 " + selectedFileIds.length + " \u4e2a\u6587\u4ef6";
   clearSelectedFilesBtn.style.display = selectedFileIds.length ? "inline-block" : "none";
-  syncFileModeSelector();
 }
 
 function setSelectedFilesStatus(){
@@ -3701,7 +3702,6 @@ function searchFilesLibrary(){
 function clearSelectedLibraryFiles(){
   selectedFileIds = [];
   selectedFileId = null;
-  fileModeUserSelected = false;
   renderFilesLibrary();
   setSelectedFilesStatus();
 }
@@ -3752,9 +3752,6 @@ function toggleLibraryFile(fileId){
       selectedFileId = null;
     }
   }else{
-    if(selectedFileIds.length === 0){
-      fileModeUserSelected = false;
-    }
     selectedFileIds.push(fileId);
   }
 
@@ -3801,22 +3798,148 @@ async function deleteLibraryFile(fileId, filename){
 
 function clearSelectedFile(){
 
-  const fileIdToClear = selectedFileId;
   selectedFile = null;
   selectedFileId = null;
-  selectedFileIds = selectedFileIds.filter(id => id !== fileIdToClear);
   selectedFileText = "";
   selectedFileChunks = [];
   lastRelevantChunkCount = 0;
-  if(!selectedFileIds.length){
-    fileModeUserSelected = false;
-  }
+  pendingConversationAttachments = [];
+  conversationAttachmentDraftId = crypto.randomUUID();
   fileInput.value = "";
   fileStatus.textContent = "";
-  renderFilesLibrary();
+  renderConversationAttachments();
   setContextStatus(getCurrentContextStatus());
   clearFileBtn.style.display = "none";
-  syncFileModeSelector();
+}
+
+function renderConversationAttachments(){
+  if(!conversationAttachmentList){
+    return;
+  }
+  conversationAttachmentList.innerHTML = "";
+  conversationAttachmentList.style.display = pendingConversationAttachments.length ? "flex" : "none";
+
+  pendingConversationAttachments.forEach((attachment, index) => {
+    const chip = document.createElement("div");
+    chip.className = "conversationAttachmentChip";
+
+    const name = document.createElement("span");
+    name.className = "conversationAttachmentName";
+    name.textContent = attachment.filename || "file";
+    name.title = name.textContent;
+
+    const size = document.createElement("span");
+    size.textContent = formatFileSize(attachment.size);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "conversationAttachmentRemove";
+    remove.title = "\u79fb\u9664\u9644\u4ef6";
+    remove.textContent = "\u00d7";
+    remove.addEventListener("click", () => {
+      pendingConversationAttachments.splice(index, 1);
+      renderConversationAttachments();
+      clearFileBtn.style.display = pendingConversationAttachments.length ? "inline-block" : "none";
+      setContextStatus(getCurrentContextStatus());
+    });
+
+    chip.appendChild(name);
+    chip.appendChild(size);
+    chip.appendChild(remove);
+    conversationAttachmentList.appendChild(chip);
+  });
+}
+
+function conversationAttachmentSupportedByUi(file){
+  const name = String(file?.name || "").toLowerCase();
+  const type = String(file?.type || "");
+  const isTextFile =
+    name.endsWith(".txt") ||
+    name.endsWith(".md") ||
+    name.endsWith(".markdown") ||
+    name.endsWith(".csv") ||
+    name.endsWith(".json") ||
+    type.startsWith("text/");
+  const isDocumentFile =
+    name.endsWith(".pdf") ||
+    name.endsWith(".doc") ||
+    name.endsWith(".docx") ||
+    name.endsWith(".xls") ||
+    name.endsWith(".xlsx") ||
+    name.endsWith(".ppt") ||
+    name.endsWith(".pptx") ||
+    name.endsWith(".zip");
+  const isNativeMedia = type.startsWith("image/") || type.startsWith("audio/");
+  const isVideoFile = type.startsWith("video/") ||
+    [".avi",".m4v",".mov",".mp4",".mpeg",".mpg",".webm"].some(ext => name.endsWith(ext));
+
+  return !isVideoFile && (isTextFile || isDocumentFile || isNativeMedia);
+}
+
+async function uploadConversationAttachment(file){
+  const formData = new FormData();
+  formData.append("file", file);
+
+  if(currentConversationId){
+    formData.append("conversation_id", currentConversationId);
+  }else{
+    formData.append("draft_id", conversationAttachmentDraftId);
+  }
+
+  const res = await fetch("/api/conversation-attachments/upload", {
+    method:"POST",
+    body:formData
+  });
+  const data = await res.json();
+
+  if(!res.ok || !data.ok){
+    throw new Error(data.error || "Attachment upload failed");
+  }
+
+  return data.attachment;
+}
+
+async function attachConversationFiles(files){
+  const acceptedFiles = Array.from(files || []).filter(Boolean);
+  if(!acceptedFiles.length){
+    return;
+  }
+
+  if(pendingConversationAttachments.length + acceptedFiles.length > 5){
+    alert("最多只能添加 5 个原文附件。");
+    return;
+  }
+
+  const unsupported = acceptedFiles.find(file => !conversationAttachmentSupportedByUi(file));
+  if(unsupported){
+    alert("当前支持 PDF / Word / Excel / PPT / TXT / Markdown / CSV / JSON / ZIP / 图片 / 音频文件");
+    return;
+  }
+
+  const previousAttachments = pendingConversationAttachments.slice();
+  try{
+    setContextStatus("Attachment uploading...");
+    for(const file of acceptedFiles){
+      const attachment = await uploadConversationAttachment(file);
+      pendingConversationAttachments.push(attachment);
+    }
+    selectedFile = acceptedFiles[0] || null;
+    selectedFileId = null;
+    selectedFileText = "";
+    selectedFileChunks = [];
+    lastRelevantChunkCount = 0;
+    renderConversationAttachments();
+    clearFileBtn.style.display = pendingConversationAttachments.length ? "inline-block" : "none";
+    setContextStatus("\u5df2\u6dfb\u52a0 " + pendingConversationAttachments.length + " \u4e2a\u539f\u6587\u9644\u4ef6\uff0c\u51c6\u5907\u53d1\u9001");
+  }catch(err){
+    pendingConversationAttachments = previousAttachments;
+    renderConversationAttachments();
+    clearFileBtn.style.display = pendingConversationAttachments.length ? "inline-block" : "none";
+    setContextStatus(getCurrentContextStatus());
+    alert("Attachment upload failed: " + err.message);
+  }finally{
+    fileInput.value = "";
+  }
 }
 
 function clearSelectedImage(){
@@ -3905,6 +4028,41 @@ function getClipboardImageFiles(event){
         item.lastModified || 0
       ].join(":") === key) === index;
     });
+}
+
+function getClipboardConversationFiles(event){
+  const items = Array.from(event.clipboardData?.items || []);
+  const filesFromItems = items
+    .filter(item => item.kind === "file" && !String(item.type || "").startsWith("image/"))
+    .map(item => item.getAsFile())
+    .filter(Boolean);
+  const filesFromClipboard = Array.from(event.clipboardData?.files || [])
+    .filter(file => !String(file.type || "").startsWith("image/"));
+  return [...filesFromItems, ...filesFromClipboard]
+    .filter((file, index, files) => {
+      const key = [
+        file.name || "",
+        file.type || "",
+        file.size || 0,
+        file.lastModified || 0
+      ].join(":");
+      return files.findIndex(item => [
+        item.name || "",
+        item.type || "",
+        item.size || 0,
+        item.lastModified || 0
+      ].join(":") === key) === index;
+    });
+}
+
+async function handleConversationFilePaste(event){
+  const files = getClipboardConversationFiles(event);
+  if(!files.length){
+    return false;
+  }
+  event.preventDefault();
+  await attachConversationFiles(files);
+  return true;
 }
 
 async function handleImagePaste(event){
@@ -4669,114 +4827,7 @@ async function uploadFileToLibrary(file, textContent){
 }
 
 fileInput.addEventListener("change", async () => {
-
-  const file = fileInput.files[0];
-
-  if (!file) return;
-
-  const name = file.name.toLowerCase();
-
-  const isTextFile =
-    name.endsWith(".txt") ||
-    name.endsWith(".md") ||
-    name.endsWith(".markdown") ||
-    name.endsWith(".csv") ||
-    name.endsWith(".json") ||
-    file.type.startsWith("text/");
-
-  const isPdfFile = name.endsWith(".pdf");
-
-  const isDocxFile = name.endsWith(".docx");
-
-  const isNativeFile =
-    file.type.startsWith("image/") ||
-    file.type.startsWith("audio/") ||
-    name.endsWith(".zip") ||
-    name.endsWith(".doc") ||
-    name.endsWith(".xls") ||
-    name.endsWith(".xlsx") ||
-    name.endsWith(".ppt") ||
-    name.endsWith(".pptx");
-
-  const isVideoFile = file.type.startsWith("video/") ||
-    [".avi",".m4v",".mov",".mp4",".mpeg",".mpg",".webm"].some(ext => name.endsWith(ext));
-
-  if (isVideoFile || (!isTextFile && !isPdfFile && !isDocxFile && !isNativeFile)) {
-    alert("当前支持 PDF / Word / Excel / PPT / TXT / Markdown / CSV / JSON / ZIP / 图片 / 音频文件");
-    fileInput.value = "";
-    return;
-  }
-
-  const previousFile = selectedFile;
-  const previousFileId = selectedFileId;
-  const previousFileText = selectedFileText;
-  const previousFileChunks = selectedFileChunks;
-  const previousRelevantChunkCount = lastRelevantChunkCount;
-
-  try{
-
-    selectedFile = file;
-    selectedFileId = null;
-    selectedFileText = "";
-    setContextStatus("\u6b63\u5728\u8bfb\u53d6\uff1a" + file.name);
-
-    if(isPdfFile){
-
-      selectedFileText = await extractPdfText(file);
-
-    }else if(isDocxFile){
-      selectedFileText = await extractDocxText(file);
-    }else if(isTextFile){
-
-      selectedFileText = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-
-        reader.onload = () => resolve(reader.result || "");
-        reader.onerror = () => reject(new Error("文件读取失败"));
-
-        reader.readAsText(file, "utf-8");
-      });
-    }else{
-      selectedFileText = "";
-    }
-
-    selectedFileChunks = splitTextIntoChunks(selectedFileText);
-    const savedFile = await uploadFileToLibrary(file, selectedFileText);
-    selectedFileId = savedFile.id;
-    filesLibrary = [
-      {
-        ...savedFile,
-        conversation_id: currentConversationId || null,
-        chunk_count: Number(savedFile.chunk_count || 0)
-      },
-      ...filesLibrary.filter(item => item.id !== savedFile.id)
-    ];
-    selectedFileIds = [
-      savedFile.id,
-      ...selectedFileIds.filter(id => id !== savedFile.id)
-    ];
-    fileModeUserSelected = false;
-    renderFilesLibrary();
-    syncFileModeSelector();
-    clearFileBtn.style.display = "inline-block";
-    setContextStatus(
-      "\u6587\u4ef6\u5df2\u4fdd\u5b58\u5230\u6587\u4ef6\u5e93\uff0c\u5e76\u5df2\u9009\u62e9"
-    );
-
-  }catch(err){
-
-    alert("File read failed: " + err.message);
-
-    selectedFile = previousFile;
-    selectedFileId = previousFileId;
-    selectedFileText = previousFileText;
-    selectedFileChunks = previousFileChunks;
-    lastRelevantChunkCount = previousRelevantChunkCount;
-    fileInput.value = "";
-    clearFileBtn.style.display = previousFile ? "inline-block" : "none";
-    renderFilesLibrary();
-    setContextStatus(getCurrentContextStatus());
-  }
+  await attachConversationFiles(fileInput.files);
 });
 
 
@@ -7489,7 +7540,15 @@ function selectedOpenClawRuntimeBinding(modelId = modelSelect.value){
   if(!runtimeId){
     return null;
   }
-  return projectOpenClawRuntimes.find(binding => binding.runtime_id === runtimeId) || null;
+  const projectBinding = projectOpenClawRuntimes.find(binding => binding.runtime_id === runtimeId);
+  if(projectBinding){
+    return projectBinding;
+  }
+  if(isCommonWorkspace()){
+    const runtime = openClawRuntimeRegistry.find(item => item.id === runtimeId);
+    return runtime ? { runtime_id: runtimeId, runtime } : null;
+  }
+  return null;
 }
 
 function currentRuntimeSupportsNativeAttachment(modelId = modelSelect.value){
@@ -7497,42 +7556,8 @@ function currentRuntimeSupportsNativeAttachment(modelId = modelSelect.value){
   return Boolean(binding?.runtime?.capabilities?.nativeAttachment);
 }
 
-function currentFileContextMode(){
-  const selected = fileModeSelector?.querySelector("input[name='fileContextMode']:checked");
-  return selected?.value === "native_attachment" ? "native_attachment" : "retrieval";
-}
-
-function setFileContextMode(mode){
-  const next = mode === "native_attachment" ? "native_attachment" : "retrieval";
-  fileModeSelector?.querySelectorAll("input[name='fileContextMode']").forEach(inputEl => {
-    inputEl.checked = inputEl.value === next;
-    inputEl.closest("label")?.classList.toggle("active", inputEl.checked);
-  });
-}
-
 function syncFileModeSelector(){
-  if(!fileModeSelector){
-    return;
-  }
-  const hasFiles = selectedFileIds.length > 0;
-  const supportsNative = hasFiles && isSelectedOpenClawRequest(modelSelect.value) && currentRuntimeSupportsNativeAttachment(modelSelect.value);
-  fileModeSelector.style.display = hasFiles ? "flex" : "none";
-  const nativeInput = fileModeSelector.querySelector("input[value='native_attachment']");
-  const nativeLabel = nativeInput?.closest("label");
-  if(nativeInput){
-    nativeInput.disabled = !supportsNative;
-  }
-  if(nativeLabel){
-    nativeLabel.title = supportsNative ? "" : "当前模型不支持阅读原文";
-    nativeLabel.style.opacity = supportsNative ? "1" : ".55";
-  }
-  if(supportsNative && !fileModeUserSelected){
-    setFileContextMode("native_attachment");
-  }else if(!supportsNative && currentFileContextMode() === "native_attachment"){
-    setFileContextMode("retrieval");
-  }else{
-    setFileContextMode(currentFileContextMode());
-  }
+  return;
 }
 
 function clearOpenClawWaitTimers(){
@@ -9074,6 +9099,7 @@ function renderProjectRuntimeStatus(){
 async function loadProjectOpenClawRuntimes(){
   if(isCommonWorkspace()){
     projectOpenClawRuntimes = [];
+    await loadOpenClawRuntimeRegistry();
     syncFileModeSelector();
     renderProjectRuntimeStatus();
     return;
@@ -9093,6 +9119,20 @@ async function loadProjectOpenClawRuntimes(){
     syncFileModeSelector();
     setProjectStatus("OpenClaw runtimes unavailable.");
     renderProjectSettingsPopover();
+  }
+}
+
+async function loadOpenClawRuntimeRegistry(){
+  try{
+    const res = await fetch("/api/openclaw/runtimes");
+    const data = await res.json();
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "load runtime registry failed");
+    }
+    openClawRuntimeRegistry = Array.isArray(data.runtimes) ? data.runtimes : [];
+  }catch(err){
+    console.warn("load OpenClaw runtime registry failed", err);
+    openClawRuntimeRegistry = [];
   }
 }
 
@@ -9678,7 +9718,27 @@ input.addEventListener("keydown", e => {
 
 });
 input.addEventListener("input", autoResizeInput);
-input.addEventListener("paste", handleImagePaste);
+input.addEventListener("paste", async event => {
+  if(await handleConversationFilePaste(event)){
+    return;
+  }
+  await handleImagePaste(event);
+});
+
+inputShell?.addEventListener("dragover", event => {
+  if(Array.from(event.dataTransfer?.items || []).some(item => item.kind === "file")){
+    event.preventDefault();
+  }
+});
+
+inputShell?.addEventListener("drop", async event => {
+  const files = Array.from(event.dataTransfer?.files || []);
+  if(!files.length){
+    return;
+  }
+  event.preventDefault();
+  await attachConversationFiles(files);
+});
 
 sendBtn.addEventListener("click", () => {
   if(activeChatAbortController){
@@ -9794,10 +9854,6 @@ modelSelect.addEventListener("change", () => {
   }
   syncFileModeSelector();
 });
-fileModeSelector?.addEventListener("change", () => {
-  fileModeUserSelected = true;
-  setFileContextMode(currentFileContextMode());
-});
 modelSettingsBtn.addEventListener("click", openSettings);
 closeSettingsBtn.addEventListener("click", closeSettings);
 cancelSettingsBtn.addEventListener("click", cancelSettings);
@@ -9862,7 +9918,11 @@ document.addEventListener("paste", event => {
   }
 
   if(document.activeElement === input || event.target?.closest?.(".inputBar")){
-    handleImagePaste(event);
+    handleConversationFilePaste(event).then(handled => {
+      if(!handled){
+        handleImagePaste(event);
+      }
+    });
   }
 });
 loginForm.addEventListener("submit", login);
@@ -9981,7 +10041,11 @@ function addUserMessage(text, imageDataUrl, fileInfo, attachments){
   if(fileInfo){
     const fileDiv = document.createElement("div");
     fileDiv.className = "fileInfo";
-    fileDiv.textContent = "File " + fileInfo.name + " - " + fileInfo.chars + " chars - " + fileInfo.chunks + " chunks";
+    if(Array.isArray(fileInfo.attachments) && fileInfo.attachments.length){
+      fileDiv.textContent = "Attachments: " + fileInfo.attachments.map(item => item.filename || "file").join(", ");
+    }else{
+      fileDiv.textContent = "File " + fileInfo.name + " - " + fileInfo.chars + " chars - " + fileInfo.chunks + " chunks";
+    }
     div.appendChild(fileDiv);
   }
 
@@ -10780,7 +10844,15 @@ async function sendMessage(){
 
   const fileToSend = selectedFile;
   const fileTextToSend = selectedFileText;
+  const conversationAttachmentsToSend = pendingConversationAttachments.slice();
   const webPageToSend = selectedWebPage;
+
+  if(conversationAttachmentsToSend.length && selectedFileIds.length){
+    const messageText = "原文附件与知识库文件暂不能在同一条消息中同时使用。";
+    setContextStatus(messageText);
+    alert(messageText);
+    return;
+  }
 
   let fileTextForAI = fileTextToSend;
   let fileInfoForUI = null;
@@ -10831,6 +10903,7 @@ async function sendMessage(){
     !imageToSend &&
     attachmentsToSend.length === 0 &&
     !fileTextToSend &&
+    conversationAttachmentsToSend.length === 0 &&
     selectedFileIds.length === 0 &&
     !webTextForAI &&
     !networkTextForAI
@@ -10840,9 +10913,16 @@ async function sendMessage(){
 
   const userMessageForRequest =
     message ||
+    (conversationAttachmentsToSend.length ? "\u8bf7\u9605\u8bfb\u539f\u6587\u9644\u4ef6\u5e76\u56de\u7b54\u3002" :
     (fileToSend ? "\u8bf7\u603b\u7ed3\u8fd9\u4e2a\u6587\u4ef6\u3002" :
     (selectedFileIds.length ? "\u8bf7\u57fa\u4e8e\u5df2\u9009\u62e9\u7684\u6587\u4ef6\u56de\u7b54\u3002" :
-    (webPageToSend ? "\u8bf7\u603b\u7ed3\u8fd9\u4e2a\u7f51\u9875\u3002" : (extraAttachmentsToSend.length ? "\u8bf7\u63cf\u8ff0\u8fd9\u4e9b\u56fe\u7247\u3002" : "\u8bf7\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\u3002"))));
+    (webPageToSend ? "\u8bf7\u603b\u7ed3\u8fd9\u4e2a\u7f51\u9875\u3002" : (extraAttachmentsToSend.length ? "\u8bf7\u63cf\u8ff0\u8fd9\u4e9b\u56fe\u7247\u3002" : "\u8bf7\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\u3002")))));
+
+  if(conversationAttachmentsToSend.length){
+    fileInfoForUI = {
+      attachments: conversationAttachmentsToSend
+    };
+  }
 
   const displayMessage = message || ((imageToSend || attachmentsToSend.length) ? "" : userMessageForRequest);
   addUserMessage(displayMessage, imageToSend, fileInfoForUI, extraAttachmentsToSend);
@@ -10888,12 +10968,13 @@ async function sendMessage(){
     setContextStatus("\u56fe\u7247\u4e0a\u4f20\u4e2d...");
   }
 
-  const fileContextModeToSend = currentFileContextMode();
+  const retrievalFileIdsToSend = selectedFileIds;
+  const conversationAttachmentIdsToSend = conversationAttachmentsToSend.map(item => item.id).filter(Boolean);
 
-  if(fileToSend && fileContextModeToSend !== "native_attachment"){
+  if(fileToSend && fileTextToSend){
     aiDiv.innerHTML =
       "<span class='loading'>正在基于 " + lastRelevantChunkCount + " 个相关片段回答...</span>";
-  }else if(selectedFileIds.length && fileContextModeToSend === "native_attachment"){
+  }else if(conversationAttachmentIdsToSend.length){
     aiDiv.innerHTML =
       "<span class='loading'>正在读取原文附件...</span>";
   }
@@ -10938,10 +11019,10 @@ async function sendMessage(){
         debugTools:localStorage.getItem("wa_tool_debug") === "1",
         image:legacyImageToSend,
         attachments:extraAttachmentsToSend.length ? extraAttachmentsToSend : undefined,
-        fileIds:selectedFileIds,
-        fileContextMode:fileContextModeToSend,
-        attachmentFileIds:fileContextModeToSend === "native_attachment" ? selectedFileIds : undefined,
-        file:fileToSend && fileContextModeToSend !== "native_attachment" ? {
+        fileIds:retrievalFileIdsToSend.length ? retrievalFileIdsToSend : undefined,
+        conversationAttachmentIds:conversationAttachmentIdsToSend.length ? conversationAttachmentIdsToSend : undefined,
+        draftId:conversationAttachmentIdsToSend.length ? conversationAttachmentDraftId : undefined,
+        file:fileToSend && fileTextToSend ? {
           id:selectedFileId || undefined,
           name:fileToSend.name,
           type:fileToSend.type,
@@ -11035,6 +11116,10 @@ async function sendMessage(){
       clearPastedImageAttachments();
     }
 
+    if(conversationAttachmentsToSend.length){
+      clearSelectedFile();
+    }
+
     const currentContextStatus = getCurrentContextStatus();
 
     if(openClawAsyncHandled){
@@ -11084,6 +11169,10 @@ async function sendMessage(){
 
     if(fileToSend && !openClawAutoResumeHandled){
       setContextStatus("\u6587\u4ef6\u95ee\u7b54\u5931\u8d25\uff0c\u53ef\u91cd\u8bd5\uff1a" + fileToSend.name);
+    }
+
+    if(conversationAttachmentsToSend.length && !openClawAutoResumeHandled){
+      setContextStatus("\u539f\u6587\u9644\u4ef6\u53d1\u9001\u5931\u8d25\uff0c\u53ef\u91cd\u8bd5");
     }
   }
 

@@ -89,6 +89,41 @@
     width:100%;
   }
 
+  .fileUseMode{
+    display:none;
+    align-items:center;
+    gap:6px;
+    width:100%;
+    font-size:12px;
+    color:var(--muted);
+  }
+
+  .fileUseMode.visible{
+    display:flex;
+  }
+
+  .fileUseModeOption{
+    display:inline-flex;
+    align-items:center;
+    gap:4px;
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:4px 7px;
+    background:#f9fafb;
+    color:var(--text);
+    cursor:pointer;
+  }
+
+  .fileUseModeOption input{
+    margin:0;
+  }
+
+  .fileUseModeHint{
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+
   .conversationAttachmentChip{
     display:flex;
     align-items:center;
@@ -2610,6 +2645,26 @@ body.dark .toolErrorNotice{
         自动 fallback
       </label>
       <label class="settingsField">
+        原文读取单文件 MB
+        <input id="attachmentMaxFileMbInput" type="number" min="1" max="20" step="1" />
+      </label>
+      <label class="settingsField">
+        原文读取总量 MB
+        <input id="attachmentMaxTotalMbInput" type="number" min="1" max="40" step="1" />
+      </label>
+      <label class="settingsField">
+        转换文本字符上限
+        <input id="attachmentMaxMarkdownCharsInput" type="number" min="1000" max="300000" step="1000" />
+      </label>
+      <label class="settingsField">
+        转换 tokens 上限
+        <input id="attachmentMaxTokensInput" type="number" min="1000" max="120000" step="1000" />
+      </label>
+      <label class="settingsField">
+        最终消息字符上限
+        <input id="attachmentMaxFinalCharsInput" type="number" min="1000" max="360000" step="1000" />
+      </label>
+      <label class="settingsField">
         新 provider 名称
         <input id="providerLabelInput" placeholder="My Provider" />
       </label>
@@ -2907,6 +2962,13 @@ body.dark .toolErrorNotice{
 
     <div id="fileStatus"></div>
 
+    <div id="fileUseMode" class="fileUseMode" aria-label="文件用途">
+      <span>文件用途</span>
+      <label class="fileUseModeOption"><input name="fileUseMode" type="radio" value="source" checked /> 原文读取</label>
+      <label class="fileUseModeOption"><input name="fileUseMode" type="radio" value="library" /> 存入文件库</label>
+      <span id="fileUseModeHint" class="fileUseModeHint">原文读取：本次发送使用，不存入文件库</span>
+    </div>
+
     <div id="conversationAttachmentList"></div>
 
     <button id="clearFileBtn" type="button">&#x6E05;&#x9664;</button>
@@ -3062,9 +3124,14 @@ const MAX_PASTED_IMAGES = 3;
 const fileBtn = document.getElementById("fileBtn");
 const fileInput = document.getElementById("fileInput");
 const fileStatus = document.getElementById("fileStatus");
+const fileUseMode = document.getElementById("fileUseMode");
+const fileUseModeHint = document.getElementById("fileUseModeHint");
 const conversationAttachmentList = document.getElementById("conversationAttachmentList");
 const clearFileBtn = document.getElementById("clearFileBtn");
 
+const FILE_USE_SOURCE = "source";
+const FILE_USE_LIBRARY = "library";
+let selectedFileUseMode = FILE_USE_SOURCE;
 let selectedFile = null;
 let selectedFileId = null;
 let selectedFileText = "";
@@ -3274,6 +3341,7 @@ function normalizeModelSettings(settings, fallbackProviders){
     fallbackModels:Array.isArray(base.fallbackModels) ? base.fallbackModels : (base.fallbackModel ? [base.fallbackModel] : []),
     customModels:Array.isArray(base.customModels) ? base.customModels : [],
     customProviders:Array.isArray(base.customProviders) ? base.customProviders : [],
+    conversationAttachmentLimits:normalizeConversationAttachmentLimits(base.conversationAttachmentLimits),
     providers:Array.isArray(base.providers) && base.providers.length ? base.providers : fallbackProviders
   };
 }
@@ -3391,6 +3459,7 @@ function refreshSettingsControls(){
   fallbackModelSelect.value = hasModel(modelSettingsState?.fallbackModels?.[0]) ? modelSettingsState.fallbackModels[0] : "";
   rememberLastModelCheck.checked = Boolean(modelSettingsState?.rememberLastModel);
   fallbackEnabledCheck.checked = Boolean(modelSettingsState?.fallbackEnabled);
+  setConversationAttachmentLimitInputs(modelSettingsState?.conversationAttachmentLimits);
   modelProviderSelect.innerHTML = "";
   modelProviders.forEach(provider => {
     const option = document.createElement("option");
@@ -3524,6 +3593,7 @@ function toggleInputMenu(menuName){
 function updateSelectedFilesStatus(){
   selectedFilesCount.textContent = "\u5df2\u9009\u62e9 " + selectedFileIds.length + " \u4e2a\u6587\u4ef6";
   clearSelectedFilesBtn.style.display = selectedFileIds.length ? "inline-block" : "none";
+  updateFileUseModeVisibility();
 }
 
 function setSelectedFilesStatus(){
@@ -3745,6 +3815,11 @@ async function toggleFileDetails(fileId){
 }
 
 function toggleLibraryFile(fileId){
+  if(pendingConversationAttachments.length){
+    pendingConversationAttachments = [];
+    renderConversationAttachments();
+  }
+  setFileUseMode(FILE_USE_LIBRARY);
   if(selectedFileIds.includes(fileId)){
     selectedFileIds = selectedFileIds.filter(id => id !== fileId);
 
@@ -3757,6 +3832,7 @@ function toggleLibraryFile(fileId){
 
   renderFilesLibrary();
   setSelectedFilesStatus();
+  clearFileBtn.style.display = selectedFileIds.length ? "inline-block" : "none";
 }
 
 async function deleteLibraryFile(fileId, filename){
@@ -3796,6 +3872,30 @@ async function deleteLibraryFile(fileId, filename){
   }
 }
 
+function currentFileUseMode(){
+  return selectedFileUseMode === FILE_USE_LIBRARY ? FILE_USE_LIBRARY : FILE_USE_SOURCE;
+}
+
+function updateFileUseModeVisibility(){
+  const hasFiles = pendingConversationAttachments.length || selectedFileIds.length;
+  if(fileUseMode){
+    fileUseMode.classList.toggle("visible", Boolean(hasFiles));
+  }
+  if(fileUseModeHint){
+    fileUseModeHint.textContent = currentFileUseMode() === FILE_USE_LIBRARY
+      ? "存入文件库：生成索引，后续对话可检索"
+      : "原文读取：本次发送使用，不存入文件库";
+  }
+}
+
+function setFileUseMode(mode){
+  selectedFileUseMode = mode === FILE_USE_LIBRARY ? FILE_USE_LIBRARY : FILE_USE_SOURCE;
+  document.querySelectorAll("input[name='fileUseMode']").forEach(input => {
+    input.checked = input.value === selectedFileUseMode;
+  });
+  updateFileUseModeVisibility();
+}
+
 function clearSelectedFile(){
 
   selectedFile = null;
@@ -3804,10 +3904,13 @@ function clearSelectedFile(){
   selectedFileChunks = [];
   lastRelevantChunkCount = 0;
   pendingConversationAttachments = [];
+  selectedFileIds = [];
   conversationAttachmentDraftId = crypto.randomUUID();
   fileInput.value = "";
   fileStatus.textContent = "";
   renderConversationAttachments();
+  renderFilesLibrary();
+  updateFileUseModeVisibility();
   setContextStatus(getCurrentContextStatus());
   clearFileBtn.style.display = "none";
 }
@@ -3818,6 +3921,7 @@ function renderConversationAttachments(){
   }
   conversationAttachmentList.innerHTML = "";
   conversationAttachmentList.style.display = pendingConversationAttachments.length ? "flex" : "none";
+  updateFileUseModeVisibility();
 
   pendingConversationAttachments.forEach((attachment, index) => {
     const chip = document.createElement("div");
@@ -3916,30 +4020,21 @@ async function attachConversationFiles(files){
     return;
   }
 
-  const previousAttachments = pendingConversationAttachments.slice();
-  try{
-    setContextStatus("Attachment uploading...");
-    for(const file of acceptedFiles){
-      const attachment = await uploadConversationAttachment(file);
-      pendingConversationAttachments.push(attachment);
-    }
-    selectedFile = acceptedFiles[0] || null;
-    selectedFileId = null;
-    selectedFileText = "";
-    selectedFileChunks = [];
-    lastRelevantChunkCount = 0;
-    renderConversationAttachments();
-    clearFileBtn.style.display = pendingConversationAttachments.length ? "inline-block" : "none";
-    setContextStatus("\u5df2\u6dfb\u52a0 " + pendingConversationAttachments.length + " \u4e2a\u539f\u6587\u9644\u4ef6\uff0c\u51c6\u5907\u53d1\u9001");
-  }catch(err){
-    pendingConversationAttachments = previousAttachments;
-    renderConversationAttachments();
-    clearFileBtn.style.display = pendingConversationAttachments.length ? "inline-block" : "none";
-    setContextStatus(getCurrentContextStatus());
-    alert("Attachment upload failed: " + err.message);
-  }finally{
-    fileInput.value = "";
-  }
+  pendingConversationAttachments.push(...acceptedFiles.map(file => ({
+    filename:file.name || "file",
+    content_type:file.type || "application/octet-stream",
+    size:file.size || 0,
+    file
+  })));
+  selectedFile = acceptedFiles[0] || null;
+  selectedFileId = null;
+  selectedFileText = "";
+  selectedFileChunks = [];
+  lastRelevantChunkCount = 0;
+  renderConversationAttachments();
+  clearFileBtn.style.display = pendingConversationAttachments.length ? "inline-block" : "none";
+  setContextStatus("已添加 " + pendingConversationAttachments.length + " 个待处理文件，请选择原文读取或存入文件库");
+  fileInput.value = "";
 }
 
 function clearSelectedImage(){
@@ -4061,7 +4156,7 @@ async function handleConversationFilePaste(event){
     return false;
   }
   event.preventDefault();
-  await attachConversationFiles(files);
+  await attachFilesByUseMode(files);
   return true;
 }
 
@@ -4157,6 +4252,12 @@ removeImageBtn.addEventListener("click", clearSelectedImage);
 fileBtn.addEventListener("click", () => {
   closeInputMenus();
   fileInput.click();
+});
+
+document.querySelectorAll("input[name='fileUseMode']").forEach(input => {
+  input.addEventListener("change", () => {
+    setFileUseMode(input.value);
+  });
 });
 
 async function searchWeb(){
@@ -4827,7 +4928,7 @@ async function uploadFileToLibrary(file, textContent){
 }
 
 fileInput.addEventListener("change", async () => {
-  await attachConversationFiles(fileInput.files);
+  await attachFilesByUseMode(fileInput.files);
 });
 
 
@@ -4842,6 +4943,11 @@ const defaultModelSelect = document.getElementById("defaultModelSelect");
 const fallbackModelSelect = document.getElementById("fallbackModelSelect");
 const rememberLastModelCheck = document.getElementById("rememberLastModelCheck");
 const fallbackEnabledCheck = document.getElementById("fallbackEnabledCheck");
+const attachmentMaxFileMbInput = document.getElementById("attachmentMaxFileMbInput");
+const attachmentMaxTotalMbInput = document.getElementById("attachmentMaxTotalMbInput");
+const attachmentMaxMarkdownCharsInput = document.getElementById("attachmentMaxMarkdownCharsInput");
+const attachmentMaxTokensInput = document.getElementById("attachmentMaxTokensInput");
+const attachmentMaxFinalCharsInput = document.getElementById("attachmentMaxFinalCharsInput");
 const providerLabelInput = document.getElementById("providerLabelInput");
 const providerIdInput = document.getElementById("providerIdInput");
 const providerTypeSelect = document.getElementById("providerTypeSelect");
@@ -4870,6 +4976,62 @@ let editingModelRef = null;
 let editDialog = null;
 let modelHealthCache = [];
 let modelHealthCollapsed = false;
+
+const DEFAULT_CONVERSATION_ATTACHMENT_LIMITS = {
+  maxAttachments: 5,
+  maxFileBytes: 10 * 1024 * 1024,
+  maxTotalBytes: 24 * 1024 * 1024,
+  maxMarkdownChars: 180000,
+  maxCloudflareTokens: 80000,
+  maxFinalUserMessageChars: 220000
+};
+
+const HARD_CONVERSATION_ATTACHMENT_LIMITS = {
+  maxFileBytes: 20 * 1024 * 1024,
+  maxTotalBytes: 40 * 1024 * 1024,
+  maxMarkdownChars: 300000,
+  maxCloudflareTokens: 120000,
+  maxFinalUserMessageChars: 360000
+};
+
+function clampSettingsNumber(value, fallback, min, max){
+  const number = Number(value);
+  if(!Number.isFinite(number)){
+    return fallback;
+  }
+  return Math.min(Math.max(Math.floor(number), min), max);
+}
+
+function normalizeConversationAttachmentLimits(limits){
+  const source = limits && typeof limits === "object" ? limits : {};
+  return {
+    maxAttachments:5,
+    maxFileBytes:clampSettingsNumber(source.maxFileBytes, DEFAULT_CONVERSATION_ATTACHMENT_LIMITS.maxFileBytes, 1, HARD_CONVERSATION_ATTACHMENT_LIMITS.maxFileBytes),
+    maxTotalBytes:clampSettingsNumber(source.maxTotalBytes, DEFAULT_CONVERSATION_ATTACHMENT_LIMITS.maxTotalBytes, 1, HARD_CONVERSATION_ATTACHMENT_LIMITS.maxTotalBytes),
+    maxMarkdownChars:clampSettingsNumber(source.maxMarkdownChars, DEFAULT_CONVERSATION_ATTACHMENT_LIMITS.maxMarkdownChars, 1, HARD_CONVERSATION_ATTACHMENT_LIMITS.maxMarkdownChars),
+    maxCloudflareTokens:clampSettingsNumber(source.maxCloudflareTokens, DEFAULT_CONVERSATION_ATTACHMENT_LIMITS.maxCloudflareTokens, 1, HARD_CONVERSATION_ATTACHMENT_LIMITS.maxCloudflareTokens),
+    maxFinalUserMessageChars:clampSettingsNumber(source.maxFinalUserMessageChars, DEFAULT_CONVERSATION_ATTACHMENT_LIMITS.maxFinalUserMessageChars, 1, HARD_CONVERSATION_ATTACHMENT_LIMITS.maxFinalUserMessageChars)
+  };
+}
+
+function setConversationAttachmentLimitInputs(limits){
+  const normalized = normalizeConversationAttachmentLimits(limits);
+  attachmentMaxFileMbInput.value = Math.round(normalized.maxFileBytes / 1024 / 1024);
+  attachmentMaxTotalMbInput.value = Math.round(normalized.maxTotalBytes / 1024 / 1024);
+  attachmentMaxMarkdownCharsInput.value = normalized.maxMarkdownChars;
+  attachmentMaxTokensInput.value = normalized.maxCloudflareTokens;
+  attachmentMaxFinalCharsInput.value = normalized.maxFinalUserMessageChars;
+}
+
+function readConversationAttachmentLimitInputs(){
+  return normalizeConversationAttachmentLimits({
+    maxFileBytes:Number(attachmentMaxFileMbInput.value || 10) * 1024 * 1024,
+    maxTotalBytes:Number(attachmentMaxTotalMbInput.value || 24) * 1024 * 1024,
+    maxMarkdownChars:Number(attachmentMaxMarkdownCharsInput.value || DEFAULT_CONVERSATION_ATTACHMENT_LIMITS.maxMarkdownChars),
+    maxCloudflareTokens:Number(attachmentMaxTokensInput.value || DEFAULT_CONVERSATION_ATTACHMENT_LIMITS.maxCloudflareTokens),
+    maxFinalUserMessageChars:Number(attachmentMaxFinalCharsInput.value || DEFAULT_CONVERSATION_ATTACHMENT_LIMITS.maxFinalUserMessageChars)
+  });
+}
 
 const conversation = [
   {
@@ -5071,6 +5233,7 @@ function saveSettingsFromUi(closeAfter){
   modelSettingsState.rememberLastModel = rememberLastModelCheck.checked;
   modelSettingsState.fallbackEnabled = fallbackEnabledCheck.checked;
   modelSettingsState.fallbackModels = fallbackModelSelect.value ? [fallbackModelSelect.value] : [];
+  modelSettingsState.conversationAttachmentLimits = readConversationAttachmentLimitInputs();
 
   if(nextDefault && hasModel(nextDefault)){
     modelSelect.value = nextDefault;
@@ -5265,6 +5428,7 @@ function saveSettingsFromUi(closeAfter){
   modelSettingsState.rememberLastModel = rememberLastModelCheck.checked;
   modelSettingsState.fallbackEnabled = fallbackEnabledCheck.checked;
   modelSettingsState.fallbackModels = fallbackModelSelect.value ? [fallbackModelSelect.value] : [];
+  modelSettingsState.conversationAttachmentLimits = readConversationAttachmentLimitInputs();
 
   if(nextDefault && hasModel(nextDefault)){
     modelSelect.value = nextDefault;
@@ -5522,6 +5686,7 @@ function saveSettingsFromUi(closeAfter){
   modelSettingsState.rememberLastModel = rememberLastModelCheck.checked;
   modelSettingsState.fallbackEnabled = fallbackEnabledCheck.checked;
   modelSettingsState.fallbackModels = fallbackModelSelect.value ? [fallbackModelSelect.value] : [];
+  modelSettingsState.conversationAttachmentLimits = readConversationAttachmentLimitInputs();
   if(nextDefault && hasModel(nextDefault)){
     modelSelect.value = nextDefault;
   }
@@ -6326,6 +6491,7 @@ function normalizeModelSettings(settings, fallbackProviders){
     fallbackModels:Array.isArray(base.fallbackModels) ? base.fallbackModels : (base.fallbackModel ? [base.fallbackModel] : []),
     customModels:Array.isArray(base.customModels) ? base.customModels : [],
     customProviders:Array.isArray(base.customProviders) ? base.customProviders : [],
+    conversationAttachmentLimits:normalizeConversationAttachmentLimits(base.conversationAttachmentLimits),
     categories,
     modelCategories:categories,
     providers,
@@ -6403,6 +6569,7 @@ function refreshSettingsControls(){
   fallbackModelSelect.value = hasModel(modelSettingsState?.fallbackModels?.[0]) ? modelSettingsState.fallbackModels[0] : "";
   rememberLastModelCheck.checked = Boolean(modelSettingsState?.rememberLastModel);
   fallbackEnabledCheck.checked = Boolean(modelSettingsState?.fallbackEnabled);
+  setConversationAttachmentLimitInputs(modelSettingsState?.conversationAttachmentLimits);
   modelProviderSelect.innerHTML = "";
   const workersOption = document.createElement("option");
   workersOption.value = WORKERS_MODEL_PROVIDER_SELECT;
@@ -7478,6 +7645,25 @@ function getModelConfigForRequest(modelId){
 function getSelectedProviderForRequest(modelId){
   const model = modelOptions.find(item => item.id === modelId);
   return model?.provider || "";
+}
+
+function modelProvidersForRequest(enableCloudflareDocumentAttachment){
+  const providers = deepClone(modelProviders);
+  if(!enableCloudflareDocumentAttachment){
+    return providers;
+  }
+  const selectedProviderId = getSelectedProviderForRequest(modelSelect.value);
+  const provider = providers.find(item => item.id === selectedProviderId);
+  const model = provider?.models?.find(item => item.id === modelSelect.value || item.modelId === modelSelect.value);
+  if(model){
+    model.capabilities = {
+      text:true,
+      streaming:true,
+      ...(model.capabilities || {}),
+      cloudflareDocumentAttachment:true
+    };
+  }
+  return providers;
 }
 
 function getOpenClawRuntimeIdForRequest(modelId){
@@ -9737,7 +9923,7 @@ inputShell?.addEventListener("drop", async event => {
     return;
   }
   event.preventDefault();
-  await attachConversationFiles(files);
+  await attachFilesByUseMode(files);
 });
 
 sendBtn.addEventListener("click", () => {
@@ -10295,6 +10481,69 @@ function decodeMathLatex(value){
   }
 }
 
+async function libraryTextForUpload(file){
+  const name = String(file?.name || "").toLowerCase();
+  const type = String(file?.type || "").toLowerCase();
+  if(type.startsWith("text/") || [".txt",".md",".markdown",".csv",".json"].some(ext => name.endsWith(ext))){
+    return file.text();
+  }
+  if(name.endsWith(".pdf") || type === "application/pdf"){
+    return extractPdfText(file).catch(() => "");
+  }
+  if(name.endsWith(".docx") || type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"){
+    return extractDocxText(file).catch(() => "");
+  }
+  return "";
+}
+
+async function attachFilesByUseMode(files){
+  await attachConversationFiles(files);
+}
+
+async function ensureConversationAttachmentsUploaded(attachments){
+  const uploaded = [];
+  for(const attachment of attachments){
+    if(attachment.id){
+      uploaded.push(attachment);
+      continue;
+    }
+    if(!attachment.file){
+      throw new Error("Attachment file is missing");
+    }
+    uploaded.push(await uploadConversationAttachment(attachment.file));
+  }
+  pendingConversationAttachments = uploaded;
+  renderConversationAttachments();
+  return uploaded;
+}
+
+async function storePendingAttachmentsInLibrary(attachments){
+  const files = attachments.map(attachment => attachment.file).filter(Boolean);
+  if(files.length !== attachments.length){
+    throw new Error("Pending file is missing");
+  }
+  const uploadedIds = [];
+  for(const file of files){
+    const textContent = await libraryTextForUpload(file);
+    const uploaded = await uploadFileToLibrary(file, textContent);
+    if(uploaded?.id){
+      uploadedIds.push(uploaded.id);
+    }
+  }
+  pendingConversationAttachments = [];
+  selectedFile = null;
+  selectedFileText = "";
+  selectedFileChunks = [];
+  lastRelevantChunkCount = 0;
+  selectedFileIds = [...new Set([...selectedFileIds, ...uploadedIds])];
+  selectedFileId = selectedFileIds[0] || null;
+  await loadFilesLibrary({ pruneSelection:false });
+  renderConversationAttachments();
+  clearFileBtn.style.display = selectedFileIds.length ? "inline-block" : "none";
+  return uploadedIds;
+}
+
+
 function protectMarkdownCode(markdown){
   const protectedParts = [];
   const backtick = String.fromCharCode(96);
@@ -10844,14 +11093,34 @@ async function sendMessage(){
 
   const fileToSend = selectedFile;
   const fileTextToSend = selectedFileText;
-  const conversationAttachmentsToSend = pendingConversationAttachments.slice();
+  let conversationAttachmentsToSend = pendingConversationAttachments.slice();
   const webPageToSend = selectedWebPage;
 
-  if(conversationAttachmentsToSend.length && selectedFileIds.length){
+  if(conversationAttachmentsToSend.length && currentFileUseMode() === FILE_USE_SOURCE && selectedFileIds.length){
     const messageText = "原文附件与知识库文件暂不能在同一条消息中同时使用。";
     setContextStatus(messageText);
     alert(messageText);
     return;
+  }
+
+  if(conversationAttachmentsToSend.length){
+    try{
+      if(currentFileUseMode() === FILE_USE_LIBRARY){
+        setContextStatus("正在存入文件库...");
+        await storePendingAttachmentsInLibrary(conversationAttachmentsToSend);
+        conversationAttachmentsToSend = [];
+      }else{
+        setContextStatus("原文附件上传中...");
+        conversationAttachmentsToSend = await ensureConversationAttachmentsUploaded(conversationAttachmentsToSend);
+      }
+    }catch(err){
+      const messageText = currentFileUseMode() === FILE_USE_LIBRARY
+        ? "存入文件库失败: " + err.message
+        : "原文附件上传失败: " + err.message;
+      setContextStatus(messageText);
+      alert(messageText);
+      return;
+    }
   }
 
   let fileTextForAI = fileTextToSend;
@@ -10914,8 +11183,8 @@ async function sendMessage(){
   const userMessageForRequest =
     message ||
     (conversationAttachmentsToSend.length ? "\u8bf7\u9605\u8bfb\u539f\u6587\u9644\u4ef6\u5e76\u56de\u7b54\u3002" :
-    (fileToSend ? "\u8bf7\u603b\u7ed3\u8fd9\u4e2a\u6587\u4ef6\u3002" :
     (selectedFileIds.length ? "\u8bf7\u57fa\u4e8e\u5df2\u9009\u62e9\u7684\u6587\u4ef6\u56de\u7b54\u3002" :
+    (fileToSend ? "\u8bf7\u603b\u7ed3\u8fd9\u4e2a\u6587\u4ef6\u3002" :
     (webPageToSend ? "\u8bf7\u603b\u7ed3\u8fd9\u4e2a\u7f51\u9875\u3002" : (extraAttachmentsToSend.length ? "\u8bf7\u63cf\u8ff0\u8fd9\u4e9b\u56fe\u7247\u3002" : "\u8bf7\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\u3002")))));
 
   if(conversationAttachmentsToSend.length){
@@ -10970,6 +11239,7 @@ async function sendMessage(){
 
   const retrievalFileIdsToSend = selectedFileIds;
   const conversationAttachmentIdsToSend = conversationAttachmentsToSend.map(item => item.id).filter(Boolean);
+  const providersForRequest = modelProvidersForRequest(Boolean(conversationAttachmentIdsToSend.length));
 
   if(fileToSend && fileTextToSend){
     aiDiv.innerHTML =
@@ -11010,7 +11280,7 @@ async function sendMessage(){
         model:modelSelect.value,
         provider:getSelectedProviderForRequest(modelSelect.value),
         runtime_id:selectedOpenClawRuntimeId || undefined,
-        providers:modelProviders,
+        providers:providersForRequest,
         autoFallbackEnabled:Boolean(modelSettingsState?.fallbackEnabled),
         fallbackModel,
         customModelConfig:selectedModelConfig,

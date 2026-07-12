@@ -280,7 +280,7 @@ describe("Native Bridge uploaded document visibility", () => {
       SESSION_SECRET: "session-secret"
     };
     const form = new FormData();
-    form.set("file", new File([new Uint8Array(6 * 1024 * 1024 + 1)], "huge.txt", { type: "text/plain" }));
+    form.set("file", new File([new Uint8Array(10 * 1024 * 1024 + 1)], "huge.txt", { type: "text/plain" }));
     form.set("draft_id", "draft-oversize");
 
     const response = await handleConversationAttachments(new Request("http://example.com/api/conversation-attachments/upload", {

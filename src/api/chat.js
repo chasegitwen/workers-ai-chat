@@ -1,5 +1,13 @@
 import { corsHeaders, jsonResponse } from "../utils/response.js";
-import { buildNativeOpenClawConversationAttachments } from "./conversationAttachments.js";
+import {
+  bindConversationAttachmentRefs,
+  buildNativeOpenClawConversationAttachments,
+  listActiveConversationAttachmentRefs
+} from "./conversationAttachments.js";
+import {
+  convertConversationAttachmentRefsWithCloudflare,
+  convertConversationAttachmentsWithCloudflare
+} from "./cloudflareDocumentAttachments.js";
 import { getRelevantFileChunksByIds } from "./files.js";
 import {
   ensureConversation,
@@ -103,6 +111,21 @@ function resolveOpenClawProviderModel(providerCatalog, requestedProvider, reques
     return {
       provider: { id: requestedProvider },
       model: { id: requestedModel, modelName: requestedModel }
+    };
+  }
+}
+
+function resolveRequestedProviderModel(providerCatalog, requestedProvider, requestedModel) {
+  try {
+    return findProviderModel(
+      providerCatalog,
+      String(requestedProvider || "").trim(),
+      String(requestedModel || "").trim()
+    );
+  } catch (err) {
+    return {
+      provider: null,
+      model: null
     };
   }
 }
@@ -542,6 +565,29 @@ function normalizeFileContextMode(value) {
 
 function runtimeSupportsNativeAttachment(runtimeResolution) {
   return runtimeResolution?.capabilities?.nativeAttachment === true;
+}
+
+function capabilityEnablesCloudflareDocumentAttachment(capabilities) {
+  return capabilities?.cloudflareDocumentAttachment === true
+    || capabilities?.cloudflare_document_attachment === true
+    || capabilities?.attachments?.conversation === "cloudflare_document";
+}
+
+export function resolveConversationAttachmentMode({
+  isOpenClawRequest = false,
+  resolvedOpenClawBridgeEnabled = false,
+  runtimeResolution = null,
+  selectedModel = null
+} = {}) {
+  if (isOpenClawRequest
+    && resolvedOpenClawBridgeEnabled
+    && runtimeSupportsNativeAttachment(runtimeResolution)) {
+    return "native_file";
+  }
+  if (capabilityEnablesCloudflareDocumentAttachment(selectedModel?.capabilities)) {
+    return "cloudflare_document";
+  }
+  return "none";
 }
 
 function isOpenClawBridgeCallbackPath(pathname) {
@@ -5097,6 +5143,16 @@ async function prepareConversation(env, conversationId, userContent, projectId =
   );
 }
 
+async function readExistingConversation(env, conversationId) {
+  const id = String(conversationId || "").trim();
+  if (!env.DB || !id) {
+    return null;
+  }
+  return env.DB.prepare(
+    "SELECT id, title, project_id, created_at, updated_at FROM conversations WHERE id = ?"
+  ).bind(id).first();
+}
+
 export async function handleChat(request, env, ctx) {
   const url = new URL(request.url);
   if (isOpenClawBridgeCallbackPath(url.pathname)) {
@@ -5175,9 +5231,20 @@ export async function handleChat(request, env, ctx) {
     fallbackCustomModelConfig
   );
 
-  const conversation = await prepareConversation(env, conversationId, userContent, projectId || camelProjectId || "");
+  const requestedConversationAttachmentIds = [...new Set((Array.isArray(conversationAttachmentIds) ? conversationAttachmentIds : [])
+    .map(id => String(id || "").trim())
+    .filter(Boolean))];
+  const requestedDraftId = String(draftId || camelDraftId || "").trim();
+  const hasConversationAttachments = requestedConversationAttachmentIds.length > 0;
+  const hasKnowledgeBaseFiles = Array.isArray(fileIds) && fileIds.length > 0;
+  const existingConversation = hasConversationAttachments
+    ? await readExistingConversation(env, conversationId)
+    : null;
+  let conversation = hasConversationAttachments
+    ? (existingConversation || (conversationId ? { id: conversationId, project_id: projectId || camelProjectId || "" } : null))
+    : await prepareConversation(env, conversationId, userContent, projectId || camelProjectId || "");
 
-  if (image && imageAttachments.length === 0) {
+  if (!hasConversationAttachments && image && imageAttachments.length === 0) {
     try {
       console.log("received image");
 
@@ -5255,30 +5322,9 @@ export async function handleChat(request, env, ctx) {
     }
   }
 
-  const savedUserMessage = env.DB
-    ? await saveMessage(env.DB, conversation.id, "user", userContent)
-    : null;
-
-  const historyMessages = env.DB
-    ? await buildConversationContext(env, conversation.id, {
-      limit: 14,
-      excludeMessageId: savedUserMessage?.id
-    })
-    : messages.filter(message => message.role !== "system");
-
-  const modelMessages = [
-    defaultSystemMessage
-  ];
-
   const ragFiles = [];
   let ragSources = [];
   let selectedFileChunks = [];
-  const requestedConversationAttachmentIds = [...new Set((Array.isArray(conversationAttachmentIds) ? conversationAttachmentIds : [])
-    .map(id => String(id || "").trim())
-    .filter(Boolean))];
-  const requestedDraftId = String(draftId || camelDraftId || "").trim();
-  const hasConversationAttachments = requestedConversationAttachmentIds.length > 0;
-  const hasKnowledgeBaseFiles = Array.isArray(fileIds) && fileIds.length > 0;
   const isOpenClawRequest = isOpenClawRequestTarget(providerCatalog, provider, model || DEFAULT_TEXT_MODEL);
   const openClawTarget = isOpenClawRequest
     ? resolveOpenClawProviderModel(providerCatalog, provider, model || DEFAULT_TEXT_MODEL)
@@ -5292,7 +5338,7 @@ export async function handleChat(request, env, ctx) {
   const requestedOpenClawAgentId = isOpenClawRequest
     ? normalizeOpenClawAgentId(openClawTarget?.model)
     : "";
-  const requestedProjectId = conversation.project_id || projectId || camelProjectId || "default";
+  const requestedProjectId = conversation?.project_id || projectId || camelProjectId || "default";
   const selectedOpenClawRuntimeId = isOpenClawRequest
     ? (runtimeId || camelRuntimeId || inferOpenClawRuntimeIdFromSelection(openClawTarget?.provider, openClawTarget?.model))
     : "";
@@ -5307,24 +5353,49 @@ export async function handleChat(request, env, ctx) {
       allowUnboundExplicitRuntime: Boolean(selectedOpenClawRuntimeId) && requestedProjectId === "default"
     })
     : null;
+  const requestedTarget = resolveRequestedProviderModel(providerCatalog, provider, model || DEFAULT_TEXT_MODEL);
+  let persistentConversationAttachmentRefs = [];
+  if (!hasConversationAttachments
+    && !isOpenClawRequest
+    && conversation?.id
+    && capabilityEnablesCloudflareDocumentAttachment(requestedTarget.model?.capabilities)) {
+    const refResult = await listActiveConversationAttachmentRefs(env, conversation.id);
+    if (!refResult.ok) {
+      return new Response(JSON.stringify({
+        ok: false,
+        error: refResult.code || "conversation_attachment_ref_read_failed",
+        message: refResult.error || "Conversation attachment references could not be read",
+        detail: refResult.detail || ""
+      }), {
+        status: 500,
+        headers: {
+          ...corsHeaders(),
+          "X-Conversation-Id": conversation.id,
+          "Content-Type": "application/json; charset=utf-8"
+        }
+      });
+    }
+    persistentConversationAttachmentRefs = refResult.refs || [];
+  }
+  const hasPersistentConversationAttachments = persistentConversationAttachmentRefs.length > 0;
   if (isOpenClawRequest && runtimeResolution && !runtimeResolution.ok) {
     return new Response(JSON.stringify({
       ok: false,
       error: runtimeResolution.error || "runtime_resolution_failed",
       message: runtimeResolution.message || "OpenClaw runtime resolution failed",
-      project_id: runtimeResolution.project_id || conversation.project_id || "default",
+      project_id: runtimeResolution.project_id || conversation?.project_id || projectId || camelProjectId || "default",
       runtime_id: runtimeResolution.runtime_id || "",
       runtimes: runtimeResolution.runtimes || []
     }), {
       status: runtimeResolution.error === "runtime_required" ? 409 : 400,
       headers: {
         ...corsHeaders(),
-        "X-Conversation-Id": conversation.id,
+        "X-Conversation-Id": conversation?.id || conversationId || "",
         "Content-Type": "application/json; charset=utf-8"
       }
     });
   }
-  if (hasConversationAttachments && hasKnowledgeBaseFiles) {
+  if ((hasConversationAttachments || hasPersistentConversationAttachments) && hasKnowledgeBaseFiles) {
     return new Response(JSON.stringify({
       ok: false,
       error: "conversation_attachment_kb_mix_unsupported",
@@ -5333,7 +5404,7 @@ export async function handleChat(request, env, ctx) {
       status: 400,
       headers: {
         ...corsHeaders(),
-        "X-Conversation-Id": conversation.id,
+        "X-Conversation-Id": conversation?.id || conversationId || "",
         "Content-Type": "application/json; charset=utf-8"
       }
     });
@@ -5341,14 +5412,131 @@ export async function handleChat(request, env, ctx) {
   const resolvedOpenClawBridgeEnabled = isOpenClawRequest
     ? runtimeResolution?.execution_mode === "bridge"
     : false;
-  if (hasConversationAttachments) {
-    if (!isOpenClawRequest || !resolvedOpenClawBridgeEnabled || !runtimeSupportsNativeAttachment(runtimeResolution)) {
+  const useNativeAttachment = hasConversationAttachments
+    && resolvedOpenClawBridgeEnabled
+    && runtimeSupportsNativeAttachment(runtimeResolution);
+  const conversationAttachmentMode = hasConversationAttachments
+    ? resolveConversationAttachmentMode({
+      isOpenClawRequest,
+      resolvedOpenClawBridgeEnabled,
+      runtimeResolution,
+      selectedModel: requestedTarget.model
+    })
+    : "none";
+  if (hasConversationAttachments && conversationAttachmentMode === "none") {
+    return new Response(JSON.stringify({
+      ok: false,
+      error: "native_attachment_unsupported",
+      message: "当前模型不支持原文附件。",
+      project_id: runtimeResolution?.project_id || conversation?.project_id || projectId || camelProjectId || "",
+      runtime_id: runtimeResolution?.runtime_id || ""
+    }), {
+      status: 400,
+      headers: {
+        ...corsHeaders(),
+        "X-Conversation-Id": conversation?.id || conversationId || "",
+        "Content-Type": "application/json; charset=utf-8"
+      }
+    });
+  }
+  const useCloudflareDocumentAttachment = hasConversationAttachments && conversationAttachmentMode === "cloudflare_document";
+  const usePersistentCloudflareDocumentAttachment = !hasConversationAttachments && hasPersistentConversationAttachments;
+  let finalUserContent = userContent;
+  let cloudflareDocumentAttachmentResult = null;
+  if (useCloudflareDocumentAttachment) {
+    cloudflareDocumentAttachmentResult = await convertConversationAttachmentsWithCloudflare(env, requestedConversationAttachmentIds, {
+      conversationId: conversation?.id || "",
+      draftId: requestedDraftId,
+      userContent
+    });
+    if (!cloudflareDocumentAttachmentResult.ok) {
       return new Response(JSON.stringify({
         ok: false,
-        error: "native_attachment_unsupported",
-        message: "当前模型不支持原文附件。",
-        project_id: runtimeResolution?.project_id || conversation.project_id || "",
-        runtime_id: runtimeResolution?.runtime_id || ""
+        error: cloudflareDocumentAttachmentResult.code || "cloudflare_document_attachment_failed",
+        message: cloudflareDocumentAttachmentResult.error || "Cloudflare document attachment conversion failed",
+        detail: cloudflareDocumentAttachmentResult.detail || "",
+        attachment_id: cloudflareDocumentAttachmentResult.attachment_id || "",
+        filename: cloudflareDocumentAttachmentResult.filename || "",
+        extension: cloudflareDocumentAttachmentResult.extension || "",
+        mime_type: cloudflareDocumentAttachmentResult.mime_type || "",
+        expected_mime_type: cloudflareDocumentAttachmentResult.expected_mime_type || "",
+        expected_mime_types: cloudflareDocumentAttachmentResult.expected_mime_types || undefined,
+        markdown_chars: cloudflareDocumentAttachmentResult.markdown_chars,
+        max_markdown_chars: cloudflareDocumentAttachmentResult.max_markdown_chars,
+        cloudflare_tokens: cloudflareDocumentAttachmentResult.cloudflare_tokens,
+        max_cloudflare_tokens: cloudflareDocumentAttachmentResult.max_cloudflare_tokens,
+        final_user_message_chars: cloudflareDocumentAttachmentResult.final_user_message_chars,
+        max_final_user_message_chars: cloudflareDocumentAttachmentResult.max_final_user_message_chars,
+        size: cloudflareDocumentAttachmentResult.size,
+        max_size: cloudflareDocumentAttachmentResult.max_size,
+        total_size: cloudflareDocumentAttachmentResult.total_size,
+        max_total_size: cloudflareDocumentAttachmentResult.max_total_size
+      }), {
+        status: cloudflareDocumentAttachmentResult.code === "attachment_converted_text_too_large" ? 413 : 400,
+        headers: {
+          ...corsHeaders(),
+          "X-Conversation-Id": conversation?.id || conversationId || "",
+          "Content-Type": "application/json; charset=utf-8"
+        }
+      });
+    }
+    finalUserContent = cloudflareDocumentAttachmentResult.userContent || userContent;
+  }
+  if (usePersistentCloudflareDocumentAttachment) {
+    cloudflareDocumentAttachmentResult = await convertConversationAttachmentRefsWithCloudflare(env, persistentConversationAttachmentRefs, {
+      userContent
+    });
+    if (!cloudflareDocumentAttachmentResult.ok) {
+      return new Response(JSON.stringify({
+        ok: false,
+        error: cloudflareDocumentAttachmentResult.code || "cloudflare_document_attachment_failed",
+        message: cloudflareDocumentAttachmentResult.error || "Cloudflare document attachment conversion failed",
+        detail: cloudflareDocumentAttachmentResult.detail || "",
+        attachment_ref_id: cloudflareDocumentAttachmentResult.attachment_ref_id || "",
+        attachment_id: cloudflareDocumentAttachmentResult.attachment_id || "",
+        filename: cloudflareDocumentAttachmentResult.filename || "",
+        extension: cloudflareDocumentAttachmentResult.extension || "",
+        mime_type: cloudflareDocumentAttachmentResult.mime_type || "",
+        expected_mime_type: cloudflareDocumentAttachmentResult.expected_mime_type || "",
+        expected_mime_types: cloudflareDocumentAttachmentResult.expected_mime_types || undefined,
+        markdown_chars: cloudflareDocumentAttachmentResult.markdown_chars,
+        max_markdown_chars: cloudflareDocumentAttachmentResult.max_markdown_chars,
+        cloudflare_tokens: cloudflareDocumentAttachmentResult.cloudflare_tokens,
+        max_cloudflare_tokens: cloudflareDocumentAttachmentResult.max_cloudflare_tokens,
+        final_user_message_chars: cloudflareDocumentAttachmentResult.final_user_message_chars,
+        max_final_user_message_chars: cloudflareDocumentAttachmentResult.max_final_user_message_chars,
+        size: cloudflareDocumentAttachmentResult.size,
+        max_size: cloudflareDocumentAttachmentResult.max_size,
+        total_size: cloudflareDocumentAttachmentResult.total_size,
+        max_total_size: cloudflareDocumentAttachmentResult.max_total_size
+      }), {
+        status: cloudflareDocumentAttachmentResult.code === "attachment_converted_text_too_large" ? 413 : 400,
+        headers: {
+          ...corsHeaders(),
+          "X-Conversation-Id": conversation?.id || conversationId || "",
+          "Content-Type": "application/json; charset=utf-8"
+        }
+      });
+    }
+    finalUserContent = cloudflareDocumentAttachmentResult.userContent || userContent;
+  }
+
+  if (!conversation || (hasConversationAttachments && env.DB)) {
+    conversation = await prepareConversation(env, conversationId, userContent, projectId || camelProjectId || "");
+  }
+
+  if (useCloudflareDocumentAttachment && env.DB) {
+    const bindResult = await bindConversationAttachmentRefs(env, requestedConversationAttachmentIds, {
+      conversationId: conversation.id,
+      draftId: requestedDraftId
+    });
+    if (!bindResult.ok) {
+      return new Response(JSON.stringify({
+        ok: false,
+        error: bindResult.code || "conversation_attachment_ref_save_failed",
+        message: bindResult.error || "Conversation attachment reference save failed",
+        detail: bindResult.detail || "",
+        attachment_id: bindResult.attachment_id || ""
       }), {
         status: 400,
         headers: {
@@ -5359,9 +5547,21 @@ export async function handleChat(request, env, ctx) {
       });
     }
   }
-  const useNativeAttachment = hasConversationAttachments
-    && resolvedOpenClawBridgeEnabled
-    && runtimeSupportsNativeAttachment(runtimeResolution);
+
+  const savedUserMessage = env.DB
+    ? await saveMessage(env.DB, conversation.id, "user", userContent)
+    : null;
+
+  const historyMessages = env.DB
+    ? await buildConversationContext(env, conversation.id, {
+      limit: 14,
+      excludeMessageId: savedUserMessage?.id
+    })
+    : messages.filter(message => message.role !== "system");
+
+  const modelMessages = [
+    defaultSystemMessage
+  ];
   const openClawTask = isOpenClawRequest
     ? await createOpenClawTask(env, {
       conversationId: conversation.id,
@@ -5386,11 +5586,11 @@ export async function handleChat(request, env, ctx) {
       ? withToolTrigger(autoFetchToolCall, "auto_url")
       : withToolTrigger(autoSearchToolCall, "auto_search"));
 
-  if (!useNativeAttachment && file && file.text) {
+  if (!hasConversationAttachments && !useNativeAttachment && file && file.text) {
     ragFiles.push(file);
   }
 
-  if (!useNativeAttachment && Array.isArray(fileIds) && fileIds.length) {
+  if (!hasConversationAttachments && !useNativeAttachment && Array.isArray(fileIds) && fileIds.length) {
     const fileChunks = await getRelevantFileChunksByIds(env, fileIds, userContent, {
       perFileLimit: 5,
       totalLimit: 14
@@ -5574,8 +5774,8 @@ export async function handleChat(request, env, ctx) {
     finalMessages.push({
       role: "user",
       content: allImageAttachments.length
-        ? buildMultimodalUserContent(userContent, allImageAttachments)
-        : userContent
+        ? buildMultimodalUserContent(finalUserContent, allImageAttachments)
+        : finalUserContent
     });
     const asyncResult = await submitOpenClawAsyncTask({
       env,
@@ -5620,7 +5820,7 @@ export async function handleChat(request, env, ctx) {
     fallbackCustomModelConfig,
     modelMessages,
     historyMessages,
-    userContent,
+    userContent: finalUserContent,
     attachments: allImageAttachments,
     requestedToolCall,
     ragSources,

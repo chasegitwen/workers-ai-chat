@@ -503,7 +503,7 @@ body.authenticated .loginScreen{
   justify-content:space-between;
   gap:8px;
   color:var(--text);
-  font-size:12px;
+  font-size:15px;
   line-height:1.35;
   font-weight:600;
   margin:12px 0 6px;
@@ -519,7 +519,7 @@ body.authenticated .loginScreen{
   background:transparent;
   color:var(--text);
   padding:8px 10px;
-  font-size:13px;
+  font-size:15px;
   outline:none;
 }
 
@@ -552,7 +552,7 @@ body.authenticated .loginScreen{
   border-radius:12px;
   padding:8px 10px;
   cursor:pointer;
-  font-size:13px;
+  font-size:15px;
 }
 
 .newChatBtn{
@@ -562,7 +562,7 @@ body.authenticated .loginScreen{
   color:white;
   border-radius:10px;
   padding:10px 12px;
-  font-size:14px;
+  font-size:15px;
   cursor:pointer;
   margin-bottom:12px;
   flex:0 0 auto;
@@ -593,7 +593,7 @@ body.authenticated .loginScreen{
 
 .projectSectionLabel{
   color:var(--text);
-  font-size:12px;
+  font-size:15px;
   line-height:1.35;
   font-weight:600;
   text-transform:uppercase;
@@ -634,15 +634,19 @@ body.authenticated .loginScreen{
 .projectRow{
   display:flex;
   align-items:center;
-  gap:7px;
-  min-height:36px;
+  gap:8px;
+  min-height:38px;
   border-radius:10px;
-  padding:3px 4px 3px 6px;
+  padding:4px 4px 4px 6px;
   border-left:0;
 }
 
 .projectRow.active{
-  background:rgba(37,99,235,.12);
+  background:rgba(37,99,235,.1);
+}
+
+.projectRow:hover{
+  background:rgba(37,99,235,.06);
 }
 
 .projectChevronBtn{
@@ -650,7 +654,7 @@ body.authenticated .loginScreen{
   align-items:center;
   justify-content:center;
   width:22px;
-  height:24px;
+  height:26px;
   flex:0 0 auto;
   border:none;
   background:transparent;
@@ -673,8 +677,8 @@ body.authenticated .loginScreen{
   background:transparent;
   color:var(--text);
   padding:6px 0;
-  font-size:13px;
-  font-weight:600;
+  font-size:15px;
+  font-weight:400;
   text-align:left;
   cursor:pointer;
   white-space:nowrap;
@@ -683,16 +687,8 @@ body.authenticated .loginScreen{
 }
 
 .projectRow.active .projectNameBtn{
-  color:var(--primary);
-  font-weight:700;
-}
-
-.projectStatusDot{
-  width:6px;
-  height:6px;
-  border-radius:999px;
-  background:#16a34a;
-  flex:0 0 auto;
+  color:var(--text);
+  font-weight:400;
 }
 
 .projectMenuBtn{
@@ -9220,10 +9216,6 @@ function renderProjectSelector(){
       }
     });
 
-    const dot = document.createElement("span");
-    dot.className = "projectStatusDot";
-    dot.title = project.is_archived ? "Archived" : "Active";
-
     const nameBtn = document.createElement("button");
     nameBtn.type = "button";
     nameBtn.className = "projectNameBtn";
@@ -9246,7 +9238,6 @@ function renderProjectSelector(){
     });
 
     row.appendChild(chevronBtn);
-    row.appendChild(dot);
     row.appendChild(nameBtn);
     row.appendChild(menuBtn);
     projectList.appendChild(row);

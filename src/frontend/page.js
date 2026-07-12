@@ -96,6 +96,7 @@
     width:100%;
     font-size:12px;
     color:var(--muted);
+    flex-wrap:wrap;
   }
 
   .fileUseMode.visible{
@@ -119,6 +120,7 @@
   }
 
   .fileUseModeHint{
+    flex-basis:100%;
     overflow:hidden;
     text-overflow:ellipsis;
     white-space:nowrap;
@@ -267,6 +269,7 @@
 :root{
   --bg:#eef2ff;
   --panel:#ffffff;
+  --panel-soft:#f8fafc;
   --text:#111827;
   --muted:#6b7280;
   --primary:#2563eb;
@@ -279,6 +282,7 @@
 body.dark{
   --bg:#0f172a;
   --panel:#111827;
+  --panel-soft:#0b1220;
   --text:#e5e7eb;
   --muted:#9ca3af;
   --primary:#60a5fa;
@@ -298,12 +302,12 @@ body{
   max-height:100vh;
   overflow:hidden;
   font-family:Arial, "Microsoft YaHei", sans-serif;
-  background:linear-gradient(135deg,var(--bg),#ffffff);
+  background:var(--bg);
   color:var(--text);
 }
 
 body.dark{
-  background:linear-gradient(135deg,#020617,#0f172a);
+  background:#020617;
 }
 
 .loginScreen{
@@ -396,8 +400,7 @@ body.authenticated .loginScreen{
   align-items:center;
   justify-content:space-between;
   background:var(--panel);
-  border-bottom:1px solid var(--border);
-  box-shadow:0 2px 12px rgba(0,0,0,.06);
+  border-bottom:1px solid rgba(148,163,184,.18);
 }
 
 .brand{
@@ -410,12 +413,19 @@ body.authenticated .loginScreen{
 }
 
 .themeBtn{
-  border:1px solid var(--border);
+  border:1px solid transparent;
   background:transparent;
   color:var(--text);
   border-radius:999px;
-  padding:6px 12px;
+  padding:7px 12px;
   cursor:pointer;
+  font-size:13px;
+}
+
+.themeBtn:hover,
+.themeBtn.active{
+  background:rgba(37,99,235,.08);
+  color:var(--primary);
 }
 
 .topbarActions{
@@ -429,9 +439,13 @@ body.authenticated .loginScreen{
   min-height:0;
   display:grid;
   grid-template-columns:280px minmax(0,1fr);
-  gap:14px;
-  padding:12px 14px 14px;
+  gap:12px;
+  padding:12px;
   overflow:hidden;
+}
+
+.main.contextPanelOpen{
+  grid-template-columns:280px minmax(0,1fr) 280px;
 }
 
 .sidebar{
@@ -439,11 +453,8 @@ body.authenticated .loginScreen{
   min-height:0;
   overflow:hidden;
   background:var(--panel);
-  border:1px solid rgba(148,163,184,.22);
-  border-radius:20px;
-  padding:18px;
-  box-shadow:0 6px 22px rgba(15,23,42,.06);
-
+  border-radius:14px;
+  padding:12px;
   display:flex;
   flex-direction:column;
 }
@@ -492,10 +503,12 @@ body.authenticated .loginScreen{
   justify-content:space-between;
   gap:8px;
   color:var(--text);
-  font-size:13px;
+  font-size:12px;
   line-height:1.35;
-  font-weight:700;
+  font-weight:600;
   margin:12px 0 6px;
+  text-transform:uppercase;
+  letter-spacing:0;
 }
 
 .chatSearchInput{
@@ -547,7 +560,7 @@ body.authenticated .loginScreen{
   border:none;
   background:var(--primary);
   color:white;
-  border-radius:14px;
+  border-radius:10px;
   padding:10px 12px;
   font-size:14px;
   cursor:pointer;
@@ -557,7 +570,7 @@ body.authenticated .loginScreen{
 
 .projectPanel{
   flex:0 0 auto;
-  max-height:40%;
+  max-height:38%;
   min-height:0;
   overflow-y:auto;
   margin:6px 0 12px;
@@ -580,9 +593,11 @@ body.authenticated .loginScreen{
 
 .projectSectionLabel{
   color:var(--text);
-  font-size:13px;
+  font-size:12px;
   line-height:1.35;
-  font-weight:700;
+  font-weight:600;
+  text-transform:uppercase;
+  letter-spacing:0;
 }
 
 .projectHeaderBtn,
@@ -623,13 +638,11 @@ body.authenticated .loginScreen{
   min-height:36px;
   border-radius:10px;
   padding:3px 4px 3px 6px;
-  border-left:3px solid transparent;
+  border-left:0;
 }
 
 .projectRow.active{
   background:rgba(37,99,235,.12);
-  border-left-color:var(--primary);
-  box-shadow:inset 0 0 0 1px rgba(37,99,235,.08);
 }
 
 .projectChevronBtn{
@@ -1062,19 +1075,18 @@ body.dark .projectRuntimeItem{
 }
 
 .libraryPanel{
-  flex:0 0 auto;
+  flex:1 1 auto;
   min-height:0;
   max-height:none;
   overflow:hidden;
   display:flex;
   flex-direction:column;
-  padding:8px 0 10px;
-  margin:2px 0 10px;
+  padding:0;
+  margin:0;
 }
 
 .libraryPanel.collapsed{
-  max-height:48px;
-  padding:8px 0;
+  flex:0 0 auto;
 }
 
 .libraryHeader{
@@ -1083,7 +1095,7 @@ body.dark .projectRuntimeItem{
   justify-content:space-between;
   gap:8px;
   margin-bottom:0;
-  padding:2px 0;
+  padding:0;
 }
 
 #libraryToggle{
@@ -1099,7 +1111,7 @@ body.dark .projectRuntimeItem{
 }
 
 .libraryTitle strong{
-  font-size:14px;
+  font-size:13px;
 }
 
 .libraryChevron{
@@ -1116,7 +1128,7 @@ body.dark .projectRuntimeItem{
   min-height:0;
   flex:1 1 auto;
   flex-direction:column;
-  margin-top:8px;
+  margin-top:10px;
   overflow:hidden;
 }
 
@@ -1125,7 +1137,7 @@ body.dark .projectRuntimeItem{
 }
 
 .libraryHeader strong{
-  font-size:14px;
+  font-size:13px;
 }
 
 .libraryHeader button{
@@ -1205,10 +1217,10 @@ body.dark .projectRuntimeItem{
 }
 
 .fileLibraryItem{
-  border:1px solid var(--border);
-  border-radius:12px;
+  border:1px solid rgba(148,163,184,.18);
+  border-radius:10px;
   padding:9px;
-  background:transparent;
+  background:var(--panel-soft);
 }
 
 .fileLibraryItem.selected{
@@ -1293,6 +1305,133 @@ body.dark .projectRuntimeItem{
   color:white;
 }
 
+.contextPanel{
+  display:none;
+  height:100%;
+  min-height:0;
+  overflow:hidden;
+  background:var(--panel);
+  border:1px solid rgba(148,163,184,.18);
+  border-radius:14px;
+  padding:12px;
+  flex-direction:column;
+}
+
+.main.contextPanelOpen .contextPanel{
+  display:flex;
+}
+
+.contextPanelHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding-bottom:10px;
+  margin-bottom:8px;
+}
+
+.contextPanelTitle{
+  min-width:0;
+}
+
+.contextPanelTitle strong{
+  display:block;
+  color:var(--text);
+  font-size:14px;
+  line-height:1.35;
+}
+
+.contextPanelTitle span{
+  display:block;
+  margin-top:2px;
+  color:var(--muted);
+  font-size:11px;
+  line-height:1.35;
+}
+
+.contextPanelClose{
+  width:30px;
+  height:30px;
+  border:0;
+  border-radius:9px;
+  background:transparent;
+  color:var(--muted);
+  cursor:pointer;
+  font-size:18px;
+  line-height:1;
+}
+
+.contextPanelClose:hover{
+  background:rgba(37,99,235,.08);
+  color:var(--primary);
+}
+
+.contextPanelBody{
+  flex:1 1 auto;
+  min-height:0;
+  overflow:auto;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+.contextSection{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  padding:10px 0 12px;
+  border-top:1px solid rgba(148,163,184,.18);
+}
+
+.contextSection:first-child{
+  border-top:0;
+  padding-top:0;
+}
+
+.contextSectionHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  color:var(--text);
+  font-size:12px;
+  font-weight:600;
+  line-height:1.35;
+  text-transform:uppercase;
+  letter-spacing:0;
+}
+
+.contextHint{
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.45;
+}
+
+.contextUploadActions{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+
+.contextUploadBtn{
+  width:100%;
+  min-height:36px;
+  border:1px solid rgba(148,163,184,.28);
+  border-radius:10px;
+  background:transparent;
+  color:var(--text);
+  cursor:pointer;
+  font-size:13px;
+  text-align:left;
+  padding:8px 10px;
+}
+
+.contextUploadBtn:hover{
+  border-color:rgba(37,99,235,.35);
+  background:rgba(37,99,235,.08);
+  color:var(--primary);
+}
+
 .badge{
   display:inline-block;
   background:rgba(37,99,235,.1);
@@ -1310,10 +1449,10 @@ body.dark .projectRuntimeItem{
   max-height:100%;
   min-height:0;
   background:var(--panel);
-  border:1px solid var(--border);
-  border-radius:22px;
+  border:1px solid rgba(148,163,184,.18);
+  border-radius:14px;
   overflow:hidden;
-  box-shadow:0 8px 28px rgba(0,0,0,.08);
+  box-shadow:0 10px 30px rgba(15,23,42,.08);
 }
 
 .chatHeader{
@@ -2568,8 +2707,22 @@ body.dark .toolErrorNotice{
     min-height:0;
   }
 
+  .main.contextPanelOpen{
+    grid-template-columns:1fr;
+  }
+
   .sidebar{
     display:none;
+  }
+
+  .contextPanel{
+    position:fixed;
+    z-index:90;
+    top:64px;
+    right:12px;
+    bottom:12px;
+    width:min(280px, calc(100vw - 24px));
+    box-shadow:0 24px 70px rgba(15,23,42,.26);
   }
 
   .msg{
@@ -2742,6 +2895,7 @@ body.dark .toolErrorNotice{
   <div class="topbar">
     <div class="brand">Workers <span>AI</span> Assistant</div>
     <div class="topbarActions">
+      <button id="contextPanelToggle" class="themeBtn" type="button" aria-expanded="false">Context</button>
       <button id="logoutBtn" class="themeBtn" type="button">Logout</button>
       <button class="themeBtn" onclick="toggleTheme()">深色 / 浅色</button>
     </div>
@@ -2752,13 +2906,13 @@ body.dark .toolErrorNotice{
     <aside class="sidebar">
 
       <button id="newChatBtn" class="newChatBtn" type="button">
-        New Chat
+        + Chat
       </button>
 
       <div class="sidebarMain">
 
         <div class="sidebarSection searchSection">
-          <input id="chatSearchInput" class="chatSearchInput" type="search" placeholder="Search Chats" aria-label="Search Chats" />
+          <input id="chatSearchInput" class="chatSearchInput" type="search" placeholder="Search Conversations" aria-label="Search Conversations" />
         </div>
 
         <div class="projectPanel sidebarSection">
@@ -2772,38 +2926,8 @@ body.dark .toolErrorNotice{
         <div id="projectStatus" class="projectStatus"></div>
 
         <div class="sidebarSection chatsSection">
-          <div class="sidebarSectionHeader">Chats</div>
+          <div class="sidebarSectionHeader">Conversations</div>
           <div id="conversationList" class="historyList"></div>
-        </div>
-
-        <div id="libraryPanel" class="libraryPanel collapsed">
-          <div id="libraryToggle" class="libraryHeader" role="button" tabindex="0" aria-expanded="false">
-            <div class="libraryTitle">
-              <span aria-hidden="true">&#x1F4C1;</span>
-              <strong>&#x6587;&#x4EF6;&#x5E93;&#xFF08;<span id="fileLibraryCount">0</span>&#xFF09;</strong>
-            </div>
-            <span class="libraryChevron" aria-hidden="true">&#x203A;</span>
-          </div>
-          <div id="filesLibraryBody" class="libraryBody">
-            <div class="libraryHeader">
-              <strong>&#x6587;&#x4EF6;</strong>
-              <button id="refreshFilesBtn" type="button">&#x5237;&#x65B0;</button>
-            </div>
-            <div class="librarySearch">
-              <input id="fileSearchInput" type="search" placeholder="&#x641C;&#x7D22;&#x6587;&#x4EF6;" />
-              <button id="fileSearchBtn" type="button">&#x641C;&#x7D22;</button>
-            </div>
-            <select id="fileSortSelect" class="librarySort">
-              <option value="latest">&#x6700;&#x65B0;&#x4F18;&#x5148;</option>
-              <option value="name">&#x6587;&#x4EF6;&#x540D; A-Z</option>
-              <option value="size">&#x6587;&#x4EF6;&#x5927;&#x5C0F;</option>
-            </select>
-            <div class="librarySelectedRow">
-              <div id="selectedFilesCount" class="libraryCount">&#x5DF2;&#x9009;&#x62E9; 0 &#x4E2A;&#x6587;&#x4EF6;</div>
-              <button id="clearSelectedFilesBtn" class="clearSelectedFilesBtn" type="button">&#x6E05;&#x7A7A;</button>
-            </div>
-            <div id="filesList" class="filesList"></div>
-          </div>
         </div>
 
       </div>
@@ -2960,26 +3084,78 @@ body.dark .toolErrorNotice{
       <button id="removeImageBtn" type="button" title="&#x79FB;&#x9664;&#x56FE;&#x7247;">&times;</button>
     </div>
 
-    <div id="fileStatus"></div>
-
-    <div id="fileUseMode" class="fileUseMode" aria-label="文件用途">
-      <span>文件用途</span>
-      <label class="fileUseModeOption"><input name="fileUseMode" type="radio" value="source" checked /> 原文读取</label>
-      <label class="fileUseModeOption"><input name="fileUseMode" type="radio" value="library" /> 存入文件库</label>
-      <span id="fileUseModeHint" class="fileUseModeHint">原文读取：本次发送使用，不存入文件库</span>
-    </div>
-
-    <div id="conversationAttachmentList"></div>
-
-    <button id="clearFileBtn" type="button">&#x6E05;&#x9664;</button>
-
-    <div id="uploadStatus"></div>
-
   </div>
 
 </div>
 
     </section>
+
+    <aside id="contextPanel" class="contextPanel" aria-label="Context Panel">
+      <div class="contextPanelHeader">
+        <div class="contextPanelTitle">
+          <strong>Context</strong>
+          <span>Attachments and knowledge</span>
+        </div>
+        <button id="contextPanelClose" class="contextPanelClose" type="button" aria-label="Collapse Context Panel">&times;</button>
+      </div>
+
+      <div class="contextPanelBody">
+        <section class="contextSection">
+          <div class="contextSectionHeader">Current Conversation Attachment</div>
+          <div id="conversationAttachmentList"></div>
+          <div id="fileStatus"></div>
+          <div id="fileUseMode" class="fileUseMode" aria-label="文件用途">
+            <span>文件用途</span>
+            <label class="fileUseModeOption"><input name="fileUseMode" type="radio" value="source" checked /> 原文读取</label>
+            <label class="fileUseModeOption"><input name="fileUseMode" type="radio" value="library" /> 存入文件库</label>
+            <span id="fileUseModeHint" class="fileUseModeHint">原文读取：本次发送使用，不存入文件库</span>
+          </div>
+          <button id="clearFileBtn" class="contextUploadBtn" type="button">&#x6E05;&#x9664;&#x5F53;&#x524D;&#x6587;&#x4EF6;</button>
+          <div id="uploadStatus"></div>
+          <div class="contextHint">Files attached here use the existing conversation attachment flow.</div>
+        </section>
+
+        <section class="contextSection">
+          <div id="libraryPanel" class="libraryPanel collapsed">
+            <div id="libraryToggle" class="libraryHeader" role="button" tabindex="0" aria-expanded="false">
+              <div class="libraryTitle">
+                <span aria-hidden="true">&#x1F4C1;</span>
+                <strong>Knowledge Base&#xFF08;<span id="fileLibraryCount">0</span>&#xFF09;</strong>
+              </div>
+              <span class="libraryChevron" aria-hidden="true">&#x203A;</span>
+            </div>
+            <div id="filesLibraryBody" class="libraryBody">
+              <div class="libraryHeader">
+                <strong>&#x6587;&#x4EF6;</strong>
+                <button id="refreshFilesBtn" type="button">&#x5237;&#x65B0;</button>
+              </div>
+              <div class="librarySearch">
+                <input id="fileSearchInput" type="search" placeholder="&#x641C;&#x7D22;&#x6587;&#x4EF6;" />
+                <button id="fileSearchBtn" type="button">&#x641C;&#x7D22;</button>
+              </div>
+              <select id="fileSortSelect" class="librarySort">
+                <option value="latest">&#x6700;&#x65B0;&#x4F18;&#x5148;</option>
+                <option value="name">&#x6587;&#x4EF6;&#x540D; A-Z</option>
+                <option value="size">&#x6587;&#x4EF6;&#x5927;&#x5C0F;</option>
+              </select>
+              <div class="librarySelectedRow">
+                <div id="selectedFilesCount" class="libraryCount">&#x5DF2;&#x9009;&#x62E9; 0 &#x4E2A;&#x6587;&#x4EF6;</div>
+                <button id="clearSelectedFilesBtn" class="clearSelectedFilesBtn" type="button">&#x6E05;&#x7A7A;</button>
+              </div>
+              <div id="filesList" class="filesList"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="contextSection">
+          <div class="contextSectionHeader">Upload</div>
+          <div class="contextUploadActions">
+            <button id="contextAttachBtn" class="contextUploadBtn" type="button">Attach to conversation</button>
+            <button id="contextKnowledgeUploadBtn" class="contextUploadBtn" type="button">Upload to Knowledge Base</button>
+          </div>
+        </section>
+      </div>
+    </aside>
 
   </div>
 
@@ -3000,6 +3176,12 @@ const loginPassword = document.getElementById("loginPassword");
 const loginBtn = document.getElementById("loginBtn");
 const loginError = document.getElementById("loginError");
 const logoutBtn = document.getElementById("logoutBtn");
+const mainLayout = document.querySelector(".main");
+const contextPanelToggle = document.getElementById("contextPanelToggle");
+const contextPanel = document.getElementById("contextPanel");
+const contextPanelClose = document.getElementById("contextPanelClose");
+const contextAttachBtn = document.getElementById("contextAttachBtn");
+const contextKnowledgeUploadBtn = document.getElementById("contextKnowledgeUploadBtn");
 const newChatBtn = document.getElementById("newChatBtn");
 const projectList = document.getElementById("projectList");
 const createProjectBtn = document.getElementById("createProjectBtn");
@@ -3144,6 +3326,7 @@ let selectedFileIds = [];
 let fileLibraryQuery = "";
 let fileLibrarySort = "latest";
 let isFileLibraryExpanded = false;
+let isContextPanelOpen = false;
 let activeInputMenu = null;
 let expandedFileId = null;
 let fileDetailsCache = {};
@@ -3563,6 +3746,18 @@ function setFileLibraryExpanded(expanded){
 
 function toggleFileLibrary(){
   setFileLibraryExpanded(!isFileLibraryExpanded);
+}
+
+function setContextPanelOpen(open){
+  isContextPanelOpen = Boolean(open);
+  mainLayout.classList.toggle("contextPanelOpen", isContextPanelOpen);
+  contextPanelToggle.classList.toggle("active", isContextPanelOpen);
+  contextPanelToggle.setAttribute("aria-expanded", String(isContextPanelOpen));
+  contextPanel.setAttribute("aria-hidden", String(!isContextPanelOpen));
+}
+
+function toggleContextPanel(){
+  setContextPanelOpen(!isContextPanelOpen);
 }
 
 function closeInputMenus(){
@@ -4033,6 +4228,7 @@ async function attachConversationFiles(files){
   lastRelevantChunkCount = 0;
   renderConversationAttachments();
   clearFileBtn.style.display = pendingConversationAttachments.length ? "inline-block" : "none";
+  setContextPanelOpen(true);
   setContextStatus("已添加 " + pendingConversationAttachments.length + " 个待处理文件，请选择原文读取或存入文件库");
   fileInput.value = "";
 }
@@ -10056,6 +10252,20 @@ settingsModal.addEventListener("click", event => {
     event.stopPropagation();
   }
 });
+contextPanelToggle.addEventListener("click", toggleContextPanel);
+contextPanelClose.addEventListener("click", () => setContextPanelOpen(false));
+contextAttachBtn.addEventListener("click", () => {
+  closeInputMenus();
+  setContextPanelOpen(true);
+  setFileUseMode(FILE_USE_SOURCE);
+  fileInput.click();
+});
+contextKnowledgeUploadBtn.addEventListener("click", () => {
+  closeInputMenus();
+  setContextPanelOpen(true);
+  setFileUseMode(FILE_USE_LIBRARY);
+  fileInput.click();
+});
 libraryToggle.addEventListener("click", toggleFileLibrary);
 libraryToggle.addEventListener("keydown", e => {
   if(e.key === "Enter" || e.key === " "){
@@ -10096,6 +10306,7 @@ document.addEventListener("keydown", event => {
     closeInputMenus();
     closeProjectActionMenu();
     closeProjectSettingsPopover();
+    setContextPanelOpen(false);
   }
 });
 document.addEventListener("paste", event => {
@@ -10115,6 +10326,7 @@ loginForm.addEventListener("submit", login);
 logoutBtn.addEventListener("click", logout);
 window.addEventListener("load", refreshRenderedMath);
 setFileLibraryExpanded(false);
+setContextPanelOpen(false);
 setupSettingsHeaderActions();
 checkAuth();
 

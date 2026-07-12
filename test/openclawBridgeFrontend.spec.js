@@ -234,10 +234,34 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("fileIds:retrievalFileIdsToSend.length ? retrievalFileIdsToSend : undefined");
     expect(page).toContain("clearSelectedFile();");
     expect(page).toContain("原文附件发送失败");
-    expect(page).toContain("await attachConversationFiles(fileInput.files)");
+    expect(page).toContain("await attachFilesByUseMode(fileInput.files)");
     expect(page).toContain("inputShell?.addEventListener(\"drop\"");
     expect(page).toContain("handleConversationFilePaste(event)");
     expect(page).toContain("await handleImagePaste(event)");
     expect(page).toContain("!String(file.type || \"\").startsWith(\"image/\")");
+  });
+
+  it("keeps Cloudflare document attachment out of model settings and exposes file purpose controls", () => {
+    const page = htmlPage();
+
+    expect(page).not.toContain("newModelCloudflareDocumentAttachment");
+    expect(page).not.toContain("editModelCloudflareDocumentAttachment");
+    expect(page).not.toContain("Conversation Attachment: Cloudflare Document");
+    expect(page).toContain("name=\"fileUseMode\"");
+    expect(page).toContain("原文读取");
+    expect(page).toContain("存入文件库");
+    expect(page).toContain("function modelProvidersForRequest(enableCloudflareDocumentAttachment)");
+    expect(page).toContain("cloudflareDocumentAttachment:true");
+    expect(page).toContain("providers:providersForRequest");
+  });
+
+  it("stages uploaded files until the user chooses source reading or library storage", () => {
+    const page = htmlPage();
+
+    expect(page).toContain("请 选择原文读取或存入文件库".replace(" ", ""));
+    expect(page).toContain("async function ensureConversationAttachmentsUploaded(attachments)");
+    expect(page).toContain("async function storePendingAttachmentsInLibrary(attachments)");
+    expect(page).toContain("conversationAttachmentsToSend = await ensureConversationAttachmentsUploaded(conversationAttachmentsToSend)");
+    expect(page).toContain("await storePendingAttachmentsInLibrary(conversationAttachmentsToSend)");
   });
 });

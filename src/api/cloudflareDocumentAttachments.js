@@ -1,21 +1,26 @@
-import { readConversationAttachmentObjects } from "./conversationAttachments.js";
+import {
+  readConversationAttachmentObjects,
+  readConversationAttachmentRefObjects
+} from "./conversationAttachments.js";
+import {
+  DEFAULT_CONVERSATION_ATTACHMENT_LIMITS,
+  readConversationAttachmentLimits
+} from "./conversationAttachmentLimits.js";
 
-export const CLOUDFLARE_DOCUMENT_ATTACHMENT_LIMITS = {
-  maxAttachments: 5,
-  maxFileBytes: 6 * 1024 * 1024,
-  maxTotalBytes: 16 * 1024 * 1024,
-  maxMarkdownChars: 120000,
-  maxCloudflareTokens: 60000,
-  maxFinalUserMessageChars: 160000
-};
+export const CLOUDFLARE_DOCUMENT_ATTACHMENT_LIMITS = DEFAULT_CONVERSATION_ATTACHMENT_LIMITS;
 
 const SUPPORTED_DOCUMENT_TYPES = new Map([
   [".pdf", new Set(["application/pdf"])],
   [".docx", new Set(["application/vnd.openxmlformats-officedocument.wordprocessingml.document"])],
   [".xls", new Set(["application/vnd.ms-excel"])],
   [".xlsx", new Set(["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"])],
-  [".csv", new Set(["text/csv"])]
+  [".csv", new Set(["text/csv"])],
+  [".txt", new Set(["text/plain"])],
+  [".md", new Set(["text/markdown", "text/plain"])],
+  [".markdown", new Set(["text/markdown", "text/plain"])]
 ]);
+
+const DIRECT_TEXT_DOCUMENT_TYPES = new Set([".txt", ".md", ".markdown"]);
 
 function extensionFromName(filename) {
   const name = String(filename || "").toLowerCase();
@@ -90,6 +95,26 @@ function normalizeResultTokens(result) {
   return Number.isFinite(tokens) && tokens >= 0 ? tokens : 0;
 }
 
+function estimateTextTokens(text) {
+  return Math.ceil(String(text || "").length / 4);
+}
+
+function isDirectTextAttachment(attachment) {
+  return DIRECT_TEXT_DOCUMENT_TYPES.has(extensionFromName(attachment.filename));
+}
+
+function textFormatForAttachment(attachment) {
+  return extensionFromName(attachment.filename) === ".txt" ? "text" : "markdown";
+}
+
+function decodeDirectTextAttachment(attachment) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(attachment.bytes);
+  } catch (err) {
+    return null;
+  }
+}
+
 function markdownBlockForAttachment(attachment, result, index) {
   const data = String(result.data || "");
   return [
@@ -123,26 +148,8 @@ export function buildCloudflareDocumentAttachmentUserContent(userContent, conver
   ].join("\n");
 }
 
-export async function convertConversationAttachmentsWithCloudflare(env, attachmentIds = [], options = {}) {
-  if (!env?.AI?.toMarkdown || typeof env.AI.toMarkdown !== "function") {
-    return errorResult("cloudflare_document_adapter_unavailable", "Cloudflare AI toMarkdown binding is not available");
-  }
-
-  const limits = {
-    ...CLOUDFLARE_DOCUMENT_ATTACHMENT_LIMITS,
-    ...(options.limits || {})
-  };
-  const readResult = await readConversationAttachmentObjects(env, attachmentIds, {
-    conversationId: options.conversationId,
-    draftId: options.draftId,
-    maxAttachments: limits.maxAttachments,
-    maxFileBytes: limits.maxFileBytes,
-    maxTotalBytes: limits.maxTotalBytes
-  });
-  if (!readResult.ok) {
-    return readResult;
-  }
-
+async function convertReadAttachmentsWithCloudflare(env, readResult, options = {}) {
+  const limits = options.limits;
   for (const attachment of readResult.attachments) {
     const validation = validateDocumentAttachment(attachment);
     if (!validation.ok) {
@@ -150,37 +157,45 @@ export async function convertConversationAttachmentsWithCloudflare(env, attachme
     }
   }
 
-  const markdownDocuments = readResult.attachments.map(attachment => ({
+  const cloudflareAttachments = readResult.attachments.filter(attachment => !isDirectTextAttachment(attachment));
+  const markdownDocuments = cloudflareAttachments.map(attachment => ({
     name: attachment.filename,
     blob: new Blob([attachment.bytes], {
       type: attachment.mimeType
     })
   }));
 
-  let rawResult;
-  try {
-    rawResult = await env.AI.toMarkdown(markdownDocuments);
-  } catch (err) {
-    return errorResult("cloudflare_document_conversion_failed", "Cloudflare document conversion failed", {
-      detail: err?.message || String(err)
-    });
-  }
+  let results = [];
+  if (markdownDocuments.length) {
+    if (!env?.AI?.toMarkdown || typeof env.AI.toMarkdown !== "function") {
+      return errorResult("cloudflare_document_adapter_unavailable", "Cloudflare AI toMarkdown binding is not available");
+    }
+    let rawResult;
+    try {
+      rawResult = await env.AI.toMarkdown(markdownDocuments);
+    } catch (err) {
+      return errorResult("cloudflare_document_conversion_failed", "Cloudflare document conversion failed", {
+        detail: err?.message || String(err)
+      });
+    }
 
-  const results = normalizeConversionResults(rawResult, markdownDocuments.length);
-  if (!results || results.length !== markdownDocuments.length) {
-    return errorResult("cloudflare_document_result_invalid", "Cloudflare document conversion returned an unexpected result shape", {
-      expected_count: markdownDocuments.length,
-      actual_count: Array.isArray(results) ? results.length : null
-    });
+    results = normalizeConversionResults(rawResult, markdownDocuments.length);
+    if (!results || results.length !== markdownDocuments.length) {
+      return errorResult("cloudflare_document_result_invalid", "Cloudflare document conversion returned an unexpected result shape", {
+        expected_count: markdownDocuments.length,
+        actual_count: Array.isArray(results) ? results.length : null
+      });
+    }
   }
 
   const converted = [];
+  const cloudflareConverted = new Map();
   let totalMarkdownChars = 0;
   let totalTokens = 0;
 
   for (let index = 0; index < results.length; index += 1) {
     const result = results[index];
-    const source = readResult.attachments[index];
+    const source = cloudflareAttachments[index];
     if (!result || typeof result !== "object" || Array.isArray(result)) {
       return errorResult("cloudflare_document_result_invalid", "Cloudflare document conversion returned an invalid item", {
         attachment_id: source.id || "",
@@ -233,13 +248,59 @@ export async function convertConversationAttachmentsWithCloudflare(env, attachme
       });
     }
 
-    converted.push({
+    cloudflareConverted.set(source.id || source.r2Key || source.filename, {
       source,
       result: {
         id: String(result.id || ""),
         name: resultName || source.filename,
         mimeType: resultMime || source.mimeType,
         format: result.format,
+        tokens,
+        data
+      }
+    });
+  }
+
+  for (const source of readResult.attachments) {
+    if (!isDirectTextAttachment(source)) {
+      const convertedItem = cloudflareConverted.get(source.id || source.r2Key || source.filename);
+      if (convertedItem) {
+        converted.push(convertedItem);
+      }
+      continue;
+    }
+
+    const data = decodeDirectTextAttachment(source);
+    if (data === null) {
+      return errorResult("attachment_text_decode_failed", "Text attachment must be valid UTF-8", {
+        attachment_id: source.id || "",
+        filename: source.filename || ""
+      });
+    }
+    if (!data.trim()) {
+      return errorResult("cloudflare_document_empty", "Text attachment is empty", {
+        attachment_id: source.id || "",
+        filename: source.filename || ""
+      });
+    }
+    const tokens = estimateTextTokens(data);
+    totalMarkdownChars += data.length;
+    totalTokens += tokens;
+    if (totalMarkdownChars > limits.maxMarkdownChars || totalTokens > limits.maxCloudflareTokens) {
+      return errorResult("attachment_converted_text_too_large", "Attachment text is too large for the current message context", {
+        markdown_chars: totalMarkdownChars,
+        max_markdown_chars: limits.maxMarkdownChars,
+        cloudflare_tokens: totalTokens,
+        max_cloudflare_tokens: limits.maxCloudflareTokens
+      });
+    }
+    converted.push({
+      source,
+      result: {
+        id: "",
+        name: source.filename,
+        mimeType: source.mimeType,
+        format: textFormatForAttachment(source),
         tokens,
         data
       }
@@ -262,6 +323,42 @@ export async function convertConversationAttachmentsWithCloudflare(env, attachme
     totalTokens,
     totalBytes: readResult.totalBytes
   };
+}
+
+export async function convertConversationAttachmentsWithCloudflare(env, attachmentIds = [], options = {}) {
+  const limits = await readConversationAttachmentLimits(env, options.limits || {});
+  const readResult = await readConversationAttachmentObjects(env, attachmentIds, {
+    conversationId: options.conversationId,
+    draftId: options.draftId,
+    maxAttachments: limits.maxAttachments,
+    maxFileBytes: limits.maxFileBytes,
+    maxTotalBytes: limits.maxTotalBytes
+  });
+  if (!readResult.ok) {
+    return readResult;
+  }
+
+  return convertReadAttachmentsWithCloudflare(env, readResult, {
+    ...options,
+    limits
+  });
+}
+
+export async function convertConversationAttachmentRefsWithCloudflare(env, refs = [], options = {}) {
+  const limits = await readConversationAttachmentLimits(env, options.limits || {});
+  const readResult = await readConversationAttachmentRefObjects(env, refs, {
+    maxAttachments: limits.maxAttachments,
+    maxFileBytes: limits.maxFileBytes,
+    maxTotalBytes: limits.maxTotalBytes
+  });
+  if (!readResult.ok) {
+    return readResult;
+  }
+
+  return convertReadAttachmentsWithCloudflare(env, readResult, {
+    ...options,
+    limits
+  });
 }
 
 export async function getCloudflareMarkdownSupportedFormats(env) {

@@ -159,4 +159,52 @@ describe("OpenClaw execution mode settings persistence", () => {
 
     expect(mergedProvider.openclawExecutionMode).toBe("bridge");
   });
+
+  it("preserves model Cloudflare document attachment capability through settings normalization", () => {
+    const settings = normalizeModelSettings({
+      providers: [provider("openai-docs", undefined, [{
+        id: "doc-model",
+        label: "Doc Model",
+        modelName: "doc-model-upstream",
+        capabilities: {
+          text: true,
+          streaming: true,
+          cloudflareDocumentAttachment: true
+        },
+        enabled: true
+      }])]
+    });
+
+    const normalizedModel = settings.providers
+      .find(item => item.id === "openai-docs")
+      .models.find(item => item.id === "doc-model");
+    const categoryModel = settings.categories[2].providers
+      .find(item => item.providerId === "openai-docs")
+      .models.find(item => item.modelId === "doc-model");
+
+    expect(normalizedModel.capabilities.cloudflareDocumentAttachment).toBe(true);
+    expect(categoryModel.capabilities.cloudflareDocumentAttachment).toBe(true);
+  });
+
+  it("preserves model Cloudflare document attachment capability through settings merge", () => {
+    const merged = mergeModelSettings(null, {
+      providers: [provider("openai-docs", undefined, [{
+        id: "doc-model",
+        label: "Doc Model",
+        modelName: "doc-model-upstream",
+        capabilities: {
+          text: true,
+          streaming: true,
+          cloudflareDocumentAttachment: true
+        },
+        enabled: true
+      }])]
+    }, 0, 5678);
+
+    const mergedModel = merged.providers
+      .find(item => item.id === "openai-docs")
+      .models.find(item => item.id === "doc-model");
+
+    expect(mergedModel.capabilities.cloudflareDocumentAttachment).toBe(true);
+  });
 });

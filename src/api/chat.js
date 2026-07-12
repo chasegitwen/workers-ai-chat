@@ -1,6 +1,13 @@
 import { corsHeaders, jsonResponse } from "../utils/response.js";
-import { buildNativeOpenClawConversationAttachments } from "./conversationAttachments.js";
-import { convertConversationAttachmentsWithCloudflare } from "./cloudflareDocumentAttachments.js";
+import {
+  bindConversationAttachmentRefs,
+  buildNativeOpenClawConversationAttachments,
+  listActiveConversationAttachmentRefs
+} from "./conversationAttachments.js";
+import {
+  convertConversationAttachmentRefsWithCloudflare,
+  convertConversationAttachmentsWithCloudflare
+} from "./cloudflareDocumentAttachments.js";
 import { getRelevantFileChunksByIds } from "./files.js";
 import {
   ensureConversation,
@@ -5347,6 +5354,30 @@ export async function handleChat(request, env, ctx) {
     })
     : null;
   const requestedTarget = resolveRequestedProviderModel(providerCatalog, provider, model || DEFAULT_TEXT_MODEL);
+  let persistentConversationAttachmentRefs = [];
+  if (!hasConversationAttachments
+    && !isOpenClawRequest
+    && conversation?.id
+    && capabilityEnablesCloudflareDocumentAttachment(requestedTarget.model?.capabilities)) {
+    const refResult = await listActiveConversationAttachmentRefs(env, conversation.id);
+    if (!refResult.ok) {
+      return new Response(JSON.stringify({
+        ok: false,
+        error: refResult.code || "conversation_attachment_ref_read_failed",
+        message: refResult.error || "Conversation attachment references could not be read",
+        detail: refResult.detail || ""
+      }), {
+        status: 500,
+        headers: {
+          ...corsHeaders(),
+          "X-Conversation-Id": conversation.id,
+          "Content-Type": "application/json; charset=utf-8"
+        }
+      });
+    }
+    persistentConversationAttachmentRefs = refResult.refs || [];
+  }
+  const hasPersistentConversationAttachments = persistentConversationAttachmentRefs.length > 0;
   if (isOpenClawRequest && runtimeResolution && !runtimeResolution.ok) {
     return new Response(JSON.stringify({
       ok: false,
@@ -5364,7 +5395,7 @@ export async function handleChat(request, env, ctx) {
       }
     });
   }
-  if (hasConversationAttachments && hasKnowledgeBaseFiles) {
+  if ((hasConversationAttachments || hasPersistentConversationAttachments) && hasKnowledgeBaseFiles) {
     return new Response(JSON.stringify({
       ok: false,
       error: "conversation_attachment_kb_mix_unsupported",
@@ -5409,6 +5440,7 @@ export async function handleChat(request, env, ctx) {
     });
   }
   const useCloudflareDocumentAttachment = hasConversationAttachments && conversationAttachmentMode === "cloudflare_document";
+  const usePersistentCloudflareDocumentAttachment = !hasConversationAttachments && hasPersistentConversationAttachments;
   let finalUserContent = userContent;
   let cloudflareDocumentAttachmentResult = null;
   if (useCloudflareDocumentAttachment) {
@@ -5434,7 +5466,49 @@ export async function handleChat(request, env, ctx) {
         cloudflare_tokens: cloudflareDocumentAttachmentResult.cloudflare_tokens,
         max_cloudflare_tokens: cloudflareDocumentAttachmentResult.max_cloudflare_tokens,
         final_user_message_chars: cloudflareDocumentAttachmentResult.final_user_message_chars,
-        max_final_user_message_chars: cloudflareDocumentAttachmentResult.max_final_user_message_chars
+        max_final_user_message_chars: cloudflareDocumentAttachmentResult.max_final_user_message_chars,
+        size: cloudflareDocumentAttachmentResult.size,
+        max_size: cloudflareDocumentAttachmentResult.max_size,
+        total_size: cloudflareDocumentAttachmentResult.total_size,
+        max_total_size: cloudflareDocumentAttachmentResult.max_total_size
+      }), {
+        status: cloudflareDocumentAttachmentResult.code === "attachment_converted_text_too_large" ? 413 : 400,
+        headers: {
+          ...corsHeaders(),
+          "X-Conversation-Id": conversation?.id || conversationId || "",
+          "Content-Type": "application/json; charset=utf-8"
+        }
+      });
+    }
+    finalUserContent = cloudflareDocumentAttachmentResult.userContent || userContent;
+  }
+  if (usePersistentCloudflareDocumentAttachment) {
+    cloudflareDocumentAttachmentResult = await convertConversationAttachmentRefsWithCloudflare(env, persistentConversationAttachmentRefs, {
+      userContent
+    });
+    if (!cloudflareDocumentAttachmentResult.ok) {
+      return new Response(JSON.stringify({
+        ok: false,
+        error: cloudflareDocumentAttachmentResult.code || "cloudflare_document_attachment_failed",
+        message: cloudflareDocumentAttachmentResult.error || "Cloudflare document attachment conversion failed",
+        detail: cloudflareDocumentAttachmentResult.detail || "",
+        attachment_ref_id: cloudflareDocumentAttachmentResult.attachment_ref_id || "",
+        attachment_id: cloudflareDocumentAttachmentResult.attachment_id || "",
+        filename: cloudflareDocumentAttachmentResult.filename || "",
+        extension: cloudflareDocumentAttachmentResult.extension || "",
+        mime_type: cloudflareDocumentAttachmentResult.mime_type || "",
+        expected_mime_type: cloudflareDocumentAttachmentResult.expected_mime_type || "",
+        expected_mime_types: cloudflareDocumentAttachmentResult.expected_mime_types || undefined,
+        markdown_chars: cloudflareDocumentAttachmentResult.markdown_chars,
+        max_markdown_chars: cloudflareDocumentAttachmentResult.max_markdown_chars,
+        cloudflare_tokens: cloudflareDocumentAttachmentResult.cloudflare_tokens,
+        max_cloudflare_tokens: cloudflareDocumentAttachmentResult.max_cloudflare_tokens,
+        final_user_message_chars: cloudflareDocumentAttachmentResult.final_user_message_chars,
+        max_final_user_message_chars: cloudflareDocumentAttachmentResult.max_final_user_message_chars,
+        size: cloudflareDocumentAttachmentResult.size,
+        max_size: cloudflareDocumentAttachmentResult.max_size,
+        total_size: cloudflareDocumentAttachmentResult.total_size,
+        max_total_size: cloudflareDocumentAttachmentResult.max_total_size
       }), {
         status: cloudflareDocumentAttachmentResult.code === "attachment_converted_text_too_large" ? 413 : 400,
         headers: {
@@ -5449,6 +5523,29 @@ export async function handleChat(request, env, ctx) {
 
   if (!conversation || (hasConversationAttachments && env.DB)) {
     conversation = await prepareConversation(env, conversationId, userContent, projectId || camelProjectId || "");
+  }
+
+  if (useCloudflareDocumentAttachment && env.DB) {
+    const bindResult = await bindConversationAttachmentRefs(env, requestedConversationAttachmentIds, {
+      conversationId: conversation.id,
+      draftId: requestedDraftId
+    });
+    if (!bindResult.ok) {
+      return new Response(JSON.stringify({
+        ok: false,
+        error: bindResult.code || "conversation_attachment_ref_save_failed",
+        message: bindResult.error || "Conversation attachment reference save failed",
+        detail: bindResult.detail || "",
+        attachment_id: bindResult.attachment_id || ""
+      }), {
+        status: 400,
+        headers: {
+          ...corsHeaders(),
+          "X-Conversation-Id": conversation.id,
+          "Content-Type": "application/json; charset=utf-8"
+        }
+      });
+    }
   }
 
   const savedUserMessage = env.DB

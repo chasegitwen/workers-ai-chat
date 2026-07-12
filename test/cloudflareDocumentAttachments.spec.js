@@ -116,19 +116,22 @@ function providerConfig(capabilities = {}, options = {}) {
   }];
 }
 
-function fakeChatDb({ existingConversation = true } = {}) {
+function fakeChatDb({ existingConversation = true, attachmentRefs = [], settings = null } = {}) {
   const executedSql = [];
+  const refs = attachmentRefs;
   return {
     executedSql,
+    attachmentRefs: refs,
     prepare(sql) {
       return {
         sql,
-        bind() {
+        bind(...bindings) {
           return {
             sql,
+            bindings,
             async first() {
               if (sql.includes("FROM settings")) {
-                return null;
+                return settings ? { value: JSON.stringify(settings), updated_at: 1 } : null;
               }
               if (sql.includes("FROM projects")) {
                 return {
@@ -157,10 +160,35 @@ function fakeChatDb({ existingConversation = true } = {}) {
               return null;
             },
             async all() {
+              if (sql.includes("FROM conversation_attachment_refs")) {
+                return {
+                  results: refs
+                    .filter(ref => ref.conversation_id === bindings[0] && ref.status === "active")
+                    .sort((left, right) => Number(left.attached_at || 0) - Number(right.attached_at || 0))
+                };
+              }
               return { results: [] };
             },
             async run() {
               executedSql.push(sql);
+              if (sql.includes("INSERT OR IGNORE INTO conversation_attachment_refs")) {
+                const row = {
+                  id: bindings[0],
+                  conversation_id: bindings[1],
+                  r2_key: bindings[2],
+                  filename: bindings[3],
+                  mime_type: bindings[4],
+                  size: bindings[5],
+                  source_attachment_id: bindings[6],
+                  draft_id: bindings[7],
+                  created_at: bindings[8],
+                  attached_at: bindings[9],
+                  status: bindings[10]
+                };
+                if (!refs.some(ref => ref.conversation_id === row.conversation_id && ref.r2_key === row.r2_key)) {
+                  refs.push(row);
+                }
+              }
               return {};
             }
           };
@@ -169,6 +197,27 @@ function fakeChatDb({ existingConversation = true } = {}) {
     },
     async batch(statements) {
       executedSql.push(...statements.map(statement => statement.sql || String(statement)));
+      for (const statement of statements) {
+        if (String(statement.sql || "").includes("INSERT OR IGNORE INTO conversation_attachment_refs")) {
+          const bindings = statement.bindings || [];
+          const row = {
+            id: bindings[0],
+            conversation_id: bindings[1],
+            r2_key: bindings[2],
+            filename: bindings[3],
+            mime_type: bindings[4],
+            size: bindings[5],
+            source_attachment_id: bindings[6],
+            draft_id: bindings[7],
+            created_at: bindings[8],
+            attached_at: bindings[9],
+            status: bindings[10]
+          };
+          if (!refs.some(ref => ref.conversation_id === row.conversation_id && ref.r2_key === row.r2_key)) {
+            refs.push(row);
+          }
+        }
+      }
       return [];
     }
   };
@@ -347,7 +396,7 @@ describe("Cloudflare document attachment adapter", () => {
       name: file.name,
       mimeType: file.blob.type,
       format: "markdown",
-      tokens: 70000,
+      tokens: 90000,
       data: "x"
     })));
     const attachment = await uploadAttachment(env);
@@ -386,6 +435,228 @@ describe("Cloudflare document attachment adapter", () => {
     expect(finalUserMessage.content).toContain("BEGIN UNTRUSTED CONVERSATION ATTACHMENT 1");
     expect(finalUserMessage.content).toContain("Converted document body");
     expect(finalUserMessage.content).toContain("not knowledge base entries");
+  });
+
+  it("reads TXT attachments directly without calling Cloudflare toMarkdown", async () => {
+    const env = envWithAttachmentSupport(() => {
+      throw new Error("toMarkdown should not be called");
+    });
+    const attachment = await uploadAttachment(env, {
+      filename: "notes.txt",
+      mimeType: "text/plain",
+      content: "Plain text marker ABC123"
+    });
+    const response = await chatRequest(env, [attachment.id], {
+      cloudflareDocumentAttachment: true
+    });
+
+    expect(response.status).toBe(200);
+    expect(env.AI.toMarkdown).not.toHaveBeenCalled();
+    expect(env.AI.run).toHaveBeenCalledOnce();
+    const input = env.AI.run.mock.calls[0][1];
+    const finalUserMessage = input.messages[input.messages.length - 1];
+    expect(finalUserMessage.content).toContain("Plain text marker ABC123");
+    expect(finalUserMessage.content).toContain("BEGIN UNTRUSTED CONVERSATION ATTACHMENT 1");
+  });
+
+  it("accepts Markdown attachments with octet-stream upload MIME and reads them directly", async () => {
+    const env = envWithAttachmentSupport(() => {
+      throw new Error("toMarkdown should not be called");
+    });
+    const attachment = await uploadAttachment(env, {
+      filename: "notes.md",
+      mimeType: "application/octet-stream",
+      content: "# Markdown marker"
+    });
+    const response = await chatRequest(env, [attachment.id], {
+      cloudflareDocumentAttachment: true
+    });
+
+    expect(response.status).toBe(200);
+    expect(attachment.content_type).toBe("text/markdown");
+    expect(env.AI.toMarkdown).not.toHaveBeenCalled();
+    const input = env.AI.run.mock.calls[0][1];
+    const finalUserMessage = input.messages[input.messages.length - 1];
+    expect(finalUserMessage.content).toContain("# Markdown marker");
+  });
+
+  it("binds uploaded conversation attachments and reloads them on follow-up turns", async () => {
+    const env = envWithAttachmentSupport(files => files.map((file, index) => ({
+      name: file.name,
+      mimeType: file.blob.type,
+      format: "markdown",
+      tokens: index + 2,
+      data: "Converted body for " + file.name
+    })));
+    const db = existingConversationDb();
+    env.DB = db;
+    const attachment = await uploadAttachment(env, {
+      filename: "persistent.pdf",
+      mimeType: "application/pdf",
+      content: "persistent source"
+    });
+
+    const firstResponse = await chatRequest(env, [attachment.id], {
+      cloudflareDocumentAttachment: true
+    });
+    expect(firstResponse.status).toBe(200);
+    expect(db.attachmentRefs).toHaveLength(1);
+    expect(db.attachmentRefs[0]).toMatchObject({
+      conversation_id: "conversation-1",
+      filename: "persistent.pdf",
+      mime_type: "application/pdf",
+      status: "active"
+    });
+
+    const secondResponse = await chatRequestWithBody(env, {
+      providers: providerConfig({ cloudflareDocumentAttachment: true }),
+      conversationId: "conversation-1",
+      messages: [{ role: "user", content: "What does the same document say?" }]
+    });
+    expect(secondResponse.status).toBe(200);
+    expect(env.AI.toMarkdown).toHaveBeenCalledTimes(2);
+    expect(env.AI.run).toHaveBeenCalledTimes(2);
+    const secondInput = env.AI.run.mock.calls[1][1];
+    const finalUserMessage = secondInput.messages[secondInput.messages.length - 1];
+    expect(finalUserMessage.content).toContain("What does the same document say?");
+    expect(finalUserMessage.content).toContain("BEGIN UNTRUSTED CONVERSATION ATTACHMENT 1");
+    expect(finalUserMessage.content).toContain("Converted body for persistent.pdf");
+    expect(db.executedSql.some(sql => String(sql).includes("file_chunks"))).toBe(false);
+  });
+
+  it("reloads persisted TXT attachments without calling Cloudflare toMarkdown on follow-up turns", async () => {
+    const env = envWithAttachmentSupport(() => {
+      throw new Error("toMarkdown should not be called");
+    });
+    const db = existingConversationDb();
+    env.DB = db;
+    const attachment = await uploadAttachment(env, {
+      filename: "persistent.txt",
+      mimeType: "text/plain",
+      content: "Persisted text marker XYZ789"
+    });
+
+    const firstResponse = await chatRequest(env, [attachment.id], {
+      cloudflareDocumentAttachment: true
+    });
+    expect(firstResponse.status).toBe(200);
+    expect(db.attachmentRefs).toHaveLength(1);
+
+    const secondResponse = await chatRequestWithBody(env, {
+      providers: providerConfig({ cloudflareDocumentAttachment: true }),
+      conversationId: "conversation-1",
+      messages: [{ role: "user", content: "Read the same text file again." }]
+    });
+    expect(secondResponse.status).toBe(200);
+    expect(env.AI.toMarkdown).not.toHaveBeenCalled();
+    expect(env.AI.run).toHaveBeenCalledTimes(2);
+    const secondInput = env.AI.run.mock.calls[1][1];
+    const finalUserMessage = secondInput.messages[secondInput.messages.length - 1];
+    expect(finalUserMessage.content).toContain("Persisted text marker XYZ789");
+  });
+
+  it("honors configured conversation attachment size limits", async () => {
+    const env = envWithAttachmentSupport(() => []);
+    env.DB = fakeChatDb({
+      settings: {
+        conversationAttachmentLimits: {
+          maxFileBytes: 4,
+          maxTotalBytes: 8
+        }
+      }
+    });
+    const form = new FormData();
+    form.set("conversation_id", "conversation-1");
+    form.set("file", new File(["12345"], "too-large.txt", { type: "text/plain" }));
+
+    const response = await handleConversationAttachments(
+      new Request("https://example.com/api/conversation-attachments/upload", {
+        method: "POST",
+        body: form
+      }),
+      env,
+      new URL("https://example.com/api/conversation-attachments/upload")
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.code).toBe("attachment_too_large");
+    expect(data.max_size).toBe(4);
+  });
+
+  it("preserves multiple persisted attachments on follow-up turns", async () => {
+    const env = envWithAttachmentSupport(files => files.map(file => ({
+      name: file.name,
+      mimeType: file.blob.type,
+      format: "markdown",
+      tokens: 5,
+      data: "Converted " + file.name
+    })));
+    const db = existingConversationDb();
+    env.DB = db;
+    const first = await uploadAttachment(env, { filename: "a.pdf", mimeType: "application/pdf", content: "a" });
+    const second = await uploadAttachment(env, {
+      filename: "b.docx",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      content: "b"
+    });
+
+    const firstResponse = await chatRequest(env, [first.id, second.id], {
+      cloudflareDocumentAttachment: true
+    });
+    expect(firstResponse.status).toBe(200);
+    expect(db.attachmentRefs.map(ref => ref.filename)).toEqual(["a.pdf", "b.docx"]);
+
+    const secondResponse = await chatRequestWithBody(env, {
+      providers: providerConfig({ cloudflareDocumentAttachment: true }),
+      conversationId: "conversation-1",
+      messages: [{ role: "user", content: "Compare the documents again." }]
+    });
+    expect(secondResponse.status).toBe(200);
+    const followUpFiles = env.AI.toMarkdown.mock.calls[1][0];
+    expect(followUpFiles.map(file => file.name)).toEqual(["a.pdf", "b.docx"]);
+  });
+
+  it("does not save a follow-up message when persisted attachment conversion fails", async () => {
+    const env = envWithAttachmentSupport(() => {
+      throw new Error("conversion down");
+    });
+    const db = fakeChatDb({
+      existingConversation: true,
+      attachmentRefs: [{
+        id: "ref-1",
+        conversation_id: "conversation-1",
+        r2_key: "conversation-attachments/conversation/conversation-1/ref-1/report.pdf",
+        filename: "report.pdf",
+        mime_type: "application/pdf",
+        size: 8,
+        source_attachment_id: "source-1",
+        draft_id: "",
+        created_at: 1,
+        attached_at: 1,
+        status: "active"
+      }]
+    });
+    env.DB = db;
+    await env.FILES_BUCKET.put("conversation-attachments/conversation/conversation-1/ref-1/report.pdf", new File(["document"], "report.pdf", {
+      type: "application/pdf"
+    }).stream(), {
+      httpMetadata: {
+        contentType: "application/pdf"
+      }
+    });
+
+    const response = await chatRequestWithBody(env, {
+      providers: providerConfig({ cloudflareDocumentAttachment: true }),
+      conversationId: "conversation-1",
+      messages: [{ role: "user", content: "Read the persisted attachment." }]
+    });
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.error).toBe("cloudflare_document_conversion_failed");
+    expect(db.executedSql.some(sql => String(sql).includes("INSERT INTO messages"))).toBe(false);
+    expect(env.AI.run).not.toHaveBeenCalled();
   });
 
   it("does not leave a saved message when conversion fails", async () => {

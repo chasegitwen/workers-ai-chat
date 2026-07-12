@@ -1205,7 +1205,7 @@ body.dark .projectRuntimeItem{
 .filesList{
   display:flex;
   flex-direction:column;
-  gap:8px;
+  gap:2px;
   flex:0 1 auto;
   min-height:120px;
   max-height:420px;
@@ -1213,28 +1213,38 @@ body.dark .projectRuntimeItem{
 }
 
 .fileLibraryItem{
-  border:1px solid rgba(148,163,184,.18);
-  border-radius:10px;
-  padding:9px;
+  border:1px solid transparent;
+  border-radius:8px;
+  padding:7px 8px;
+  background:transparent;
+  cursor:pointer;
+  transition:background .14s ease, border-color .14s ease;
+}
+
+.fileLibraryItem:hover,
+.fileLibraryItem.actionsOpen,
+.fileLibraryItem.detailOpen{
   background:var(--panel-soft);
 }
 
 .fileLibraryItem.selected{
-  border-color:var(--primary);
+  border-color:transparent;
   background:rgba(37,99,235,.08);
 }
 
 .fileLibraryName{
   color:var(--text);
   font-size:13px;
-  font-weight:600;
+  font-weight:400;
+  line-height:1.45;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
 }
 
 .fileLibraryMeta{
-  margin-top:4px;
+  display:none;
+  margin-top:3px;
   color:var(--muted);
   font-size:11px;
   white-space:nowrap;
@@ -1243,18 +1253,40 @@ body.dark .projectRuntimeItem{
 }
 
 .fileLibraryActions{
-  display:flex;
+  display:none;
   flex-wrap:wrap;
   gap:6px;
   margin-top:8px;
 }
 
+.fileLibraryItem.actionsOpen .fileLibraryMeta,
+.fileLibraryItem.actionsOpen .fileLibraryActions,
+.fileLibraryItem.detailOpen .fileLibraryMeta,
+.fileLibraryItem.detailOpen .fileLibraryActions{
+  display:flex;
+}
+
+.fileLibraryItem.actionsOpen .fileLibraryMeta,
+.fileLibraryItem.detailOpen .fileLibraryMeta{
+  display:block;
+}
+
+@media(hover:hover) and (pointer:fine){
+  .fileLibraryItem:hover .fileLibraryMeta{
+    display:block;
+  }
+
+  .fileLibraryItem:hover .fileLibraryActions{
+    display:flex;
+  }
+}
+
 .fileLibraryActions button{
   flex:1;
-  border:1px solid var(--border);
+  border:1px solid rgba(148,163,184,.22);
   background:transparent;
   color:var(--text);
-  border-radius:10px;
+  border-radius:8px;
   padding:6px 8px;
   font-size:12px;
   cursor:pointer;
@@ -3323,6 +3355,7 @@ let fileLibraryQuery = "";
 let fileLibrarySort = "latest";
 let isFileLibraryExpanded = false;
 let isContextPanelOpen = false;
+let activeLibraryActionFileId = null;
 let activeInputMenu = null;
 let expandedFileId = null;
 let fileDetailsCache = {};
@@ -3878,8 +3911,23 @@ function renderFilesLibrary(){
 
   getSortedFilesLibrary().forEach(file => {
     const selected = selectedFileIds.includes(file.id);
+    const actionsOpen = activeLibraryActionFileId === file.id;
+    const detailOpen = expandedFileId === file.id;
     const item = document.createElement("div");
-    item.className = "fileLibraryItem" + (selected ? " selected" : "");
+    item.className = "fileLibraryItem"
+      + (selected ? " selected" : "")
+      + (actionsOpen ? " actionsOpen" : "")
+      + (detailOpen ? " detailOpen" : "");
+    item.addEventListener("click", event => {
+      if(event.target?.closest?.("button")){
+        return;
+      }
+      if(!window.matchMedia || !window.matchMedia("(hover: none), (pointer: coarse)").matches){
+        return;
+      }
+      activeLibraryActionFileId = activeLibraryActionFileId === file.id ? null : file.id;
+      renderFilesLibrary();
+    });
 
     const name = document.createElement("div");
     name.className = "fileLibraryName";
@@ -3900,18 +3948,27 @@ function renderFilesLibrary(){
     selectBtn.type = "button";
     selectBtn.className = selected ? "selectedAction" : "";
     selectBtn.textContent = selected ? "\u53d6\u6d88" : "\u9009\u62e9";
-    selectBtn.addEventListener("click", () => toggleLibraryFile(file.id));
+    selectBtn.addEventListener("click", event => {
+      event.stopPropagation();
+      toggleLibraryFile(file.id);
+    });
 
     const detailBtn = document.createElement("button");
     detailBtn.type = "button";
     detailBtn.textContent = expandedFileId === file.id ? "\u6536\u8d77" : "\u8be6\u60c5";
-    detailBtn.addEventListener("click", () => toggleFileDetails(file.id));
+    detailBtn.addEventListener("click", event => {
+      event.stopPropagation();
+      toggleFileDetails(file.id);
+    });
 
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
     deleteBtn.className = "deleteFileAction";
     deleteBtn.textContent = "\u5220\u9664";
-    deleteBtn.addEventListener("click", () => deleteLibraryFile(file.id, file.filename || "file"));
+    deleteBtn.addEventListener("click", event => {
+      event.stopPropagation();
+      deleteLibraryFile(file.id, file.filename || "file");
+    });
 
     actions.appendChild(selectBtn);
     actions.appendChild(detailBtn);
@@ -3920,7 +3977,7 @@ function renderFilesLibrary(){
     item.appendChild(meta);
     item.appendChild(actions);
 
-    if(expandedFileId === file.id){
+    if(detailOpen){
       item.appendChild(renderFileDetailPanel(file.id));
     }
 

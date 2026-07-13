@@ -173,6 +173,9 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("await loadConversations({ clearMissingCurrent:false });");
     expect(page).toContain("async function loadMoreConversations()");
     expect(page).toContain("conversationLoadMoreBtn.addEventListener(\"click\", loadMoreConversations)");
+    expect(page).toContain("let commonConversationsCache = [];");
+    expect(page).toContain("projectId:DEFAULT_PROJECT_ID");
+    expect(page).toContain("commonConversationsCache = visibleConversations([...commonConversationsCache, ...nextItems]);");
     expect(page).toContain("pinMark.textContent = \"PIN\";");
     expect(page).toContain("row.addEventListener(\"contextmenu\"");
     expect(page).toContain("restoreConversationAfterNewMessage(currentConversationId);");

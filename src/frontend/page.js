@@ -3555,6 +3555,7 @@ let pendingToolCall = null;
 let searchResults = document.getElementById("searchResults");
 let currentConversationId = null;
 let conversationsCache = [];
+let commonConversationsCache = [];
 let archiveSourceConversations = [];
 let conversationPageState = {
   projectId:"",
@@ -10245,30 +10246,25 @@ async function loadConversations(options = {}){
   try{
     const commonPage = await fetchConversationsForProject(DEFAULT_PROJECT_ID);
     const commonConversations = visibleConversations(commonPage.conversations);
+    commonConversationsCache = commonConversations;
     renderConversationRows(conversationList, commonConversations);
     conversationList.hidden = false;
+    setConversationPageState({
+      projectId:DEFAULT_PROJECT_ID,
+      cursor:commonPage.nextCursor,
+      hasMore:commonPage.hasMore,
+      searchQuery:""
+    });
 
     if(isCommonWorkspace()){
       archiveSourceConversations = await fetchArchiveSourceConversations();
       conversationsCache = commonConversations;
-      setConversationPageState({
-        projectId:DEFAULT_PROJECT_ID,
-        cursor:commonPage.nextCursor,
-        hasMore:commonPage.hasMore,
-        searchQuery:""
-      });
     }else{
       const projectId = activeProjectId || DEFAULT_PROJECT_ID;
       const projectPage = await fetchConversationsForProject(projectId);
       const projectConversations = visibleConversations(projectPage.conversations);
       archiveSourceConversations = await fetchArchiveSourceConversations();
       conversationsCache = projectConversations;
-      setConversationPageState({
-        projectId,
-        cursor:projectPage.nextCursor,
-        hasMore:projectPage.hasMore,
-        searchQuery:""
-      });
       const projectMount = document.getElementById("projectConversationMount");
       if(projectMount){
         renderConversationRows(projectMount, projectConversations);
@@ -10519,13 +10515,10 @@ function setConversationPageState(patch = {}){
 }
 
 function activeConversationProjectId(){
-  return isCommonWorkspace() ? DEFAULT_PROJECT_ID : (activeProjectId || DEFAULT_PROJECT_ID);
+  return DEFAULT_PROJECT_ID;
 }
 
 function activeConversationListElement(){
-  if(!isCommonWorkspace()){
-    return document.getElementById("projectConversationMount") || conversationList;
-  }
   return conversationList;
 }
 
@@ -10547,11 +10540,11 @@ async function loadMoreConversations(){
       cursor:conversationPageState.cursor,
       limit:50
     });
-    const existingIds = new Set(conversationsCache.map(item => item.id));
+    const existingIds = new Set(commonConversationsCache.map(item => item.id));
     const nextItems = visibleConversations(page.conversations)
       .filter(item => item?.id && !existingIds.has(item.id));
-    conversationsCache = visibleConversations([...conversationsCache, ...nextItems]);
-    renderConversationRows(activeConversationListElement(), conversationsCache);
+    commonConversationsCache = visibleConversations([...commonConversationsCache, ...nextItems]);
+    renderConversationRows(conversationList, commonConversationsCache);
     setConversationPageState({
       projectId,
       cursor:page.nextCursor,
@@ -10726,7 +10719,7 @@ async function applyChatSearchFilter(){
   const query = normalizedChatSearchQuery();
   const requestId = ++conversationSearchRequestId;
   if(!query){
-    renderConversationRows(activeConversationListElement(), conversationsCache);
+    renderConversationRows(conversationList, commonConversationsCache);
     renderConversationLoadMore();
     setProjectStatus("");
     return;

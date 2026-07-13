@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { handleHistory, saveMessage } from "../src/api/history.js";
+import { ensureConversationArchiveSchema, handleHistory, saveMessage } from "../src/api/history.js";
 import { DEFAULT_PROJECT_ID } from "../src/api/projects.js";
 
 class FakeStatement {
@@ -33,6 +33,7 @@ class FakeD1 {
     this.conversations = new Map();
     this.messages = new Map();
     this.settings = new Map();
+    this.schemaStatements = [];
   }
 
   prepare(sql) {
@@ -88,6 +89,11 @@ class FakeD1 {
 
   run(sql, bindings) {
     const normalized = this.normalize(sql);
+    if (normalized.startsWith("alter table conversations add column")
+      || normalized.startsWith("create index if not exists idx_conversations_project_archive")) {
+      this.schemaStatements.push(normalized);
+      return;
+    }
     if (normalized.startsWith("update conversations") && normalized.includes("set is_archived = 1") && normalized.includes("updated_at <= ?")) {
       const [archivedAt, fallbackProjectId, projectId, cutoff] = bindings;
       for (const [id, conversation] of this.conversations.entries()) {
@@ -165,6 +171,20 @@ function addConversation(db, id, updatedAt, extras = {}) {
 }
 
 describe("conversation archive state", () => {
+  it("self-heals archive schema fields before archive-aware queries run", async () => {
+    const db = new FakeD1();
+
+    await ensureConversationArchiveSchema(db);
+
+    expect(db.schemaStatements).toEqual(expect.arrayContaining([
+      expect.stringContaining("add column is_archived"),
+      expect.stringContaining("add column archived_at"),
+      expect.stringContaining("add column pinned"),
+      expect.stringContaining("idx_conversations_project_archive_updated"),
+      expect.stringContaining("idx_conversations_project_archived_at")
+    ]));
+  });
+
   it("auto-archives inactive conversations after the default 90 days", async () => {
     const db = new FakeD1();
     addConversation(db, "old-chat", Date.now() - 91 * 24 * 60 * 60 * 1000);

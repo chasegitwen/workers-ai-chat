@@ -1162,6 +1162,8 @@ body.dark .projectRuntimeItem{
 }
 
 .archiveToggle{
+  appearance:none;
+  -webkit-appearance:none;
   width:100%;
   min-height:34px;
   display:flex;
@@ -1169,6 +1171,7 @@ body.dark .projectRuntimeItem{
   justify-content:space-between;
   gap:8px;
   border:0;
+  outline:none;
   border-radius:8px;
   background:transparent;
   color:var(--text);
@@ -1181,6 +1184,15 @@ body.dark .projectRuntimeItem{
 
 .archiveToggle:hover{
   background:rgba(148,163,184,.12);
+}
+
+.archiveToggle:focus-visible{
+  background:rgba(148,163,184,.12);
+  box-shadow:0 0 0 2px rgba(148,163,184,.22);
+}
+
+.archivePanel.open .archiveToggle{
+  background:rgba(148,163,184,.1);
 }
 
 .archiveBody{

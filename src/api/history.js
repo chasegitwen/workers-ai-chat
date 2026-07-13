@@ -1,6 +1,17 @@
 import { jsonResponse } from "../utils/response.js";
 import { DEFAULT_PROJECT_ID, ensureDefaultProject, resolveProjectId } from "./projects.js";
 
+const conversationArchiveSchemaReady = new WeakSet();
+const conversationArchiveSchemaStatements = [
+  "ALTER TABLE conversations ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE conversations ADD COLUMN archived_at INTEGER",
+  "ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+  `CREATE INDEX IF NOT EXISTS idx_conversations_project_archive_updated
+   ON conversations(project_id, is_archived, updated_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_conversations_project_archived_at
+   ON conversations(project_id, is_archived, archived_at DESC)`
+];
+
 export function createId() {
   return crypto.randomUUID();
 }
@@ -50,6 +61,39 @@ function normalizeAutoArchiveDays(value) {
   }
   const days = Number(value || 90);
   return [30, 60, 90].includes(days) ? days : 90;
+}
+
+function isAlreadyAppliedSchemaError(err) {
+  const message = String(err?.message || err || "").toLowerCase();
+  return message.includes("duplicate column")
+    || message.includes("already exists")
+    || message.includes("duplicate column name");
+}
+
+async function runSchemaStatement(db, statement) {
+  const prepared = db.prepare(statement);
+  if (typeof prepared.run === "function") {
+    return prepared.run();
+  }
+  return prepared.bind().run();
+}
+
+export async function ensureConversationArchiveSchema(db) {
+  if (!db || conversationArchiveSchemaReady.has(db)) {
+    return;
+  }
+
+  for (const statement of conversationArchiveSchemaStatements) {
+    try {
+      await runSchemaStatement(db, statement);
+    } catch (err) {
+      if (!isAlreadyAppliedSchemaError(err)) {
+        throw err;
+      }
+    }
+  }
+
+  conversationArchiveSchemaReady.add(db);
 }
 
 async function readAutoArchiveDays(db) {
@@ -126,6 +170,8 @@ export async function createConversation(db, title = "New Chat", projectId = "")
 }
 
 export async function ensureConversation(db, conversationId, title, projectId = "") {
+  await ensureConversationArchiveSchema(db);
+
   const nextTitle = cleanTitle(title) || "New Chat";
   const resolvedProjectId = await resolveProjectId(db, projectId);
 
@@ -159,6 +205,8 @@ export async function ensureConversation(db, conversationId, title, projectId = 
 }
 
 export async function saveMessage(db, conversationId, role, content) {
+  await ensureConversationArchiveSchema(db);
+
   const timestamp = now();
   const id = createId();
 
@@ -204,6 +252,8 @@ export async function handleHistory(request, env, url) {
       error: "D1 binding DB is not configured"
     }, 500);
   }
+
+  await ensureConversationArchiveSchema(env.DB);
 
   if (request.method === "GET" && url.pathname === "/api/conversations") {
     await ensureDefaultProject(env.DB);

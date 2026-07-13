@@ -155,6 +155,9 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("return Boolean(item.archived || item.is_archived || item.status === \"archived\");");
     expect(page).toContain("function visibleConversations(conversations)");
     expect(page).toContain("const pinnedDiff = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));");
+    expect(page).toContain("async function fetchArchiveSourceConversations(knownLists = [])");
+    expect(page).toContain("archiveSourceConversations = await fetchArchiveSourceConversations([commonConversations]);");
+    expect(page).toContain("archiveSourceConversations = await fetchArchiveSourceConversations([commonConversations, projectConversations]);");
     expect(page).toContain("function groupedArchiveConversations(conversations)");
     expect(page).toContain("function conversationArchivedAt(item)");
     expect(page).toContain("\"Today\"");

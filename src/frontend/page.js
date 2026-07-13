@@ -10217,11 +10217,11 @@ async function loadConversations(options = {}){
     conversationList.hidden = false;
 
     if(isCommonWorkspace()){
-      archiveSourceConversations = commonConversations;
+      archiveSourceConversations = await fetchArchiveSourceConversations([commonConversations]);
       conversationsCache = visibleConversations(commonConversations);
     }else{
       const projectConversations = await fetchConversationsForProject(activeProjectId || DEFAULT_PROJECT_ID);
-      archiveSourceConversations = projectConversations;
+      archiveSourceConversations = await fetchArchiveSourceConversations([commonConversations, projectConversations]);
       conversationsCache = visibleConversations(projectConversations);
       const projectMount = document.getElementById("projectConversationMount");
       if(projectMount){
@@ -10252,6 +10252,42 @@ async function fetchConversationsForProject(projectId){
     throw new Error(data.error || "load conversations failed");
   }
   return data.conversations || [];
+}
+
+function mergeConversationLists(lists){
+  const merged = new Map();
+  (lists || []).forEach(list => {
+    (list || []).forEach(item => {
+      if(item?.id){
+        merged.set(item.id, item);
+      }
+    });
+  });
+  return Array.from(merged.values());
+}
+
+async function fetchArchiveSourceConversations(knownLists = []){
+  const knownProjectIds = new Set();
+  knownLists.forEach(list => {
+    (list || []).forEach(item => {
+      if(item?.project_id){
+        knownProjectIds.add(item.project_id);
+      }
+    });
+  });
+  knownProjectIds.add(DEFAULT_PROJECT_ID);
+
+  const remainingProjects = realProjects()
+    .filter(project => project.id && !knownProjectIds.has(project.id));
+
+  const projectLists = await Promise.all(remainingProjects.map(project =>
+    fetchConversationsForProject(project.id).catch(err => {
+      console.warn("load archived project conversations failed", project.id, err);
+      return [];
+    })
+  ));
+
+  return mergeConversationLists([...knownLists, ...projectLists]);
 }
 
 const archiveExpandedGroups = new Set();

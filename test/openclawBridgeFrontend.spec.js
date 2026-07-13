@@ -131,9 +131,12 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("--user:#f3f4f6;");
     expect(page).toContain("--user-text:#111827;");
     expect(page).toContain("color:var(--user-text);");
-    expect(page).toContain("--button-neutral:#4b5563;");
+    expect(page).toContain("--button-neutral:#f3f4f6;");
+    expect(page).toContain("--button-neutral-text:#374151;");
     expect(page).toContain("background:var(--button-neutral);");
     expect(page).toContain("background:var(--button-neutral-hover);");
+    expect(page).toContain(".toolBtn[aria-expanded=\"true\"]");
+    expect(page).toContain(".browserToolToggleBtn[aria-expanded=\"true\"]");
     expect(page).toContain(".assistantMessageBody a{\n  color:var(--primary);\n}");
     expect(page).not.toContain(".browserToolBtn{\n  background:#0f766e;");
     expect(page).not.toContain("#sendBtn{\n  border:none;\n  background:var(--primary);");
@@ -152,10 +155,16 @@ describe("OpenClaw bridge frontend SSE state", () => {
 
     expect(page).not.toContain("id=\"commonChatsBtn\"");
     expect(page).not.toContain("id=\"projectSelect\"");
+    expect(page).not.toContain("id=\"newChatBtn\"");
+    expect(page).not.toContain("class=\"newChatBtn\"");
+    expect(page).not.toContain("class=\"sidebarSection searchSection\"");
+    expect(page).toContain("id=\"projectList\"");
+    expect(page).toContain("id=\"conversationNewChatBtn\"");
+    expect(page).toContain("id=\"conversationSearchToggleBtn\"");
+    expect(page).toContain("id=\"conversationSearchDialog\"");
     expect(page).toContain("id=\"chatSearchInput\"");
     expect(page).toContain("placeholder=\"Search Conversations\"");
-    expect(page).toContain("id=\"projectList\"");
-    expect(page).toContain("class=\"sidebarSectionHeader\">Conversations</div>");
+    expect(page).toMatch(/<div class="sidebarSectionHeader">\s*<span>Conversations<\/span>[\s\S]*?conversationNewChatBtn[\s\S]*?conversationSearchToggleBtn/);
     expect(page).toContain("id=\"conversationList\"");
     expect(page).toMatch(/<div id="projectStatus" class="projectStatus"><\/div>[\s\S]*?<div class="sidebarSection chatsSection">/);
     expect(page).toMatch(/<\/aside>\s*<div id="projectSettingsPopover" class="projectSettingsPopover" hidden>/);
@@ -263,7 +272,10 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("if(isExpandedProject){");
     expect(page).toContain("document.getElementById(\"projectConversationMount\")");
     expect(page).toContain("if(projectMount){");
-    expect(page).toContain("newChatBtn.addEventListener(\"click\", createNewConversation)");
+    expect(page).toContain("conversationNewChatBtn.addEventListener(\"click\", createNewConversation)");
+    expect(page).toContain("conversationSearchToggleBtn.addEventListener(\"click\"");
+    expect(page).toContain("setConversationSearchOpen(!conversationSearchDialog.classList.contains(\"open\"))");
+    expect(page).toContain("chatSearchInput.addEventListener(\"input\", applyChatSearchFilter)");
   });
 
   it("exposes conversation attachment controls and request fields", () => {

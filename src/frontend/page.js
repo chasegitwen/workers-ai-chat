@@ -21,9 +21,9 @@
 <style>
 
   .menuButton{
-    border:none;
-    background:#4b5563;
-    color:white;
+    border:1px solid transparent;
+    background:var(--button-neutral);
+    color:var(--button-neutral-text);
     min-width:38px;
     min-height:38px;
     padding:0 11px;
@@ -32,6 +32,12 @@
     line-height:1;
     cursor:pointer;
     flex:0 0 auto;
+  }
+
+  .menuButton:hover,
+  .menuButton[aria-expanded="true"]{
+    background:var(--button-neutral-hover);
+    color:var(--button-neutral-text);
   }
 
   .inputMenuWrap{
@@ -278,8 +284,10 @@
   --ai:#ffffff;
   --user:#f3f4f6;
   --user-text:#111827;
-  --button-neutral:#4b5563;
-  --button-neutral-hover:#374151;
+  --button-neutral:#f3f4f6;
+  --button-neutral-hover:#e5e7eb;
+  --button-neutral-active:#e5e7eb;
+  --button-neutral-text:#374151;
 }
 
 body.dark{
@@ -294,8 +302,10 @@ body.dark{
   --ai:#1f2937;
   --user:#374151;
   --user-text:#f9fafb;
-  --button-neutral:#4b5563;
-  --button-neutral-hover:#6b7280;
+  --button-neutral:#374151;
+  --button-neutral-hover:#4b5563;
+  --button-neutral-active:#4b5563;
+  --button-neutral-text:#f9fafb;
 }
 
 *{
@@ -517,6 +527,49 @@ body.authenticated .loginScreen{
   letter-spacing:0;
 }
 
+.sidebarHeaderActions{
+  display:flex;
+  align-items:center;
+  gap:4px;
+}
+
+.sidebarIconBtn{
+  width:28px;
+  height:28px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border:0;
+  border-radius:8px;
+  background:transparent;
+  color:var(--muted);
+  cursor:pointer;
+  font-size:17px;
+  line-height:1;
+}
+
+.sidebarIconBtn:hover,
+.sidebarIconBtn[aria-expanded="true"]{
+  background:rgba(148,163,184,.16);
+  color:var(--text);
+}
+
+.conversationSearchDialog{
+  display:none;
+  gap:8px;
+  align-items:center;
+  padding:8px;
+  margin-bottom:8px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--panel);
+  box-shadow:0 10px 24px rgba(15,23,42,.12);
+}
+
+.conversationSearchDialog.open{
+  display:flex;
+}
+
 .chatSearchInput{
   width:100%;
   min-height:34px;
@@ -530,8 +583,8 @@ body.authenticated .loginScreen{
 }
 
 .chatSearchInput:focus{
-  border-color:var(--primary);
-  box-shadow:0 0 0 2px rgba(37,99,235,.12);
+  border-color:#9ca3af;
+  box-shadow:0 0 0 2px rgba(148,163,184,.16);
 }
 
 .modelArea{
@@ -559,19 +612,6 @@ body.authenticated .loginScreen{
   padding:8px 10px;
   cursor:pointer;
   font-size:15px;
-}
-
-.newChatBtn{
-  width:100%;
-  border:none;
-  background:var(--primary);
-  color:white;
-  border-radius:10px;
-  padding:10px 12px;
-  font-size:15px;
-  cursor:pointer;
-  margin-bottom:12px;
-  flex:0 0 auto;
 }
 
 .projectPanel{
@@ -2083,8 +2123,8 @@ body.dark .toolErrorNotice{
 
 .toolBtn{
   min-height:38px;
-  border:none;
-  color:white;
+  border:1px solid transparent;
+  color:var(--button-neutral-text);
   padding:0 12px;
   border-radius:999px;
   font-size:14px;
@@ -2096,6 +2136,12 @@ body.dark .toolErrorNotice{
 
 .toolBtn:hover{
   background:var(--button-neutral-hover);
+}
+
+.toolBtn[aria-expanded="true"]{
+  border-color:#cbd5e1;
+  background:var(--button-neutral-active);
+  color:#1f2937;
 }
 
 .toolMenuWrap .inputMenu{
@@ -2142,8 +2188,8 @@ body.dark .toolErrorNotice{
 .browserToolToggleBtn,
 .browserToolBtn{
   min-height:38px;
-  border:none;
-  color:white;
+  border:1px solid transparent;
+  color:var(--button-neutral-text);
   padding:0 12px;
   border-radius:999px;
   font-size:14px;
@@ -2154,12 +2200,24 @@ body.dark .toolErrorNotice{
 }
 
 .browserToolToggleBtn{
-  background:#6b7280;
+  background:var(--button-neutral);
 }
 
 .browserToolToggleBtn:hover,
 .browserToolBtn:hover{
   background:var(--button-neutral-hover);
+}
+
+.browserToolToggleBtn[aria-expanded="true"]{
+  border-color:#cbd5e1;
+  background:var(--button-neutral-active);
+  color:#1f2937;
+}
+
+body.dark .toolBtn[aria-expanded="true"],
+body.dark .browserToolToggleBtn[aria-expanded="true"]{
+  border-color:#6b7280;
+  color:var(--button-neutral-text);
 }
 
 .browserToolBtn:disabled{
@@ -2747,9 +2805,9 @@ body.dark .toolErrorNotice{
 }
 
 #sendBtn{
-  border:none;
+  border:1px solid transparent;
   background:var(--button-neutral);
-  color:white;
+  color:var(--button-neutral-text);
   min-height:40px;
   padding:0 20px;
   border-radius:999px;
@@ -2977,15 +3035,7 @@ body.dark .toolErrorNotice{
 
     <aside class="sidebar">
 
-      <button id="newChatBtn" class="newChatBtn" type="button">
-        + Chat
-      </button>
-
       <div class="sidebarMain">
-
-        <div class="sidebarSection searchSection">
-          <input id="chatSearchInput" class="chatSearchInput" type="search" placeholder="Search Conversations" aria-label="Search Conversations" />
-        </div>
 
         <div class="projectPanel sidebarSection">
           <div class="projectHeader">
@@ -2998,7 +3048,17 @@ body.dark .toolErrorNotice{
         <div id="projectStatus" class="projectStatus"></div>
 
         <div class="sidebarSection chatsSection">
-          <div class="sidebarSectionHeader">Conversations</div>
+          <div class="sidebarSectionHeader">
+            <span>Conversations</span>
+            <div class="sidebarHeaderActions">
+              <button id="conversationNewChatBtn" class="sidebarIconBtn" type="button" aria-label="New Chat" title="New Chat">+</button>
+              <button id="conversationSearchToggleBtn" class="sidebarIconBtn" type="button" aria-label="Search Conversations" title="Search Conversations" aria-expanded="false">&#x2315;</button>
+            </div>
+          </div>
+          <div id="conversationSearchDialog" class="conversationSearchDialog" aria-hidden="true">
+            <input id="chatSearchInput" class="chatSearchInput" type="search" placeholder="Search Conversations" aria-label="Search Conversations" />
+            <button id="conversationSearchCloseBtn" class="sidebarIconBtn" type="button" aria-label="Close Search" title="Close Search">×</button>
+          </div>
           <div id="conversationList" class="historyList"></div>
         </div>
 
@@ -3254,7 +3314,10 @@ const contextPanel = document.getElementById("contextPanel");
 const contextPanelClose = document.getElementById("contextPanelClose");
 const contextAttachBtn = document.getElementById("contextAttachBtn");
 const contextKnowledgeUploadBtn = document.getElementById("contextKnowledgeUploadBtn");
-const newChatBtn = document.getElementById("newChatBtn");
+const conversationNewChatBtn = document.getElementById("conversationNewChatBtn");
+const conversationSearchToggleBtn = document.getElementById("conversationSearchToggleBtn");
+const conversationSearchCloseBtn = document.getElementById("conversationSearchCloseBtn");
+const conversationSearchDialog = document.getElementById("conversationSearchDialog");
 const projectList = document.getElementById("projectList");
 const createProjectBtn = document.getElementById("createProjectBtn");
 const projectStatus = document.getElementById("projectStatus");
@@ -10056,6 +10119,20 @@ function applyChatSearchFilter(){
   });
 }
 
+function setConversationSearchOpen(open){
+  conversationSearchDialog.classList.toggle("open", open);
+  conversationSearchDialog.setAttribute("aria-hidden", open ? "false" : "true");
+  conversationSearchToggleBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  if(open){
+    chatSearchInput.focus();
+    chatSearchInput.select();
+  }
+}
+
+function closeConversationSearch(){
+  setConversationSearchOpen(false);
+}
+
 async function createConversationForProject(projectId){
   const targetProjectId = projectId || activeProjectId || DEFAULT_PROJECT_ID;
   try{
@@ -10290,7 +10367,16 @@ openClawTaskHistoryPanel.addEventListener("click", event => {
   }
   loadOpenClawTaskHistory(view);
 });
-newChatBtn.addEventListener("click", createNewConversation);
+conversationNewChatBtn.addEventListener("click", createNewConversation);
+conversationSearchToggleBtn.addEventListener("click", event => {
+  event.stopPropagation();
+  setConversationSearchOpen(!conversationSearchDialog.classList.contains("open"));
+});
+conversationSearchCloseBtn.addEventListener("click", event => {
+  event.stopPropagation();
+  closeConversationSearch();
+});
+conversationSearchDialog.addEventListener("click", event => event.stopPropagation());
 createProjectBtn.addEventListener("click", createProject);
 chatSearchInput.addEventListener("input", applyChatSearchFilter);
 projectSettingsCloseBtn.addEventListener("click", closeProjectSettingsPopover);
@@ -10389,6 +10475,7 @@ attachmentMenu.addEventListener("click", event => event.stopPropagation());
 toolMenu.addEventListener("click", event => event.stopPropagation());
 document.addEventListener("click", () => {
   closeInputMenus();
+  closeConversationSearch();
   closeModelActionMenus();
   closeProjectActionMenu();
   closeProjectSettingsPopover();
@@ -10396,6 +10483,7 @@ document.addEventListener("click", () => {
 document.addEventListener("keydown", event => {
   if(event.key === "Escape"){
     closeInputMenus();
+    closeConversationSearch();
     closeProjectActionMenu();
     closeProjectSettingsPopover();
     setContextPanelOpen(false);

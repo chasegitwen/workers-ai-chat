@@ -146,24 +146,29 @@ describe("OpenClaw bridge frontend SSE state", () => {
     const page = htmlPage();
 
     expect(page).toMatch(/<div id="archivePanel" class="archivePanel">[\s\S]*?<button id="archiveToggleBtn"[\s\S]*?<span>Archive<\/span>[\s\S]*?<div id="archiveBody" class="archiveBody"><\/div>[\s\S]*?<div class="modelArea">/);
-    expect(page).toContain("const ARCHIVED_CONVERSATIONS_KEY = \"wa_archived_conversation_ids\";");
-    expect(page).toContain("const ARCHIVE_INACTIVE_DAYS = 30;");
+    expect(page).toContain("include_archived:\"1\"");
+    expect(page).toContain("id=\"autoArchiveDaysSelect\"");
+    expect(page).toContain("autoArchiveDays:normalizeAutoArchiveDays(base.autoArchiveDays)");
+    expect(page).toContain("modelSettingsState.autoArchiveDays = normalizeAutoArchiveDays(autoArchiveDaysSelect.value);");
+    expect(page).toContain("autoArchiveDaysSelect.value = normalizeAutoArchiveDays(modelSettingsState?.autoArchiveDays);");
     expect(page).toContain("function isConversationArchived(item)");
-    expect(page).toContain("item.archived || item.is_archived || item.status === \"archived\"");
+    expect(page).toContain("return Boolean(item.archived || item.is_archived || item.status === \"archived\");");
     expect(page).toContain("function visibleConversations(conversations)");
     expect(page).toContain("function groupedArchiveConversations(conversations)");
+    expect(page).toContain("function conversationArchivedAt(item)");
     expect(page).toContain("\"Today\"");
     expect(page).toContain("\"Yesterday\"");
     expect(page).toContain("\"Last 7 Days\"");
     expect(page).toContain("\"This Month\"");
     expect(page).toContain("\"Older...\"");
     expect(page).toContain("appendConversationMenuItem(menu, \"Restore\", () => restoreArchivedConversation(item.id));");
-    expect(page).toContain("appendConversationMenuItem(menu, \"Archive\", () => archiveInactiveConversation(item.id));");
+    expect(page).toContain("appendConversationMenuItem(menu, item.pinned ? \"Unpin\" : \"Pin\", () => togglePinnedConversation(item));");
+    expect(page).toContain("appendConversationMenuItem(menu, \"Archive\", () => archiveConversation(item.id));");
     expect(page).toContain("appendConversationMenuItem(menu, \"Delete\", () => deleteConversation(item.id, item.title || \"New Chat\"));");
-    expect(page).toContain("appendConversationMenuItem(menu, \"Cancel\", () => {});");
+    expect(page).toContain("JSON.stringify({ action })");
     expect(page).toContain("row.addEventListener(\"contextmenu\"");
     expect(page).toContain("restoreConversationAfterNewMessage(currentConversationId);");
-    expect(page).not.toContain("/api/conversations/archive");
+    expect(page).not.toContain("wa_archived_conversation_ids");
   });
 
   it("sends an explicit Seattle runtime_id when the selected OpenClaw model is Seattle", () => {

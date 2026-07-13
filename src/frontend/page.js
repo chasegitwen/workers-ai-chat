@@ -3035,6 +3035,15 @@ body.dark .browserToolToggleBtn[aria-expanded="true"]{
         fallback 模型
         <select id="fallbackModelSelect"></select>
       </label>
+      <label class="settingsField">
+        自动归档
+        <select id="autoArchiveDaysSelect">
+          <option value="never">Never</option>
+          <option value="30">30 days</option>
+          <option value="60">60 days</option>
+          <option value="90">90 days</option>
+        </select>
+      </label>
       <label class="settingsCheck">
         <input id="rememberLastModelCheck" type="checkbox" />
         记住上次选择
@@ -3787,11 +3796,20 @@ function normalizeModelSettings(settings, fallbackProviders){
     lastModel:base.lastModel || base.selectedModel || "",
     fallbackEnabled:Boolean(base.fallbackEnabled ?? base.autoFallbackEnabled),
     fallbackModels:Array.isArray(base.fallbackModels) ? base.fallbackModels : (base.fallbackModel ? [base.fallbackModel] : []),
+    autoArchiveDays:normalizeAutoArchiveDays(base.autoArchiveDays),
     customModels:Array.isArray(base.customModels) ? base.customModels : [],
     customProviders:Array.isArray(base.customProviders) ? base.customProviders : [],
     conversationAttachmentLimits:normalizeConversationAttachmentLimits(base.conversationAttachmentLimits),
     providers:Array.isArray(base.providers) && base.providers.length ? base.providers : fallbackProviders
   };
+}
+
+function normalizeAutoArchiveDays(value){
+  if(value === "never" || value === "Never" || value === 0 || value === "0"){
+    return "never";
+  }
+  const days = Number(value || 90);
+  return [30,60,90].includes(days) ? String(days) : "90";
 }
 
 function writeSettingsCache(settings){
@@ -3907,6 +3925,7 @@ function refreshSettingsControls(){
   fallbackModelSelect.value = hasModel(modelSettingsState?.fallbackModels?.[0]) ? modelSettingsState.fallbackModels[0] : "";
   rememberLastModelCheck.checked = Boolean(modelSettingsState?.rememberLastModel);
   fallbackEnabledCheck.checked = Boolean(modelSettingsState?.fallbackEnabled);
+  autoArchiveDaysSelect.value = normalizeAutoArchiveDays(modelSettingsState?.autoArchiveDays);
   setConversationAttachmentLimitInputs(modelSettingsState?.conversationAttachmentLimits);
   modelProviderSelect.innerHTML = "";
   modelProviders.forEach(provider => {
@@ -5426,6 +5445,7 @@ const applySettingsBtn = document.getElementById("applySettingsBtn");
 const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const defaultModelSelect = document.getElementById("defaultModelSelect");
 const fallbackModelSelect = document.getElementById("fallbackModelSelect");
+const autoArchiveDaysSelect = document.getElementById("autoArchiveDaysSelect");
 const rememberLastModelCheck = document.getElementById("rememberLastModelCheck");
 const fallbackEnabledCheck = document.getElementById("fallbackEnabledCheck");
 const attachmentMaxFileMbInput = document.getElementById("attachmentMaxFileMbInput");
@@ -5718,6 +5738,7 @@ function saveSettingsFromUi(closeAfter){
   modelSettingsState.rememberLastModel = rememberLastModelCheck.checked;
   modelSettingsState.fallbackEnabled = fallbackEnabledCheck.checked;
   modelSettingsState.fallbackModels = fallbackModelSelect.value ? [fallbackModelSelect.value] : [];
+  modelSettingsState.autoArchiveDays = normalizeAutoArchiveDays(autoArchiveDaysSelect.value);
   modelSettingsState.conversationAttachmentLimits = readConversationAttachmentLimitInputs();
 
   if(nextDefault && hasModel(nextDefault)){
@@ -5913,6 +5934,7 @@ function saveSettingsFromUi(closeAfter){
   modelSettingsState.rememberLastModel = rememberLastModelCheck.checked;
   modelSettingsState.fallbackEnabled = fallbackEnabledCheck.checked;
   modelSettingsState.fallbackModels = fallbackModelSelect.value ? [fallbackModelSelect.value] : [];
+  modelSettingsState.autoArchiveDays = normalizeAutoArchiveDays(autoArchiveDaysSelect.value);
   modelSettingsState.conversationAttachmentLimits = readConversationAttachmentLimitInputs();
 
   if(nextDefault && hasModel(nextDefault)){
@@ -6171,6 +6193,7 @@ function saveSettingsFromUi(closeAfter){
   modelSettingsState.rememberLastModel = rememberLastModelCheck.checked;
   modelSettingsState.fallbackEnabled = fallbackEnabledCheck.checked;
   modelSettingsState.fallbackModels = fallbackModelSelect.value ? [fallbackModelSelect.value] : [];
+  modelSettingsState.autoArchiveDays = normalizeAutoArchiveDays(autoArchiveDaysSelect.value);
   modelSettingsState.conversationAttachmentLimits = readConversationAttachmentLimitInputs();
   if(nextDefault && hasModel(nextDefault)){
     modelSelect.value = nextDefault;
@@ -10189,7 +10212,8 @@ async function loadConversations(options = {}){
 
 async function fetchConversationsForProject(projectId){
   const params = new URLSearchParams({
-    project_id:projectId || DEFAULT_PROJECT_ID
+    project_id:projectId || DEFAULT_PROJECT_ID,
+    include_archived:"1"
   });
   const res = await fetch("/api/conversations?" + params.toString());
   const data = await res.json();
@@ -10199,56 +10223,21 @@ async function fetchConversationsForProject(projectId){
   return data.conversations || [];
 }
 
-const ARCHIVED_CONVERSATIONS_KEY = "wa_archived_conversation_ids";
-const ARCHIVE_INACTIVE_DAYS = 30;
 const archiveExpandedGroups = new Set();
-
-function readArchivedConversationIds(){
-  try{
-    const values = JSON.parse(localStorage.getItem(ARCHIVED_CONVERSATIONS_KEY) || "[]");
-    return new Set(Array.isArray(values) ? values.map(String) : []);
-  }catch(err){
-    return new Set();
-  }
-}
-
-function writeArchivedConversationIds(ids){
-  localStorage.setItem(ARCHIVED_CONVERSATIONS_KEY, JSON.stringify(Array.from(ids)));
-}
 
 function isConversationArchived(item){
   if(!item?.id){
     return false;
   }
-  if(item.archived || item.is_archived || item.status === "archived"){
-    return true;
-  }
-  return readArchivedConversationIds().has(String(item.id));
-}
-
-function archiveConversationLocally(conversationId){
-  const ids = readArchivedConversationIds();
-  ids.add(String(conversationId || ""));
-  ids.delete("");
-  writeArchivedConversationIds(ids);
-}
-
-function restoreConversationLocally(conversationId){
-  const ids = readArchivedConversationIds();
-  ids.delete(String(conversationId || ""));
-  writeArchivedConversationIds(ids);
+  return Boolean(item.archived || item.is_archived || item.status === "archived");
 }
 
 function conversationUpdatedAt(item){
   return new Date(item?.updated_at || item?.created_at || 0).getTime() || 0;
 }
 
-function isInactiveConversation(item){
-  const updatedAt = conversationUpdatedAt(item);
-  if(!updatedAt){
-    return false;
-  }
-  return Date.now() - updatedAt >= ARCHIVE_INACTIVE_DAYS * 24 * 60 * 60 * 1000;
+function conversationArchivedAt(item){
+  return new Date(item?.archived_at || item?.updated_at || item?.created_at || 0).getTime() || 0;
 }
 
 function visibleConversations(conversations){
@@ -10258,7 +10247,7 @@ function visibleConversations(conversations){
 function archivedConversations(conversations){
   return (conversations || [])
     .filter(isConversationArchived)
-    .sort((a, b) => conversationUpdatedAt(b) - conversationUpdatedAt(a));
+    .sort((a, b) => conversationArchivedAt(b) - conversationArchivedAt(a));
 }
 
 function sameLocalDate(a, b){
@@ -10268,7 +10257,7 @@ function sameLocalDate(a, b){
 }
 
 function archiveGroupLabel(item){
-  const updated = new Date(conversationUpdatedAt(item));
+  const updated = new Date(conversationArchivedAt(item));
   const now = new Date();
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
@@ -10319,7 +10308,7 @@ function groupedArchiveConversations(conversations){
     if(orderDiff){
       return orderDiff;
     }
-    return conversationUpdatedAt(b[1][0]) - conversationUpdatedAt(a[1][0]);
+    return conversationArchivedAt(b[1][0]) - conversationArchivedAt(a[1][0]);
   });
 }
 
@@ -10388,31 +10377,55 @@ function renderCurrentConversationLists(){
   setActiveConversation();
 }
 
-function archiveInactiveConversation(conversationId){
-  archiveConversationLocally(conversationId);
+function mergeConversationState(conversation){
+  if(!conversation?.id){
+    return;
+  }
   archiveSourceConversations = archiveSourceConversations.map(item => (
-    item.id === conversationId ? { ...item, archived:true } : item
+    item.id === conversation.id ? { ...item, ...conversation } : item
   ));
+}
+
+async function updateConversationState(conversationId, action){
+  const res = await fetch("/api/conversations/" + encodeURIComponent(conversationId), {
+    method:"PATCH",
+    headers:{ "Content-Type":"application/json; charset=utf-8" },
+    body:JSON.stringify({ action })
+  });
+  const data = await res.json();
+  if(!res.ok || !data.ok){
+    throw new Error(data.error || "update conversation failed");
+  }
+  mergeConversationState(data.conversation);
   renderCurrentConversationLists();
   renderArchivePanel();
+  return data.conversation;
+}
+
+function archiveConversation(conversationId){
+  updateConversationState(conversationId, "archive").catch(err => {
+    alert("Archive failed: " + err.message);
+  });
 }
 
 function restoreArchivedConversation(conversationId){
-  restoreConversationLocally(conversationId);
-  archiveSourceConversations = archiveSourceConversations.map(item => (
-    item.id === conversationId ? { ...item, archived:false, is_archived:false, status:item.status === "archived" ? "" : item.status } : item
-  ));
-  renderCurrentConversationLists();
-  renderArchivePanel();
+  updateConversationState(conversationId, "restore").catch(err => {
+    alert("Restore failed: " + err.message);
+  });
+}
+
+function togglePinnedConversation(item){
+  updateConversationState(item.id, item.pinned ? "unpin" : "pin").catch(err => {
+    alert("Pin failed: " + err.message);
+  });
 }
 
 function restoreConversationAfterNewMessage(conversationId){
   if(!conversationId){
     return;
   }
-  restoreConversationLocally(conversationId);
   archiveSourceConversations = archiveSourceConversations.map(item => (
-    item.id === conversationId ? { ...item, archived:false, is_archived:false, status:item.status === "archived" ? "" : item.status } : item
+    item.id === conversationId ? { ...item, archived:false, is_archived:false, archived_at:null, status:item.status === "archived" ? "" : item.status } : item
   ));
 }
 
@@ -10470,11 +10483,11 @@ function renderConversationRows(targetList, conversations, options = {}){
 
     if(inArchive){
       appendConversationMenuItem(menu, "Restore", () => restoreArchivedConversation(item.id));
-    }else if(isInactiveConversation(item)){
-      appendConversationMenuItem(menu, "Archive", () => archiveInactiveConversation(item.id));
+    }else{
+      appendConversationMenuItem(menu, item.pinned ? "Unpin" : "Pin", () => togglePinnedConversation(item));
+      appendConversationMenuItem(menu, "Archive", () => archiveConversation(item.id));
     }
     appendConversationMenuItem(menu, "Delete", () => deleteConversation(item.id, item.title || "New Chat"));
-    appendConversationMenuItem(menu, "Cancel", () => {});
 
     menuBtn.addEventListener("click", event => {
       event.stopPropagation();
@@ -10588,7 +10601,6 @@ async function deleteConversation(conversationId, title){
       throw new Error(data.error || "delete conversation failed");
     }
 
-    restoreConversationLocally(conversationId);
     const conversations = await loadConversations();
 
     if(deletingCurrent){

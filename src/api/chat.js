@@ -5149,7 +5149,7 @@ async function readExistingConversation(env, conversationId) {
     return null;
   }
   return env.DB.prepare(
-    "SELECT id, title, project_id, created_at, updated_at FROM conversations WHERE id = ?"
+    "SELECT id, title, project_id, created_at, updated_at, is_archived, archived_at, pinned FROM conversations WHERE id = ?"
   ).bind(id).first();
 }
 

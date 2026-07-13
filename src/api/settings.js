@@ -22,6 +22,14 @@ function settingVersion(settings, rowUpdatedAt = 0) {
   return Number.isFinite(value) ? value : 0;
 }
 
+function normalizeAutoArchiveDays(value) {
+  if (value === "never" || value === "Never" || value === 0 || value === "0") {
+    return "never";
+  }
+  const days = Number(value || 90);
+  return [30, 60, 90].includes(days) ? days : 90;
+}
+
 function normalizeProviderId(provider) {
   return String(provider?.id || provider?.providerId || "").trim();
 }
@@ -282,6 +290,7 @@ export function normalizeModelSettings(settings) {
   }
   const normalized = { ...settings };
   const providers = sourceProviders(normalized);
+  normalized.autoArchiveDays = normalizeAutoArchiveDays(normalized.autoArchiveDays);
 
   if (providers.length) {
     normalized.providers = providers;

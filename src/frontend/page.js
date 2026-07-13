@@ -1789,6 +1789,14 @@ body.dark .projectRuntimeItem{
   min-width:0;
 }
 
+.messageModelInfo{
+  margin-top:6px;
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.4;
+  opacity:.82;
+}
+
 .messageCopyBtn,
 .codeCopyBtn{
   border:1px solid var(--border);
@@ -3105,6 +3113,10 @@ body.dark .browserToolToggleBtn[aria-expanded="true"]{
         <input id="fallbackEnabledCheck" type="checkbox" />
         自动 fallback
       </label>
+      <label class="settingsCheck">
+        <input id="showPerMessageModelInfoCheck" type="checkbox" />
+        显示每轮使用的模型
+      </label>
       <label class="settingsField">
         原文读取单文件 MB
         <input id="attachmentMaxFileMbInput" type="number" min="1" max="20" step="1" />
@@ -3860,6 +3872,7 @@ function normalizeModelSettings(settings, fallbackProviders){
     fallbackEnabled:Boolean(base.fallbackEnabled ?? base.autoFallbackEnabled),
     fallbackModels:Array.isArray(base.fallbackModels) ? base.fallbackModels : (base.fallbackModel ? [base.fallbackModel] : []),
     autoArchiveDays:normalizeAutoArchiveDays(base.autoArchiveDays),
+    showPerMessageModelInfo:Boolean(base.showPerMessageModelInfo),
     customModels:Array.isArray(base.customModels) ? base.customModels : [],
     customProviders:Array.isArray(base.customProviders) ? base.customProviders : [],
     conversationAttachmentLimits:normalizeConversationAttachmentLimits(base.conversationAttachmentLimits),
@@ -3989,6 +4002,7 @@ function refreshSettingsControls(){
   rememberLastModelCheck.checked = Boolean(modelSettingsState?.rememberLastModel);
   fallbackEnabledCheck.checked = Boolean(modelSettingsState?.fallbackEnabled);
   autoArchiveDaysSelect.value = normalizeAutoArchiveDays(modelSettingsState?.autoArchiveDays);
+  showPerMessageModelInfoCheck.checked = Boolean(modelSettingsState?.showPerMessageModelInfo);
   setConversationAttachmentLimitInputs(modelSettingsState?.conversationAttachmentLimits);
   modelProviderSelect.innerHTML = "";
   modelProviders.forEach(provider => {
@@ -5511,6 +5525,7 @@ const fallbackModelSelect = document.getElementById("fallbackModelSelect");
 const autoArchiveDaysSelect = document.getElementById("autoArchiveDaysSelect");
 const rememberLastModelCheck = document.getElementById("rememberLastModelCheck");
 const fallbackEnabledCheck = document.getElementById("fallbackEnabledCheck");
+const showPerMessageModelInfoCheck = document.getElementById("showPerMessageModelInfoCheck");
 const attachmentMaxFileMbInput = document.getElementById("attachmentMaxFileMbInput");
 const attachmentMaxTotalMbInput = document.getElementById("attachmentMaxTotalMbInput");
 const attachmentMaxMarkdownCharsInput = document.getElementById("attachmentMaxMarkdownCharsInput");
@@ -5802,6 +5817,7 @@ function saveSettingsFromUi(closeAfter){
   modelSettingsState.fallbackEnabled = fallbackEnabledCheck.checked;
   modelSettingsState.fallbackModels = fallbackModelSelect.value ? [fallbackModelSelect.value] : [];
   modelSettingsState.autoArchiveDays = normalizeAutoArchiveDays(autoArchiveDaysSelect.value);
+  modelSettingsState.showPerMessageModelInfo = showPerMessageModelInfoCheck.checked;
   modelSettingsState.conversationAttachmentLimits = readConversationAttachmentLimitInputs();
 
   if(nextDefault && hasModel(nextDefault)){
@@ -5998,6 +6014,7 @@ function saveSettingsFromUi(closeAfter){
   modelSettingsState.fallbackEnabled = fallbackEnabledCheck.checked;
   modelSettingsState.fallbackModels = fallbackModelSelect.value ? [fallbackModelSelect.value] : [];
   modelSettingsState.autoArchiveDays = normalizeAutoArchiveDays(autoArchiveDaysSelect.value);
+  modelSettingsState.showPerMessageModelInfo = showPerMessageModelInfoCheck.checked;
   modelSettingsState.conversationAttachmentLimits = readConversationAttachmentLimitInputs();
 
   if(nextDefault && hasModel(nextDefault)){
@@ -6257,6 +6274,7 @@ function saveSettingsFromUi(closeAfter){
   modelSettingsState.fallbackEnabled = fallbackEnabledCheck.checked;
   modelSettingsState.fallbackModels = fallbackModelSelect.value ? [fallbackModelSelect.value] : [];
   modelSettingsState.autoArchiveDays = normalizeAutoArchiveDays(autoArchiveDaysSelect.value);
+  modelSettingsState.showPerMessageModelInfo = showPerMessageModelInfoCheck.checked;
   modelSettingsState.conversationAttachmentLimits = readConversationAttachmentLimitInputs();
   if(nextDefault && hasModel(nextDefault)){
     modelSelect.value = nextDefault;
@@ -7060,8 +7078,10 @@ function normalizeModelSettings(settings, fallbackProviders){
     lastModel:base.lastModel || base.selectedModel || "",
     fallbackEnabled:Boolean(base.fallbackEnabled ?? base.autoFallbackEnabled),
     fallbackModels:Array.isArray(base.fallbackModels) ? base.fallbackModels : (base.fallbackModel ? [base.fallbackModel] : []),
+    autoArchiveDays:normalizeAutoArchiveDays(base.autoArchiveDays),
     customModels:Array.isArray(base.customModels) ? base.customModels : [],
     customProviders:Array.isArray(base.customProviders) ? base.customProviders : [],
+    showPerMessageModelInfo:Boolean(base.showPerMessageModelInfo),
     conversationAttachmentLimits:normalizeConversationAttachmentLimits(base.conversationAttachmentLimits),
     categories,
     modelCategories:categories,
@@ -7140,6 +7160,8 @@ function refreshSettingsControls(){
   fallbackModelSelect.value = hasModel(modelSettingsState?.fallbackModels?.[0]) ? modelSettingsState.fallbackModels[0] : "";
   rememberLastModelCheck.checked = Boolean(modelSettingsState?.rememberLastModel);
   fallbackEnabledCheck.checked = Boolean(modelSettingsState?.fallbackEnabled);
+  autoArchiveDaysSelect.value = normalizeAutoArchiveDays(modelSettingsState?.autoArchiveDays);
+  showPerMessageModelInfoCheck.checked = Boolean(modelSettingsState?.showPerMessageModelInfo);
   setConversationAttachmentLimitInputs(modelSettingsState?.conversationAttachmentLimits);
   modelProviderSelect.innerHTML = "";
   const workersOption = document.createElement("option");
@@ -10841,6 +10863,7 @@ function renderHistoryMessage(message){
 
   if(message.role === "assistant"){
     renderAssistantMarkdown(div, message.content || "");
+    renderMessageModelInfo(div, message.metadata);
   }else{
     div.textContent = message.content || "";
   }
@@ -10869,7 +10892,8 @@ async function loadConversationMessages(conversationId){
       if(message.role === "user" || message.role === "assistant"){
         conversation.push({
           role:message.role,
-          content:message.content || ""
+          content:message.content || "",
+          metadata:message.metadata || null
         });
       }
     });
@@ -11730,13 +11754,97 @@ function renderAssistantMarkdown(element, markdown){
   renderKatexMath(body);
 }
 
-function renderAssistantMessage(element, text, sources, toolSources, toolError, toolDebug, diagnostics){
+function displayModelInfoEnabled(){
+  return Boolean(modelSettingsState?.showPerMessageModelInfo);
+}
+
+function titleCaseExecutionMode(value){
+  const text = String(value || "").trim();
+  if(!text){
+    return "";
+  }
+  return text
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function normalizeMessageModelMetadata(metadata){
+  if(!metadata || typeof metadata !== "object"){
+    return null;
+  }
+  const clean = {};
+  ["provider","provider_label","model","model_label","runtime","runtime_id","agent","execution_mode"].forEach(key => {
+    const value = String(metadata[key] || "").trim();
+    if(value){
+      clean[key] = value;
+    }
+  });
+  return Object.keys(clean).length ? clean : null;
+}
+
+function doneEventModelMetadata(data){
+  const provider = String(data?.provider || "").trim();
+  const model = String(data?.model || data?.modelName || "").trim();
+  const metadata = normalizeMessageModelMetadata(data?.metadata);
+  if(metadata){
+    return metadata;
+  }
+  if(!provider && !model){
+    return null;
+  }
+  return normalizeMessageModelMetadata({
+    provider,
+    provider_label:provider,
+    model,
+    model_label:model
+  });
+}
+
+function messageModelInfoText(metadata){
+  const clean = normalizeMessageModelMetadata(metadata);
+  if(!clean){
+    return "";
+  }
+  const parts = [];
+  const model = clean.model_label || clean.model;
+  const runtime = clean.runtime || clean.provider_label || clean.provider;
+  const mode = titleCaseExecutionMode(clean.execution_mode);
+  if(model){
+    parts.push(model);
+  }
+  if(runtime && runtime !== model){
+    parts.push(runtime);
+  }
+  if(mode){
+    parts.push(mode);
+  }
+  return parts.join(" · ");
+}
+
+function renderMessageModelInfo(element, metadata){
+  if(!displayModelInfoEnabled()){
+    return;
+  }
+  const text = messageModelInfoText(metadata);
+  if(!text){
+    return;
+  }
+  const info = document.createElement("div");
+  info.className = "messageModelInfo";
+  info.textContent = text;
+  element.appendChild(info);
+}
+
+function renderAssistantMessage(element, text, sources, toolSources, toolError, toolDebug, diagnostics, metadata){
   renderAssistantMarkdown(element, text || "");
   renderToolError(element, toolError);
   renderToolDebug(element, toolDebug);
   renderModelDiagnostics(element, diagnostics);
   renderSources(element, sources);
   renderToolSources(element, toolSources);
+  renderMessageModelInfo(element, metadata);
   scrollBottom();
 }
 
@@ -12048,11 +12156,12 @@ async function handleStreamEvent(eventText, state, element){
     try{
       const data = JSON.parse(event.data || "{}");
       state.diagnostics.done = data;
+      state.modelMetadata = doneEventModelMetadata(data);
       const chunk = readStreamChunk(event.data);
       if(chunk.text && !state.openClawFriendlyError){
         state.reply += chunk.text;
       }
-      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug, state.diagnostics);
+      renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug, state.diagnostics, state.modelMetadata);
     }catch(err){
       console.log("parse done failed", err);
     }
@@ -12099,7 +12208,8 @@ async function streamAIResponse(response, element, isOpenClawRequest = false){
     openClawFriendlyError:false,
     isOpenClawRequest:Boolean(isOpenClawRequest),
     openClawTask:null,
-    openClawAutoResume:null
+    openClawAutoResume:null,
+    modelMetadata:null
   };
 
   while(true){
@@ -12420,6 +12530,7 @@ async function sendMessage(){
         conversation.push({
           role:"assistant",
           content:reply || "",
+          metadata:streamResult.modelMetadata || null,
           sources:streamResult.sources || [],
           toolSources:streamResult.toolSources || []
         });

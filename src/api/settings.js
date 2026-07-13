@@ -291,6 +291,7 @@ export function normalizeModelSettings(settings) {
   const normalized = { ...settings };
   const providers = sourceProviders(normalized);
   normalized.autoArchiveDays = normalizeAutoArchiveDays(normalized.autoArchiveDays);
+  normalized.showPerMessageModelInfo = Boolean(normalized.showPerMessageModelInfo);
 
   if (providers.length) {
     normalized.providers = providers;

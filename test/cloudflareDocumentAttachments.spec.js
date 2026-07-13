@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFile } from "node:fs/promises";
 import { handleChat, resolveConversationAttachmentMode } from "../src/api/chat.js";
 import {
   buildCloudflareDocumentAttachmentUserContent,
@@ -756,8 +757,7 @@ describe("Cloudflare document attachment adapter", () => {
   });
 
   it("does not contain the old disabled conversation attachment guard", async () => {
-    const source = await import("node:fs/promises")
-      .then(fs => fs.readFile("src/api/chat.js", "utf8"));
+    const source = await readFile(new URL("../src/api/chat.js", import.meta.url), "utf8");
 
     expect(source).not.toContain("if (false && hasConversationAttachments)");
   });

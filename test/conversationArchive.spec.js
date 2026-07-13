@@ -64,6 +64,12 @@ class FakeD1 {
 
   all(sql, bindings) {
     const normalized = this.normalize(sql);
+    if (normalized.includes("from messages") && normalized.includes("where conversation_id = ?")) {
+      return [...this.messages.values()]
+        .filter(message => message.conversation_id === bindings[0])
+        .sort((left, right) => Number(left.created_at || 0) - Number(right.created_at || 0))
+        .map(message => ({ ...message }));
+    }
     if (normalized.includes("from conversations c")) {
       const fallbackProjectId = bindings[1];
       const projectId = bindings[2];
@@ -123,7 +129,8 @@ class FakeD1 {
 
   run(sql, bindings) {
     const normalized = this.normalize(sql);
-    if (normalized.startsWith("alter table conversations add column")
+    if (normalized.startsWith("alter table messages add column")
+      || normalized.startsWith("alter table conversations add column")
       || normalized.startsWith("create index if not exists idx_conversations_project_archive")) {
       this.schemaStatements.push(normalized);
       return;
@@ -184,8 +191,8 @@ class FakeD1 {
       return;
     }
     if (normalized.startsWith("insert into messages")) {
-      const [id, conversationId, role, content, createdAt] = bindings;
-      this.messages.set(id, { id, conversation_id: conversationId, role, content, created_at: createdAt });
+      const [id, conversationId, role, content, createdAt, metadata] = bindings;
+      this.messages.set(id, { id, conversation_id: conversationId, role, content, created_at: createdAt, metadata });
       return;
     }
     if (normalized.startsWith("delete from conversations")) {
@@ -428,6 +435,42 @@ describe("conversation archive state", () => {
 
     expect(db.conversations.get("active-again").is_archived).toBe(0);
     expect(db.conversations.get("active-again").archived_at).toBe(null);
+  });
+
+  it("persists assistant message metadata and returns it from history", async () => {
+    const db = new FakeD1();
+    addConversation(db, "metadata-chat", Date.now());
+
+    const saved = await saveMessage(db, "metadata-chat", "assistant", "hello", {
+      provider: "openai",
+      provider_label: "OpenAI",
+      model: "gpt-5.5",
+      model_label: "GPT-5.5",
+      runtime: "OpenClaw Hillsboro",
+      runtime_id: "hillsboro-openclaw",
+      agent: "openclaw",
+      execution_mode: "bridge",
+      ignored: "not persisted"
+    });
+
+    expect(saved.metadata).toEqual({
+      provider: "openai",
+      provider_label: "OpenAI",
+      model: "gpt-5.5",
+      model_label: "GPT-5.5",
+      runtime: "OpenClaw Hillsboro",
+      runtime_id: "hillsboro-openclaw",
+      agent: "openclaw",
+      execution_mode: "bridge"
+    });
+
+    const body = await json(await handleHistory(
+      new Request("http://example.com/api/conversations/metadata-chat/messages"),
+      env(db),
+      new URL("http://example.com/api/conversations/metadata-chat/messages")
+    ));
+
+    expect(body.messages[0].metadata).toEqual(saved.metadata);
   });
 
   it("honors persisted Never auto-archive setting", async () => {

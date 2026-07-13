@@ -226,14 +226,19 @@ class FakeD1 {
         conversation_id: bindings[1],
         role: bindings[2],
         content: bindings[3],
-        created_at: bindings[4]
+        created_at: bindings[4],
+        metadata: bindings[5] || null
       });
       return;
     }
     if (normalized.startsWith("update messages")) {
-      const message = this.messages.get(bindings[1]);
+      const messageId = normalized.includes("metadata = coalesce") ? bindings[2] : bindings[1];
+      const message = this.messages.get(messageId);
       if (message?.role === "assistant") {
         message.content = bindings[0] || "";
+        if (normalized.includes("metadata = coalesce") && bindings[1]) {
+          message.metadata = bindings[1];
+        }
       }
       return;
     }
@@ -553,6 +558,11 @@ describe("OpenClaw bridge callback endpoint", () => {
     expect(task.remote_status).toBe("completed");
     expect(task.remote_progress).toBe(100);
     expect(message.content).toBe("Final callback answer");
+    expect(JSON.parse(message.metadata)).toMatchObject({
+      provider: "openclaw-hillsboro",
+      model: "openclaw/glm5-2",
+      model_label: "zai/glm-5.2"
+    });
   });
 
   it("treats duplicate event_id as idempotent", async () => {

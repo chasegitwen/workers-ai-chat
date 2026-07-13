@@ -418,7 +418,8 @@ describe("Project workspace foundation", () => {
       conversation_id: "legacy-conversation",
       role: "user",
       content: "hello",
-      created_at: 1
+      created_at: 1,
+      metadata: null
     }]);
   });
 

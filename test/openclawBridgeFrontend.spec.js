@@ -146,7 +146,7 @@ describe("OpenClaw bridge frontend SSE state", () => {
     const page = htmlPage();
 
     expect(page).toMatch(/<div id="archivePanel" class="archivePanel">[\s\S]*?<button id="archiveToggleBtn"[\s\S]*?<span>Archive<\/span>[\s\S]*?<div id="archiveBody" class="archiveBody"><\/div>[\s\S]*?<div class="modelArea">/);
-    expect(page).toContain("include_archived:\"1\"");
+    expect(page).toContain("archived_only");
     expect(page).toContain("id=\"autoArchiveDaysSelect\"");
     expect(page).toContain("autoArchiveDays:normalizeAutoArchiveDays(base.autoArchiveDays)");
     expect(page).toContain("modelSettingsState.autoArchiveDays = normalizeAutoArchiveDays(autoArchiveDaysSelect.value);");
@@ -155,9 +155,9 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("return Boolean(item.archived || item.is_archived || item.status === \"archived\");");
     expect(page).toContain("function visibleConversations(conversations)");
     expect(page).toContain("const pinnedDiff = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));");
-    expect(page).toContain("async function fetchArchiveSourceConversations(knownLists = [])");
-    expect(page).toContain("archiveSourceConversations = await fetchArchiveSourceConversations([commonConversations]);");
-    expect(page).toContain("archiveSourceConversations = await fetchArchiveSourceConversations([commonConversations, projectConversations]);");
+    expect(page).toContain("async function fetchArchiveSourceConversations()");
+    expect(page).toContain("archiveSourceConversations = await fetchArchiveSourceConversations();");
+    expect(page).toContain("fetchConversationsForProject(projectId, { archivedOnly:true, limit:1000 })");
     expect(page).toContain("function groupedArchiveConversations(conversations)");
     expect(page).toContain("function conversationArchivedAt(item)");
     expect(page).toContain("\"Today\"");
@@ -171,6 +171,8 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("appendConversationMenuItem(menu, \"Delete\", () => deleteConversation(item.id, item.title || \"New Chat\"));");
     expect(page).toContain("JSON.stringify({ action })");
     expect(page).toContain("await loadConversations({ clearMissingCurrent:false });");
+    expect(page).toContain("async function loadMoreConversations()");
+    expect(page).toContain("conversationLoadMoreBtn.addEventListener(\"click\", loadMoreConversations)");
     expect(page).toContain("pinMark.textContent = \"PIN\";");
     expect(page).toContain("row.addEventListener(\"contextmenu\"");
     expect(page).toContain("restoreConversationAfterNewMessage(currentConversationId);");
@@ -201,6 +203,7 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("placeholder=\"Search Conversations\"");
     expect(page).toMatch(/<div class="sidebarSectionHeader">\s*<span>Conversations<\/span>[\s\S]*?conversationNewChatBtn[\s\S]*?conversationSearchToggleBtn/);
     expect(page).toContain("id=\"conversationList\"");
+    expect(page).toContain("id=\"conversationLoadMoreBtn\"");
     expect(page).toMatch(/<div id="projectStatus" class="projectStatus"><\/div>[\s\S]*?<div class="sidebarSection chatsSection">/);
     expect(page).toMatch(/<\/aside>\s*<div id="projectSettingsPopover" class="projectSettingsPopover" hidden>/);
     expect(page).toContain("id=\"modelSelect\"");
@@ -277,9 +280,12 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("String.fromCharCode(9662)");
     expect(page).toContain("String.fromCharCode(9656)");
     expect(page).toContain("fetchConversationsForProject(DEFAULT_PROJECT_ID)");
-    expect(page).toContain("renderConversationRows(conversationList, visibleConversations(commonConversations))");
+    expect(page).toContain("renderConversationRows(conversationList, commonConversations)");
     expect(page).toContain("conversationList.hidden = false");
     expect(page).toContain("applyChatSearchFilter");
+    expect(page).toContain("params.set(\"cursor\", options.cursor);");
+    expect(page).toContain("params.set(\"q\", options.q);");
+    expect(page).toContain("return normalizeConversationPage(data);");
     expect(page).toContain("runtimeCapabilityLabel");
     expect(page).toContain("renderRuntimeBinding");
     expect(page).toContain("runtimeCanBeBridgeDefault");

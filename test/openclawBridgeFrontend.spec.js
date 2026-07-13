@@ -90,6 +90,55 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).not.toContain(mojibakeSecond);
   });
 
+  it("renders explanatory markdown code blocks with a neutral light style while keeping programming code dark", () => {
+    const page = htmlPage();
+
+    expect(page).toContain("const LIGHT_CODE_BLOCK_LANGUAGES = new Set");
+    expect(page).toContain("\"text\"");
+    expect(page).toContain("\"plaintext\"");
+    expect(page).toContain("\"flow\"");
+    expect(page).toContain("\"diagram\"");
+    expect(page).toContain("\"mermaid\"");
+    expect(page).toMatch(/function codeBlockTone\(pre, code\)\{[\s\S]*?LIGHT_CODE_BLOCK_LANGUAGES\.has\(language\)[\s\S]*?return "light";[\s\S]*?if\(!language\)[\s\S]*?return "light";[\s\S]*?return "dark";/);
+    expect(page).toContain("wrapper.className = \"codeBlock \" + codeBlockTone(pre, code);");
+    expect(page).toContain(".codeBlock.light");
+    expect(page).toContain("background:#f8fafc;");
+    expect(page).toContain("color:#111827;");
+    expect(page).toContain(".codeBlock.dark");
+    expect(page).toContain("background:#111827;");
+    expect(page).toContain("white-space:pre-wrap;");
+  });
+
+  it("keeps markdown copy, math, table, and list enhancements wired", () => {
+    const page = htmlPage();
+
+    expect(page).toContain("button.dataset.copyCode = \"1\";");
+    expect(page).toContain("button.dataset.code = code.textContent || \"\";");
+    expect(page).toContain("const code = codeButton.dataset.code || codeButton.closest(\".codeBlock\")?.querySelector(\"code\")?.textContent || \"\";");
+    expect(page).toContain("copyBtn.dataset.copyMessage = \"1\";");
+    expect(page).toContain("body.innerHTML = parseAssistantMarkdown(markdown || \"\");");
+    expect(page).toContain("enhanceCodeBlocks(body);");
+    expect(page).toContain("enhanceTables(body);");
+    expect(page).toContain("renderKatexMath(body);");
+    expect(page).toContain(".assistantMessageBody ul,");
+    expect(page).toContain(".assistantMessageBody ol{");
+    expect(page).toContain(".tableWrap{");
+  });
+
+  it("uses neutral message and action colors while preserving primary color for links", () => {
+    const page = htmlPage();
+
+    expect(page).toContain("--user:#f3f4f6;");
+    expect(page).toContain("--user-text:#111827;");
+    expect(page).toContain("color:var(--user-text);");
+    expect(page).toContain("--button-neutral:#4b5563;");
+    expect(page).toContain("background:var(--button-neutral);");
+    expect(page).toContain("background:var(--button-neutral-hover);");
+    expect(page).toContain(".assistantMessageBody a{\n  color:var(--primary);\n}");
+    expect(page).not.toContain(".browserToolBtn{\n  background:#0f766e;");
+    expect(page).not.toContain("#sendBtn{\n  border:none;\n  background:var(--primary);");
+  });
+
   it("sends an explicit Seattle runtime_id when the selected OpenClaw model is Seattle", () => {
     const page = htmlPage();
 
@@ -104,9 +153,9 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).not.toContain("id=\"commonChatsBtn\"");
     expect(page).not.toContain("id=\"projectSelect\"");
     expect(page).toContain("id=\"chatSearchInput\"");
-    expect(page).toContain("placeholder=\"Search Chats\"");
+    expect(page).toContain("placeholder=\"Search Conversations\"");
     expect(page).toContain("id=\"projectList\"");
-    expect(page).toContain("class=\"sidebarSectionHeader\">Chats</div>");
+    expect(page).toContain("class=\"sidebarSectionHeader\">Conversations</div>");
     expect(page).toContain("id=\"conversationList\"");
     expect(page).toMatch(/<div id="projectStatus" class="projectStatus"><\/div>[\s\S]*?<div class="sidebarSection chatsSection">/);
     expect(page).toMatch(/<\/aside>\s*<div id="projectSettingsPopover" class="projectSettingsPopover" hidden>/);

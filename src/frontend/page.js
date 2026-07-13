@@ -74,8 +74,8 @@
   }
 
   .inputMenu button:hover{
-    background:rgba(37,99,235,.08);
-    color:var(--primary);
+    background:rgba(148,163,184,.14);
+    color:var(--text);
   }
   
   #fileStatus{
@@ -267,7 +267,7 @@
   }
 
 :root{
-  --bg:#eef2ff;
+  --bg:#f4f4f5;
   --panel:#ffffff;
   --panel-soft:#f8fafc;
   --text:#111827;
@@ -276,7 +276,10 @@
   --primary-dark:#1d4ed8;
   --border:#e5e7eb;
   --ai:#ffffff;
-  --user:#2563eb;
+  --user:#f3f4f6;
+  --user-text:#111827;
+  --button-neutral:#4b5563;
+  --button-neutral-hover:#374151;
 }
 
 body.dark{
@@ -289,7 +292,10 @@ body.dark{
   --primary-dark:#3b82f6;
   --border:#374151;
   --ai:#1f2937;
-  --user:#2563eb;
+  --user:#374151;
+  --user-text:#f9fafb;
+  --button-neutral:#4b5563;
+  --button-neutral-hover:#6b7280;
 }
 
 *{
@@ -1390,8 +1396,8 @@ body.dark .projectRuntimeItem{
 }
 
 .contextPanelClose:hover{
-  background:rgba(37,99,235,.08);
-  color:var(--primary);
+  background:rgba(148,163,184,.14);
+  color:var(--text);
 }
 
 .contextPanelBody{
@@ -1455,9 +1461,9 @@ body.dark .projectRuntimeItem{
 }
 
 .contextUploadBtn:hover{
-  border-color:rgba(37,99,235,.35);
-  background:rgba(37,99,235,.08);
-  color:var(--primary);
+  border-color:rgba(148,163,184,.45);
+  background:rgba(148,163,184,.14);
+  color:var(--text);
 }
 
 .badge{
@@ -1541,7 +1547,7 @@ body.dark .projectRuntimeItem{
 .user{
   align-self:flex-end;
   background:var(--user);
-  color:white;
+  color:var(--user-text);
   border-bottom-right-radius:4px;
 }
 
@@ -1638,9 +1644,11 @@ body.dark .projectRuntimeItem{
 .ai pre{
   background:#111827;
   color:#f9fafb;
+  border:1px solid rgba(255,255,255,.08);
   padding:12px;
   border-radius:10px;
   overflow:auto;
+  white-space:pre-wrap;
 }
 
 .ai code{
@@ -1697,6 +1705,7 @@ body.dark .projectRuntimeItem{
   border-radius:10px;
   overflow:hidden;
   background:#111827;
+  border:1px solid rgba(255,255,255,.08);
 }
 
 .codeBlockToolbar{
@@ -1709,6 +1718,32 @@ body.dark .projectRuntimeItem{
 .codeBlock pre{
   margin:0;
   border-radius:0;
+  border:0;
+}
+
+.codeBlock.light{
+  background:#f8fafc;
+  border-color:#e5e7eb;
+}
+
+.codeBlock.light .codeBlockToolbar{
+  border-bottom:1px solid #e5e7eb;
+}
+
+.codeBlock.light pre{
+  background:#f8fafc;
+  color:#111827;
+}
+
+.codeBlock.light .codeCopyBtn{
+  border-color:#d1d5db;
+  background:#ffffff;
+  color:#374151;
+}
+
+.codeBlock.dark{
+  background:#111827;
+  border-color:rgba(255,255,255,.08);
 }
 
 .tableWrap{
@@ -2056,7 +2091,11 @@ body.dark .toolErrorNotice{
   cursor:pointer;
   white-space:nowrap;
   flex:0 0 auto;
-  background:#475569;
+  background:var(--button-neutral);
+}
+
+.toolBtn:hover{
+  background:var(--button-neutral-hover);
 }
 
 .toolMenuWrap .inputMenu{
@@ -2084,7 +2123,7 @@ body.dark .toolErrorNotice{
 }
 
 .browserToolInput:focus{
-  border-color:var(--primary);
+  border-color:#9ca3af;
 }
 
 .browserToolPanel{
@@ -2111,11 +2150,16 @@ body.dark .toolErrorNotice{
   cursor:pointer;
   white-space:nowrap;
   flex:0 0 auto;
-  background:#0f766e;
+  background:var(--button-neutral);
 }
 
 .browserToolToggleBtn{
-  background:#334155;
+  background:#6b7280;
+}
+
+.browserToolToggleBtn:hover,
+.browserToolBtn:hover{
+  background:var(--button-neutral-hover);
 }
 
 .browserToolBtn:disabled{
@@ -2602,8 +2646,8 @@ body.dark .toolErrorNotice{
 }
 
 .actionMenu button:hover{
-  background:rgba(37,99,235,.08);
-  color:var(--primary);
+  background:rgba(148,163,184,.14);
+  color:var(--text);
 }
 
 .modelRow{
@@ -2704,7 +2748,7 @@ body.dark .toolErrorNotice{
 
 #sendBtn{
   border:none;
-  background:var(--primary);
+  background:var(--button-neutral);
   color:white;
   min-height:40px;
   padding:0 20px;
@@ -2715,7 +2759,7 @@ body.dark .toolErrorNotice{
 }
 
 #sendBtn:hover{
-  background:var(--primary-dark);
+  background:var(--button-neutral-hover);
 }
 
 #sendBtn:disabled{
@@ -10853,6 +10897,37 @@ function parseAssistantMarkdown(markdown){
   return marked.parse(renderMathMarkup(markdown || ""));
 }
 
+const LIGHT_CODE_BLOCK_LANGUAGES = new Set([
+  "",
+  "text",
+  "txt",
+  "plain",
+  "plaintext",
+  "flow",
+  "diagram",
+  "ascii",
+  "ascii-art",
+  "mermaid"
+]);
+
+function codeBlockLanguage(code){
+  const classList = Array.from(code?.classList || []);
+  const languageClass = classList.find(name => name.startsWith("language-") || name.startsWith("lang-")) || "";
+  const language = languageClass.replace(/^(language|lang)-/, "").toLowerCase();
+  return language || String(code?.getAttribute?.("data-lang") || "").toLowerCase();
+}
+
+function codeBlockTone(pre, code){
+  const language = codeBlockLanguage(code);
+  if(LIGHT_CODE_BLOCK_LANGUAGES.has(language)){
+    return "light";
+  }
+  if(!language){
+    return "light";
+  }
+  return "dark";
+}
+
 function enhanceCodeBlocks(container){
   container.querySelectorAll("pre").forEach(pre => {
     if(pre.closest(".codeBlock")){
@@ -10860,7 +10935,7 @@ function enhanceCodeBlocks(container){
     }
     const code = pre.querySelector("code");
     const wrapper = document.createElement("div");
-    wrapper.className = "codeBlock";
+    wrapper.className = "codeBlock " + codeBlockTone(pre, code);
     const toolbar = document.createElement("div");
     toolbar.className = "codeBlockToolbar";
     const button = document.createElement("button");

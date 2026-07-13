@@ -5240,6 +5240,7 @@ async function readExistingConversation(env, conversationId) {
   if (!env.DB || !id) {
     return null;
   }
+  await ensureConversationArchiveSchema(env.DB);
   return env.DB.prepare(
     "SELECT id, title, project_id, created_at, updated_at, is_archived, archived_at, pinned FROM conversations WHERE id = ?"
   ).bind(id).first();

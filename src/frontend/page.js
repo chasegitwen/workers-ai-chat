@@ -1130,12 +1130,15 @@ body.dark .projectRuntimeItem{
 
 .archiveToggle,
 .archiveGroupToggle{
+  appearance:none;
+  -webkit-appearance:none;
   width:100%;
   min-height:30px;
   display:flex;
   align-items:center;
   gap:6px;
   border:0;
+  outline:none;
   border-radius:8px;
   background:transparent;
   color:var(--muted);
@@ -1149,6 +1152,15 @@ body.dark .projectRuntimeItem{
 .archiveGroupToggle:hover{
   background:rgba(148,163,184,.12);
   color:var(--text);
+}
+
+.archiveToggle:focus-visible{
+  background:rgba(148,163,184,.12);
+  box-shadow:0 0 0 2px rgba(148,163,184,.22);
+}
+
+.archivePanel.open .archiveToggle{
+  background:rgba(148,163,184,.1);
 }
 
 .archiveBody{

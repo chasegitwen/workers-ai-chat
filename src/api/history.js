@@ -92,7 +92,12 @@ function isAlreadyAppliedSchemaError(err) {
 
 async function runSchemaStatement(db, statement) {
   try {
-    await db.prepare(statement).run();
+    const prepared = db.prepare(statement);
+    if (typeof prepared.run === "function") {
+      await prepared.run();
+    } else {
+      await prepared.bind().run();
+    }
   } catch (err) {
     if (!isAlreadyAppliedSchemaError(err)) {
       throw err;
@@ -144,6 +149,39 @@ function normalizeAutoArchiveDays(value) {
   }
   const days = Number(value || 90);
   return [30, 60, 90].includes(days) ? days : 90;
+}
+
+function isAlreadyAppliedSchemaError(err) {
+  const message = String(err?.message || err || "").toLowerCase();
+  return message.includes("duplicate column")
+    || message.includes("already exists")
+    || message.includes("duplicate column name");
+}
+
+async function runSchemaStatement(db, statement) {
+  const prepared = db.prepare(statement);
+  if (typeof prepared.run === "function") {
+    return prepared.run();
+  }
+  return prepared.bind().run();
+}
+
+export async function ensureConversationArchiveSchema(db) {
+  if (!db || conversationArchiveSchemaReady.has(db)) {
+    return;
+  }
+
+  for (const statement of conversationArchiveSchemaStatements) {
+    try {
+      await runSchemaStatement(db, statement);
+    } catch (err) {
+      if (!isAlreadyAppliedSchemaError(err)) {
+        throw err;
+      }
+    }
+  }
+
+  conversationArchiveSchemaReady.add(db);
 }
 
 async function readAutoArchiveDays(db) {

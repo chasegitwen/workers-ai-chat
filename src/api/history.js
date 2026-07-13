@@ -5,6 +5,16 @@ const messageMetadataSchemaReady = new WeakSet();
 const messageMetadataSchemaStatements = [
   "ALTER TABLE messages ADD COLUMN metadata TEXT"
 ];
+const conversationArchiveSchemaReady = new WeakSet();
+const conversationArchiveSchemaStatements = [
+  "ALTER TABLE conversations ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE conversations ADD COLUMN archived_at INTEGER",
+  "ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+  `CREATE INDEX IF NOT EXISTS idx_conversations_project_archive_updated
+   ON conversations(project_id, is_archived, updated_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_conversations_project_archived_at
+   ON conversations(project_id, is_archived, archived_at DESC)`
+];
 
 export function createId() {
   return crypto.randomUUID();
@@ -80,22 +90,90 @@ function isAlreadyAppliedSchemaError(err) {
     || message.includes("duplicate column name");
 }
 
+async function runSchemaStatement(db, statement) {
+  try {
+    await db.prepare(statement).run();
+  } catch (err) {
+    if (!isAlreadyAppliedSchemaError(err)) {
+      throw err;
+    }
+  }
+}
+
+export async function ensureConversationArchiveSchema(db) {
+  if (!db || conversationArchiveSchemaReady.has(db)) {
+    return;
+  }
+
+  for (const statement of conversationArchiveSchemaStatements) {
+    await runSchemaStatement(db, statement);
+  }
+
+  conversationArchiveSchemaReady.add(db);
+}
+
 export async function ensureMessageMetadataSchema(db) {
   if (!db || messageMetadataSchemaReady.has(db)) {
     return;
   }
 
   for (const statement of messageMetadataSchemaStatements) {
-    try {
-      await db.prepare(statement).run();
-    } catch (err) {
-      if (!isAlreadyAppliedSchemaError(err)) {
-        throw err;
-      }
-    }
+    await runSchemaStatement(db, statement);
   }
 
   messageMetadataSchemaReady.add(db);
+}
+
+function normalizeConversation(row) {
+  if (!row) {
+    return null;
+  }
+  return {
+    ...row,
+    project_id: row.project_id || DEFAULT_PROJECT_ID,
+    is_archived: Number(row.is_archived || 0) === 1,
+    archived: Number(row.is_archived || 0) === 1,
+    archived_at: row.archived_at || null,
+    pinned: Number(row.pinned || 0) === 1
+  };
+}
+
+function normalizeAutoArchiveDays(value) {
+  if (value === "never" || value === "Never" || value === 0 || value === "0") {
+    return 0;
+  }
+  const days = Number(value || 90);
+  return [30, 60, 90].includes(days) ? days : 90;
+}
+
+async function readAutoArchiveDays(db) {
+  try {
+    const row = await db.prepare(
+      "SELECT value FROM settings WHERE key = ?"
+    ).bind("model_settings").first();
+    const settings = row?.value ? JSON.parse(row.value) : null;
+    return normalizeAutoArchiveDays(settings?.autoArchiveDays);
+  } catch (err) {
+    return 90;
+  }
+}
+
+async function autoArchiveInactiveConversations(db, projectId) {
+  const days = await readAutoArchiveDays(db);
+  if (!days) {
+    return;
+  }
+  const timestamp = now();
+  const cutoff = timestamp - days * 24 * 60 * 60 * 1000;
+  await db.prepare(
+    `UPDATE conversations
+     SET is_archived = 1,
+       archived_at = ?
+     WHERE COALESCE(project_id, ?) = ?
+       AND COALESCE(is_archived, 0) = 0
+       AND COALESCE(pinned, 0) = 0
+       AND updated_at <= ?`
+  ).bind(timestamp, DEFAULT_PROJECT_ID, projectId, cutoff).run();
 }
 
 export function titleFromMessage(content) {
@@ -120,6 +198,8 @@ function requestProjectId(data, url) {
 }
 
 export async function createConversation(db, title = "New Chat", projectId = "") {
+  await ensureConversationArchiveSchema(db);
+
   const id = createId();
   const timestamp = now();
   const resolvedProjectId = await resolveProjectId(db, projectId);
@@ -133,17 +213,23 @@ export async function createConversation(db, title = "New Chat", projectId = "")
     title,
     project_id: resolvedProjectId,
     created_at: timestamp,
-    updated_at: timestamp
+    updated_at: timestamp,
+    is_archived: false,
+    archived: false,
+    archived_at: null,
+    pinned: false
   };
 }
 
 export async function ensureConversation(db, conversationId, title, projectId = "") {
+  await ensureConversationArchiveSchema(db);
+
   const nextTitle = cleanTitle(title) || "New Chat";
   const resolvedProjectId = await resolveProjectId(db, projectId);
 
   if (conversationId) {
     const existing = await db.prepare(
-      "SELECT id, title, project_id, created_at, updated_at FROM conversations WHERE id = ?"
+      "SELECT id, title, project_id, created_at, updated_at, is_archived, archived_at, pinned FROM conversations WHERE id = ?"
     ).bind(conversationId).first();
 
     if (existing) {
@@ -154,14 +240,14 @@ export async function ensureConversation(db, conversationId, title, projectId = 
         ).bind(nextTitle, conversationId).run();
 
         return {
-          ...existing,
+          ...normalizeConversation(existing),
           project_id: existingProjectId,
           title: nextTitle
         };
       }
 
       return {
-        ...existing,
+        ...normalizeConversation(existing),
         project_id: existingProjectId
       };
     }
@@ -171,6 +257,7 @@ export async function ensureConversation(db, conversationId, title, projectId = 
 }
 
 export async function saveMessage(db, conversationId, role, content, metadata = null) {
+  await ensureConversationArchiveSchema(db);
   await ensureMessageMetadataSchema(db);
 
   const timestamp = now();
@@ -182,7 +269,7 @@ export async function saveMessage(db, conversationId, role, content, metadata = 
       "INSERT INTO messages (id, conversation_id, role, content, created_at, metadata) VALUES (?, ?, ?, ?, ?, ?)"
     ).bind(id, conversationId, role, content || "", timestamp, cleanMetadata ? JSON.stringify(cleanMetadata) : null),
     db.prepare(
-      "UPDATE conversations SET updated_at = ? WHERE id = ?"
+      "UPDATE conversations SET updated_at = ?, is_archived = 0, archived_at = NULL WHERE id = ?"
     ).bind(timestamp, conversationId)
   ]);
 
@@ -224,11 +311,14 @@ export async function handleHistory(request, env, url) {
     }, 500);
   }
 
+  await ensureConversationArchiveSchema(env.DB);
   await ensureMessageMetadataSchema(env.DB);
 
   if (request.method === "GET" && url.pathname === "/api/conversations") {
     await ensureDefaultProject(env.DB);
     const projectId = requestProjectId(null, url) || DEFAULT_PROJECT_ID;
+    const includeArchived = ["1", "true"].includes(String(url.searchParams.get("include_archived") || url.searchParams.get("includeArchived") || "").toLowerCase());
+    await autoArchiveInactiveConversations(env.DB, projectId);
     const result = await env.DB.prepare(
       `SELECT
          c.id,
@@ -236,6 +326,9 @@ export async function handleHistory(request, env, url) {
          COALESCE(c.project_id, ?) AS project_id,
          c.created_at,
          c.updated_at,
+         c.is_archived,
+         c.archived_at,
+         c.pinned,
          COUNT(m.id) AS message_count,
          (
            SELECT content
@@ -247,16 +340,17 @@ export async function handleHistory(request, env, url) {
        FROM conversations c
        LEFT JOIN messages m ON m.conversation_id = c.id
        WHERE COALESCE(c.project_id, ?) = ?
-       GROUP BY c.id, c.title, c.project_id, c.created_at, c.updated_at
-       ORDER BY c.updated_at DESC
+         AND (? = 1 OR COALESCE(c.is_archived, 0) = 0)
+       GROUP BY c.id, c.title, c.project_id, c.created_at, c.updated_at, c.is_archived, c.archived_at, c.pinned
+       ORDER BY COALESCE(c.is_archived, 0) ASC, c.updated_at DESC
        LIMIT 50`
-    ).bind(DEFAULT_PROJECT_ID, DEFAULT_PROJECT_ID, projectId).all();
+    ).bind(DEFAULT_PROJECT_ID, DEFAULT_PROJECT_ID, projectId, includeArchived ? 1 : 0).all();
 
     return jsonResponse({
       ok: true,
       project_id: projectId,
       conversations: (result.results || []).map(item => ({
-        ...item,
+        ...normalizeConversation(item),
         last_message_preview: item.last_message_preview
           ? String(item.last_message_preview).replace(/\s+/g, " ").trim().slice(0, 80)
           : ""
@@ -352,6 +446,38 @@ export async function handleHistory(request, env, url) {
 
   if (request.method === "PATCH" && conversationMatch) {
     const data = await request.json().catch(() => ({}));
+    const action = String(data.action || "").trim().toLowerCase();
+    const timestamp = now();
+
+    if (["pin", "unpin", "archive", "restore"].includes(action)) {
+      if (action === "pin") {
+        await env.DB.prepare(
+          "UPDATE conversations SET pinned = 1 WHERE id = ?"
+        ).bind(conversationMatch[1]).run();
+      } else if (action === "unpin") {
+        await env.DB.prepare(
+          "UPDATE conversations SET pinned = 0 WHERE id = ?"
+        ).bind(conversationMatch[1]).run();
+      } else if (action === "archive") {
+        await env.DB.prepare(
+          "UPDATE conversations SET is_archived = 1, archived_at = ? WHERE id = ?"
+        ).bind(timestamp, conversationMatch[1]).run();
+      } else if (action === "restore") {
+        await env.DB.prepare(
+          "UPDATE conversations SET is_archived = 0, archived_at = NULL WHERE id = ?"
+        ).bind(conversationMatch[1]).run();
+      }
+
+      const conversation = await env.DB.prepare(
+        "SELECT id, title, project_id, created_at, updated_at, is_archived, archived_at, pinned FROM conversations WHERE id = ?"
+      ).bind(conversationMatch[1]).first();
+
+      return jsonResponse({
+        ok: true,
+        conversation: normalizeConversation(conversation)
+      });
+    }
+
     const title = cleanTitle(data.title);
 
     if (!title) {
@@ -360,8 +486,6 @@ export async function handleHistory(request, env, url) {
         error: "title must be a non-empty string"
       }, 400);
     }
-
-    const timestamp = now();
 
     await env.DB.prepare(
       "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?"

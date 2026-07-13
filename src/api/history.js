@@ -380,7 +380,7 @@ export async function handleHistory(request, env, url) {
        WHERE COALESCE(c.project_id, ?) = ?
          AND (? = 1 OR COALESCE(c.is_archived, 0) = 0)
        GROUP BY c.id, c.title, c.project_id, c.created_at, c.updated_at, c.is_archived, c.archived_at, c.pinned
-       ORDER BY COALESCE(c.is_archived, 0) ASC, c.updated_at DESC
+       ORDER BY COALESCE(c.is_archived, 0) ASC, COALESCE(c.pinned, 0) DESC, c.updated_at DESC
        LIMIT 50`
     ).bind(DEFAULT_PROJECT_ID, DEFAULT_PROJECT_ID, projectId, includeArchived ? 1 : 0).all();
 
@@ -486,29 +486,44 @@ export async function handleHistory(request, env, url) {
     const data = await request.json().catch(() => ({}));
     const action = String(data.action || "").trim().toLowerCase();
     const timestamp = now();
+    const conversationId = decodeURIComponent(conversationMatch[1]);
+
+    if (action && !["pin", "unpin", "archive", "restore"].includes(action)) {
+      return jsonResponse({
+        ok: false,
+        error: "unsupported conversation action"
+      }, 400);
+    }
 
     if (["pin", "unpin", "archive", "restore"].includes(action)) {
       if (action === "pin") {
         await env.DB.prepare(
           "UPDATE conversations SET pinned = 1 WHERE id = ?"
-        ).bind(conversationMatch[1]).run();
+        ).bind(conversationId).run();
       } else if (action === "unpin") {
         await env.DB.prepare(
           "UPDATE conversations SET pinned = 0 WHERE id = ?"
-        ).bind(conversationMatch[1]).run();
+        ).bind(conversationId).run();
       } else if (action === "archive") {
         await env.DB.prepare(
           "UPDATE conversations SET is_archived = 1, archived_at = ? WHERE id = ?"
-        ).bind(timestamp, conversationMatch[1]).run();
+        ).bind(timestamp, conversationId).run();
       } else if (action === "restore") {
         await env.DB.prepare(
           "UPDATE conversations SET is_archived = 0, archived_at = NULL WHERE id = ?"
-        ).bind(conversationMatch[1]).run();
+        ).bind(conversationId).run();
       }
 
       const conversation = await env.DB.prepare(
         "SELECT id, title, project_id, created_at, updated_at, is_archived, archived_at, pinned FROM conversations WHERE id = ?"
-      ).bind(conversationMatch[1]).first();
+      ).bind(conversationId).first();
+
+      if (!conversation) {
+        return jsonResponse({
+          ok: false,
+          error: "conversation not found"
+        }, 404);
+      }
 
       return jsonResponse({
         ok: true,

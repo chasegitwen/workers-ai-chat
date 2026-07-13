@@ -1008,6 +1008,10 @@ body.dark .projectRuntimeItem{
   background:rgba(37,99,235,.1);
 }
 
+.historyRow.pinned .historyItem{
+  font-weight:600;
+}
+
 .historyItem{
   min-width:0;
   flex:1;
@@ -1024,6 +1028,21 @@ body.dark .projectRuntimeItem{
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
+}
+
+.historyPinMark{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width:22px;
+  margin-right:6px;
+  border-radius:999px;
+  background:rgba(148,163,184,.16);
+  color:var(--muted);
+  font-size:9px;
+  font-weight:700;
+  line-height:1.4;
+  vertical-align:1px;
 }
 
 .historyItem.active{
@@ -10159,7 +10178,15 @@ function conversationArchivedAt(item){
 }
 
 function visibleConversations(conversations){
-  return (conversations || []).filter(item => !isConversationArchived(item));
+  return (conversations || [])
+    .filter(item => !isConversationArchived(item))
+    .sort((a, b) => {
+      const pinnedDiff = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));
+      if(pinnedDiff){
+        return pinnedDiff;
+      }
+      return conversationUpdatedAt(b) - conversationUpdatedAt(a);
+    });
 }
 
 function archivedConversations(conversations){
@@ -10305,19 +10332,25 @@ function mergeConversationState(conversation){
 }
 
 async function updateConversationState(conversationId, action){
-  const res = await fetch("/api/conversations/" + encodeURIComponent(conversationId), {
-    method:"PATCH",
-    headers:{ "Content-Type":"application/json; charset=utf-8" },
-    body:JSON.stringify({ action })
-  });
-  const data = await res.json();
-  if(!res.ok || !data.ok){
-    throw new Error(data.error || "update conversation failed");
+  try{
+    const res = await fetch("/api/conversations/" + encodeURIComponent(conversationId), {
+      method:"PATCH",
+      headers:{ "Content-Type":"application/json; charset=utf-8" },
+      body:JSON.stringify({ action })
+    });
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok || !data.ok){
+      throw new Error(data.error || "update conversation failed");
+    }
+    mergeConversationState(data.conversation);
+    await loadConversations({ clearMissingCurrent:false });
+    setProjectStatus("Conversation updated.");
+    return data.conversation;
+  }catch(err){
+    const message = err?.message || String(err);
+    setProjectStatus("Conversation update failed: " + message);
+    throw err;
   }
-  mergeConversationState(data.conversation);
-  renderCurrentConversationLists();
-  renderArchivePanel();
-  return data.conversation;
 }
 
 function archiveConversation(conversationId){
@@ -10380,18 +10413,18 @@ function renderConversationRows(targetList, conversations, options = {}){
     btn.type = "button";
     btn.className = "historyItem";
     btn.dataset.id = item.id;
-    btn.title = item.last_message_preview
-      ? (item.title || "New Chat") + "\\n" + item.last_message_preview
-      : (item.title || "New Chat");
     if(item.pinned && !inArchive){
       const pinMark = document.createElement("span");
       pinMark.className = "historyPinMark";
       pinMark.textContent = "PIN";
       btn.appendChild(pinMark);
-      btn.appendChild(document.createTextNode(" " + (item.title || "New Chat")));
-    }else{
-      btn.textContent = item.title || "New Chat";
     }
+    const titleText = document.createElement("span");
+    titleText.textContent = item.title || "New Chat";
+    btn.appendChild(titleText);
+    btn.title = item.last_message_preview
+      ? (item.title || "New Chat") + "\\n" + item.last_message_preview
+      : (item.title || "New Chat");
     btn.addEventListener("click", () => loadConversationMessages(item.id));
 
     const time = document.createElement("span");

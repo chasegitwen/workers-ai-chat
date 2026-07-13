@@ -154,6 +154,7 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("function isConversationArchived(item)");
     expect(page).toContain("return Boolean(item.archived || item.is_archived || item.status === \"archived\");");
     expect(page).toContain("function visibleConversations(conversations)");
+    expect(page).toContain("const pinnedDiff = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));");
     expect(page).toContain("function groupedArchiveConversations(conversations)");
     expect(page).toContain("function conversationArchivedAt(item)");
     expect(page).toContain("\"Today\"");
@@ -166,6 +167,8 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("appendConversationMenuItem(menu, \"Archive\", () => archiveConversation(item.id));");
     expect(page).toContain("appendConversationMenuItem(menu, \"Delete\", () => deleteConversation(item.id, item.title || \"New Chat\"));");
     expect(page).toContain("JSON.stringify({ action })");
+    expect(page).toContain("await loadConversations({ clearMissingCurrent:false });");
+    expect(page).toContain("pinMark.textContent = \"PIN\";");
     expect(page).toContain("row.addEventListener(\"contextmenu\"");
     expect(page).toContain("restoreConversationAfterNewMessage(currentConversationId);");
     expect(page).not.toContain("wa_archived_conversation_ids");

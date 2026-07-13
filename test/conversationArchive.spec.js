@@ -71,7 +71,10 @@ class FakeD1 {
       return [...this.conversations.values()]
         .filter(conversation => (conversation.project_id || fallbackProjectId) === projectId)
         .filter(conversation => includeArchived || Number(conversation.is_archived || 0) === 0)
-        .sort((left, right) => Number(right.updated_at || 0) - Number(left.updated_at || 0))
+        .sort((left, right) => {
+          const pinnedDiff = Number(right.pinned || 0) - Number(left.pinned || 0);
+          return pinnedDiff || Number(right.updated_at || 0) - Number(left.updated_at || 0);
+        })
         .map(conversation => {
           const messages = [...this.messages.values()]
             .filter(message => message.conversation_id === conversation.id)
@@ -112,22 +115,34 @@ class FakeD1 {
     }
     if (normalized.startsWith("update conversations") && normalized.includes("set pinned = 1")) {
       const conversation = this.conversations.get(bindings[0]);
+      if (!conversation) {
+        return;
+      }
       this.conversations.set(bindings[0], { ...conversation, pinned: 1 });
       return;
     }
     if (normalized.startsWith("update conversations") && normalized.includes("set pinned = 0")) {
       const conversation = this.conversations.get(bindings[0]);
+      if (!conversation) {
+        return;
+      }
       this.conversations.set(bindings[0], { ...conversation, pinned: 0 });
       return;
     }
     if (normalized.startsWith("update conversations") && normalized.includes("set is_archived = 1, archived_at = ? where id = ?")) {
       const [archivedAt, id] = bindings;
       const conversation = this.conversations.get(id);
+      if (!conversation) {
+        return;
+      }
       this.conversations.set(id, { ...conversation, is_archived: 1, archived_at: archivedAt });
       return;
     }
     if (normalized.startsWith("update conversations") && normalized.includes("set is_archived = 0, archived_at = null where id = ?")) {
       const conversation = this.conversations.get(bindings[0]);
+      if (!conversation) {
+        return;
+      }
       this.conversations.set(bindings[0], { ...conversation, is_archived: 0, archived_at: null });
       return;
     }
@@ -212,6 +227,20 @@ describe("conversation archive state", () => {
     expect(db.conversations.get("pinned-chat").is_archived).toBe(0);
   });
 
+  it("orders pinned active conversations before newer unpinned conversations", async () => {
+    const db = new FakeD1();
+    addConversation(db, "newer-chat", Date.now());
+    addConversation(db, "pinned-older-chat", Date.now() - 10 * 24 * 60 * 60 * 1000, { pinned: 1 });
+
+    const body = await json(await handleHistory(
+      new Request("http://example.com/api/conversations"),
+      env(db),
+      new URL("http://example.com/api/conversations")
+    ));
+
+    expect(body.conversations.map(item => item.id)).toEqual(["pinned-older-chat", "newer-chat"]);
+  });
+
   it("archives, restores, pins, and deletes through the existing conversation route", async () => {
     const db = new FakeD1();
     addConversation(db, "manual-chat", Date.now());
@@ -254,6 +283,24 @@ describe("conversation archive state", () => {
     );
     expect((await json(deleteResponse)).ok).toBe(true);
     expect(db.conversations.has("manual-chat")).toBe(false);
+  });
+
+  it("returns a clear 404 when a conversation action targets a missing conversation", async () => {
+    const db = new FakeD1();
+
+    const response = await handleHistory(
+      new Request("http://example.com/api/conversations/missing-chat", {
+        method: "PATCH",
+        body: JSON.stringify({ action: "pin" })
+      }),
+      env(db),
+      new URL("http://example.com/api/conversations/missing-chat")
+    );
+    const body = await json(response);
+
+    expect(response.status).toBe(404);
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe("conversation not found");
   });
 
   it("restores an archived conversation when a new message is saved", async () => {

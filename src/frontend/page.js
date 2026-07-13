@@ -1037,6 +1037,7 @@ body.dark .projectRuntimeItem{
 }
 
 .historyRow{
+  position:relative;
   display:flex;
   align-items:center;
   gap:8px;
@@ -1046,11 +1047,11 @@ body.dark .projectRuntimeItem{
 }
 
 .historyRow:hover{
-  background:rgba(37,99,235,.06);
+  background:rgba(148,163,184,.12);
 }
 
 .historyRow.active{
-  background:rgba(37,99,235,.1);
+  background:rgba(148,163,184,.16);
 }
 
 .historyItem{
@@ -1087,7 +1088,7 @@ body.dark .projectRuntimeItem{
   text-overflow:ellipsis;
 }
 
-.deleteConversationBtn{
+.conversationMenuBtn{
   display:none;
   align-items:center;
   justify-content:center;
@@ -1107,13 +1108,128 @@ body.dark .projectRuntimeItem{
   display:none;
 }
 
-.historyRow:hover .deleteConversationBtn{
+.historyRow:hover .conversationMenuBtn,
+.conversationMenuBtn[aria-expanded="true"]{
   display:flex;
 }
 
-.deleteConversationBtn:hover{
-  color:white;
-  background:#dc2626;
+.conversationMenuBtn:hover,
+.conversationMenuBtn[aria-expanded="true"]{
+  color:var(--text);
+  background:rgba(148,163,184,.16);
+}
+
+.conversationMenu{
+  position:absolute;
+  right:4px;
+  top:30px;
+  z-index:30;
+  min-width:112px;
+  display:none;
+  flex-direction:column;
+  gap:2px;
+  padding:5px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--panel);
+  box-shadow:0 12px 30px rgba(15,23,42,.16);
+}
+
+.conversationMenu.open{
+  display:flex;
+}
+
+.conversationMenu button{
+  width:100%;
+  border:0;
+  border-radius:8px;
+  background:transparent;
+  color:var(--text);
+  cursor:pointer;
+  padding:7px 9px;
+  font-size:12px;
+  text-align:left;
+  white-space:nowrap;
+}
+
+.conversationMenu button:hover{
+  background:rgba(148,163,184,.14);
+}
+
+.archivePanel{
+  flex:0 0 auto;
+  margin:8px 0 10px;
+}
+
+.archiveToggle{
+  width:100%;
+  min-height:34px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  border:0;
+  border-radius:8px;
+  background:transparent;
+  color:var(--text);
+  cursor:pointer;
+  padding:6px 4px;
+  font-size:13px;
+  font-weight:600;
+  text-align:left;
+}
+
+.archiveToggle:hover{
+  background:rgba(148,163,184,.12);
+}
+
+.archiveBody{
+  display:none;
+  flex-direction:column;
+  gap:2px;
+  padding-top:2px;
+}
+
+.archivePanel.open .archiveBody{
+  display:flex;
+}
+
+.archiveGroupToggle{
+  width:100%;
+  min-height:30px;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  border:0;
+  border-radius:8px;
+  background:transparent;
+  color:var(--muted);
+  cursor:pointer;
+  padding:5px 4px;
+  font-size:12px;
+  text-align:left;
+}
+
+.archiveGroupToggle:hover{
+  background:rgba(148,163,184,.12);
+  color:var(--text);
+}
+
+.archiveGroupList{
+  display:none;
+  flex-direction:column;
+  gap:2px;
+  padding-left:10px;
+}
+
+.archiveGroup.open .archiveGroupList{
+  display:flex;
+}
+
+.archiveEmpty{
+  color:var(--muted);
+  font-size:12px;
+  padding:5px 4px 7px;
 }
 
 .libraryPanel{
@@ -3077,6 +3193,14 @@ body.dark .browserToolToggleBtn[aria-expanded="true"]{
         <div class="badge">深浅色切换</div>
       </div>
 
+      <div id="archivePanel" class="archivePanel">
+        <button id="archiveToggleBtn" class="archiveToggle" type="button" aria-expanded="false">
+          <span>Archive</span>
+          <span id="archiveChevron" aria-hidden="true">&#x203A;</span>
+        </button>
+        <div id="archiveBody" class="archiveBody"></div>
+      </div>
+
       <div class="modelArea">
         <div class="modelLabel">当前模型</div>
     
@@ -3318,6 +3442,10 @@ const conversationNewChatBtn = document.getElementById("conversationNewChatBtn")
 const conversationSearchToggleBtn = document.getElementById("conversationSearchToggleBtn");
 const conversationSearchCloseBtn = document.getElementById("conversationSearchCloseBtn");
 const conversationSearchDialog = document.getElementById("conversationSearchDialog");
+const archivePanel = document.getElementById("archivePanel");
+const archiveToggleBtn = document.getElementById("archiveToggleBtn");
+const archiveChevron = document.getElementById("archiveChevron");
+const archiveBody = document.getElementById("archiveBody");
 const projectList = document.getElementById("projectList");
 const createProjectBtn = document.getElementById("createProjectBtn");
 const projectStatus = document.getElementById("projectStatus");
@@ -3363,6 +3491,7 @@ let pendingToolCall = null;
 let searchResults = document.getElementById("searchResults");
 let currentConversationId = null;
 let conversationsCache = [];
+let archiveSourceConversations = [];
 let projectsCache = [];
 let projectOpenClawRuntimes = [];
 let openClawRuntimeRegistry = [];
@@ -10030,20 +10159,23 @@ async function loadConversations(options = {}){
   const clearMissingCurrent = options.clearMissingCurrent !== false;
   try{
     const commonConversations = await fetchConversationsForProject(DEFAULT_PROJECT_ID);
-    renderConversationRows(conversationList, commonConversations);
+    renderConversationRows(conversationList, visibleConversations(commonConversations));
     conversationList.hidden = false;
 
     if(isCommonWorkspace()){
-      conversationsCache = commonConversations;
+      archiveSourceConversations = commonConversations;
+      conversationsCache = visibleConversations(commonConversations);
     }else{
       const projectConversations = await fetchConversationsForProject(activeProjectId || DEFAULT_PROJECT_ID);
-      conversationsCache = projectConversations;
+      archiveSourceConversations = projectConversations;
+      conversationsCache = visibleConversations(projectConversations);
       const projectMount = document.getElementById("projectConversationMount");
       if(projectMount){
-        renderConversationRows(projectMount, projectConversations);
+        renderConversationRows(projectMount, visibleConversations(projectConversations));
       }
     }
 
+    renderArchivePanel();
     setActiveConversation();
     if(clearMissingCurrent && currentConversationId && !conversationsCache.some(item => item.id === currentConversationId)){
       enterBlankChat();
@@ -10067,8 +10199,245 @@ async function fetchConversationsForProject(projectId){
   return data.conversations || [];
 }
 
-function renderConversationRows(targetList, conversations){
+const ARCHIVED_CONVERSATIONS_KEY = "wa_archived_conversation_ids";
+const ARCHIVE_INACTIVE_DAYS = 30;
+const archiveExpandedGroups = new Set();
+
+function readArchivedConversationIds(){
+  try{
+    const values = JSON.parse(localStorage.getItem(ARCHIVED_CONVERSATIONS_KEY) || "[]");
+    return new Set(Array.isArray(values) ? values.map(String) : []);
+  }catch(err){
+    return new Set();
+  }
+}
+
+function writeArchivedConversationIds(ids){
+  localStorage.setItem(ARCHIVED_CONVERSATIONS_KEY, JSON.stringify(Array.from(ids)));
+}
+
+function isConversationArchived(item){
+  if(!item?.id){
+    return false;
+  }
+  if(item.archived || item.is_archived || item.status === "archived"){
+    return true;
+  }
+  return readArchivedConversationIds().has(String(item.id));
+}
+
+function archiveConversationLocally(conversationId){
+  const ids = readArchivedConversationIds();
+  ids.add(String(conversationId || ""));
+  ids.delete("");
+  writeArchivedConversationIds(ids);
+}
+
+function restoreConversationLocally(conversationId){
+  const ids = readArchivedConversationIds();
+  ids.delete(String(conversationId || ""));
+  writeArchivedConversationIds(ids);
+}
+
+function conversationUpdatedAt(item){
+  return new Date(item?.updated_at || item?.created_at || 0).getTime() || 0;
+}
+
+function isInactiveConversation(item){
+  const updatedAt = conversationUpdatedAt(item);
+  if(!updatedAt){
+    return false;
+  }
+  return Date.now() - updatedAt >= ARCHIVE_INACTIVE_DAYS * 24 * 60 * 60 * 1000;
+}
+
+function visibleConversations(conversations){
+  return (conversations || []).filter(item => !isConversationArchived(item));
+}
+
+function archivedConversations(conversations){
+  return (conversations || [])
+    .filter(isConversationArchived)
+    .sort((a, b) => conversationUpdatedAt(b) - conversationUpdatedAt(a));
+}
+
+function sameLocalDate(a, b){
+  return a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate();
+}
+
+function archiveGroupLabel(item){
+  const updated = new Date(conversationUpdatedAt(item));
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const sevenDaysAgo = new Date(now);
+  sevenDaysAgo.setDate(now.getDate() - 7);
+
+  if(sameLocalDate(updated, now)){
+    return "Today";
+  }
+  if(sameLocalDate(updated, yesterday)){
+    return "Yesterday";
+  }
+  if(updated >= sevenDaysAgo){
+    return "Last 7 Days";
+  }
+  if(updated.getFullYear() === now.getFullYear() && updated.getMonth() === now.getMonth()){
+    return "This Month";
+  }
+  if(updated.getFullYear() === now.getFullYear()){
+    return updated.toLocaleString("en-US", { month:"long", year:"numeric" });
+  }
+  return "Older...";
+}
+
+function archiveGroupOrder(label){
+  const fixed = ["Today", "Yesterday", "Last 7 Days", "This Month"];
+  const fixedIndex = fixed.indexOf(label);
+  if(fixedIndex >= 0){
+    return fixedIndex;
+  }
+  if(label === "Older..."){
+    return 999;
+  }
+  return 10;
+}
+
+function groupedArchiveConversations(conversations){
+  const groups = new Map();
+  archivedConversations(conversations).forEach(item => {
+    const label = archiveGroupLabel(item);
+    if(!groups.has(label)){
+      groups.set(label, []);
+    }
+    groups.get(label).push(item);
+  });
+  return Array.from(groups.entries()).sort((a, b) => {
+    const orderDiff = archiveGroupOrder(a[0]) - archiveGroupOrder(b[0]);
+    if(orderDiff){
+      return orderDiff;
+    }
+    return conversationUpdatedAt(b[1][0]) - conversationUpdatedAt(a[1][0]);
+  });
+}
+
+function setArchiveOpen(open){
+  archivePanel.classList.toggle("open", open);
+  archiveToggleBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  archiveChevron.textContent = open ? String.fromCharCode(9662) : String.fromCharCode(8250);
+}
+
+function renderArchivePanel(){
+  archiveBody.innerHTML = "";
+  const groups = groupedArchiveConversations(archiveSourceConversations);
+
+  if(!groups.length){
+    const empty = document.createElement("div");
+    empty.className = "archiveEmpty";
+    empty.textContent = "No archived conversations";
+    archiveBody.appendChild(empty);
+    return;
+  }
+
+  groups.forEach(([label, items]) => {
+    const group = document.createElement("div");
+    group.className = "archiveGroup";
+    group.dataset.archiveGroup = label;
+    const expanded = archiveExpandedGroups.has(label);
+    group.classList.toggle("open", expanded);
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "archiveGroupToggle";
+    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+    toggle.textContent = (expanded ? String.fromCharCode(9662) : String.fromCharCode(9656)) + " " + label;
+    toggle.addEventListener("click", event => {
+      event.stopPropagation();
+      if(archiveExpandedGroups.has(label)){
+        archiveExpandedGroups.delete(label);
+      }else{
+        archiveExpandedGroups.add(label);
+      }
+      renderArchivePanel();
+    });
+
+    const list = document.createElement("div");
+    list.className = "archiveGroupList";
+    renderConversationRows(list, items, { archive:true });
+
+    group.appendChild(toggle);
+    group.appendChild(list);
+    archiveBody.appendChild(group);
+  });
+}
+
+function renderCurrentConversationLists(){
+  const visible = visibleConversations(archiveSourceConversations);
+  if(isCommonWorkspace()){
+    conversationsCache = visible;
+    renderConversationRows(conversationList, visible);
+  }else{
+    conversationsCache = visible;
+    const projectMount = document.getElementById("projectConversationMount");
+    if(projectMount){
+      renderConversationRows(projectMount, visible);
+    }
+  }
+  setActiveConversation();
+}
+
+function archiveInactiveConversation(conversationId){
+  archiveConversationLocally(conversationId);
+  archiveSourceConversations = archiveSourceConversations.map(item => (
+    item.id === conversationId ? { ...item, archived:true } : item
+  ));
+  renderCurrentConversationLists();
+  renderArchivePanel();
+}
+
+function restoreArchivedConversation(conversationId){
+  restoreConversationLocally(conversationId);
+  archiveSourceConversations = archiveSourceConversations.map(item => (
+    item.id === conversationId ? { ...item, archived:false, is_archived:false, status:item.status === "archived" ? "" : item.status } : item
+  ));
+  renderCurrentConversationLists();
+  renderArchivePanel();
+}
+
+function restoreConversationAfterNewMessage(conversationId){
+  if(!conversationId){
+    return;
+  }
+  restoreConversationLocally(conversationId);
+  archiveSourceConversations = archiveSourceConversations.map(item => (
+    item.id === conversationId ? { ...item, archived:false, is_archived:false, status:item.status === "archived" ? "" : item.status } : item
+  ));
+}
+
+function closeConversationMenus(){
+  document.querySelectorAll(".conversationMenu.open").forEach(menu => {
+    menu.classList.remove("open");
+    menu.previousElementSibling?.setAttribute("aria-expanded", "false");
+  });
+}
+
+function appendConversationMenuItem(menu, label, handler){
+  const item = document.createElement("button");
+  item.type = "button";
+  item.textContent = label;
+  item.addEventListener("click", event => {
+    event.stopPropagation();
+    closeConversationMenus();
+    handler();
+  });
+  menu.appendChild(item);
+}
+
+function renderConversationRows(targetList, conversations, options = {}){
   targetList.innerHTML = "";
+  const inArchive = options.archive === true;
   conversations.forEach(item => {
     const row = document.createElement("div");
     row.className = "historyRow";
@@ -10089,19 +10458,43 @@ function renderConversationRows(targetList, conversations){
     time.className = "historyTime";
     time.textContent = formatHistoryTime(item.updated_at || item.created_at);
 
-    const deleteBtn = document.createElement("button");
-    deleteBtn.type = "button";
-    deleteBtn.className = "deleteConversationBtn";
-    deleteBtn.textContent = "x";
-    deleteBtn.title = "Delete chat";
-    deleteBtn.addEventListener("click", (event) => {
+    const menuBtn = document.createElement("button");
+    menuBtn.type = "button";
+    menuBtn.className = "conversationMenuBtn";
+    menuBtn.textContent = "...";
+    menuBtn.title = "Conversation actions";
+    menuBtn.setAttribute("aria-expanded", "false");
+
+    const menu = document.createElement("div");
+    menu.className = "conversationMenu";
+
+    if(inArchive){
+      appendConversationMenuItem(menu, "Restore", () => restoreArchivedConversation(item.id));
+    }else if(isInactiveConversation(item)){
+      appendConversationMenuItem(menu, "Archive", () => archiveInactiveConversation(item.id));
+    }
+    appendConversationMenuItem(menu, "Delete", () => deleteConversation(item.id, item.title || "New Chat"));
+    appendConversationMenuItem(menu, "Cancel", () => {});
+
+    menuBtn.addEventListener("click", event => {
       event.stopPropagation();
-      deleteConversation(item.id, item.title || "New Chat");
+      const open = !menu.classList.contains("open");
+      closeConversationMenus();
+      menu.classList.toggle("open", open);
+      menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    row.addEventListener("contextmenu", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeConversationMenus();
+      menu.classList.add("open");
+      menuBtn.setAttribute("aria-expanded", "true");
     });
 
     row.appendChild(btn);
     row.appendChild(time);
-    row.appendChild(deleteBtn);
+    row.appendChild(menuBtn);
+    row.appendChild(menu);
     targetList.appendChild(row);
   });
   applyChatSearchFilter();
@@ -10195,6 +10588,7 @@ async function deleteConversation(conversationId, title){
       throw new Error(data.error || "delete conversation failed");
     }
 
+    restoreConversationLocally(conversationId);
     const conversations = await loadConversations();
 
     if(deletingCurrent){
@@ -10377,6 +10771,10 @@ conversationSearchCloseBtn.addEventListener("click", event => {
   closeConversationSearch();
 });
 conversationSearchDialog.addEventListener("click", event => event.stopPropagation());
+archiveToggleBtn.addEventListener("click", event => {
+  event.stopPropagation();
+  setArchiveOpen(!archivePanel.classList.contains("open"));
+});
 createProjectBtn.addEventListener("click", createProject);
 chatSearchInput.addEventListener("input", applyChatSearchFilter);
 projectSettingsCloseBtn.addEventListener("click", closeProjectSettingsPopover);
@@ -10476,6 +10874,7 @@ toolMenu.addEventListener("click", event => event.stopPropagation());
 document.addEventListener("click", () => {
   closeInputMenus();
   closeConversationSearch();
+  closeConversationMenus();
   closeModelActionMenus();
   closeProjectActionMenu();
   closeProjectSettingsPopover();
@@ -10484,6 +10883,7 @@ document.addEventListener("keydown", event => {
   if(event.key === "Escape"){
     closeInputMenus();
     closeConversationSearch();
+    closeConversationMenus();
     closeProjectActionMenu();
     closeProjectSettingsPopover();
     setContextPanelOpen(false);
@@ -11793,12 +12193,13 @@ async function sendMessage(){
           toolSources:streamResult.toolSources || []
         });
       }
-    }
-    webSearchContext = "";
-    webSearchSources = [];
-    await loadConversations({
-      clearMissingCurrent:false
-    });
+     }
+     webSearchContext = "";
+     webSearchSources = [];
+     restoreConversationAfterNewMessage(currentConversationId);
+     await loadConversations({
+       clearMissingCurrent:false
+     });
     await loadSummaryStatus();
 
     if(imageToSend){

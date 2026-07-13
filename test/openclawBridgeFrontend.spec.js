@@ -142,6 +142,30 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).not.toContain("#sendBtn{\n  border:none;\n  background:var(--primary);");
   });
 
+  it("adds an archive sidebar UI without changing conversation APIs", () => {
+    const page = htmlPage();
+
+    expect(page).toMatch(/<div id="archivePanel" class="archivePanel">[\s\S]*?<button id="archiveToggleBtn"[\s\S]*?<span>Archive<\/span>[\s\S]*?<div id="archiveBody" class="archiveBody"><\/div>[\s\S]*?<div class="modelArea">/);
+    expect(page).toContain("const ARCHIVED_CONVERSATIONS_KEY = \"wa_archived_conversation_ids\";");
+    expect(page).toContain("const ARCHIVE_INACTIVE_DAYS = 30;");
+    expect(page).toContain("function isConversationArchived(item)");
+    expect(page).toContain("item.archived || item.is_archived || item.status === \"archived\"");
+    expect(page).toContain("function visibleConversations(conversations)");
+    expect(page).toContain("function groupedArchiveConversations(conversations)");
+    expect(page).toContain("\"Today\"");
+    expect(page).toContain("\"Yesterday\"");
+    expect(page).toContain("\"Last 7 Days\"");
+    expect(page).toContain("\"This Month\"");
+    expect(page).toContain("\"Older...\"");
+    expect(page).toContain("appendConversationMenuItem(menu, \"Restore\", () => restoreArchivedConversation(item.id));");
+    expect(page).toContain("appendConversationMenuItem(menu, \"Archive\", () => archiveInactiveConversation(item.id));");
+    expect(page).toContain("appendConversationMenuItem(menu, \"Delete\", () => deleteConversation(item.id, item.title || \"New Chat\"));");
+    expect(page).toContain("appendConversationMenuItem(menu, \"Cancel\", () => {});");
+    expect(page).toContain("row.addEventListener(\"contextmenu\"");
+    expect(page).toContain("restoreConversationAfterNewMessage(currentConversationId);");
+    expect(page).not.toContain("/api/conversations/archive");
+  });
+
   it("sends an explicit Seattle runtime_id when the selected OpenClaw model is Seattle", () => {
     const page = htmlPage();
 
@@ -184,7 +208,7 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("button.textContent = \"...\"");
     expect(page).toContain("menuBtn.textContent = \"...\"");
     expect(page).not.toContain("button.textContent = \"Menu\"");
-    expect(page).toMatch(/<div class="sidebarBadges">[\s\S]*?<\/div>\s*<div class="modelArea">/);
+    expect(page).toMatch(/<div class="sidebarBadges">[\s\S]*?<\/div>\s*<div id="archivePanel" class="archivePanel">[\s\S]*?<div class="modelArea">/);
     expect(page).toMatch(/<div class="modelArea">[\s\S]*?<select[\s\S]*?id="modelSelect"[\s\S]*?<button id="modelSettingsBtn"/);
     expect(page).toContain("class=\"projectHeader\"");
     expect(page).toContain("aria-label=\"New Project\"");
@@ -242,7 +266,7 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("String.fromCharCode(9662)");
     expect(page).toContain("String.fromCharCode(9656)");
     expect(page).toContain("fetchConversationsForProject(DEFAULT_PROJECT_ID)");
-    expect(page).toContain("renderConversationRows(conversationList, commonConversations)");
+    expect(page).toContain("renderConversationRows(conversationList, visibleConversations(commonConversations))");
     expect(page).toContain("conversationList.hidden = false");
     expect(page).toContain("applyChatSearchFilter");
     expect(page).toContain("runtimeCapabilityLabel");
@@ -268,7 +292,7 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("async function loadConversations(options = {})");
     expect(page).toContain("const clearMissingCurrent = options.clearMissingCurrent !== false;");
     expect(page).toContain("if(clearMissingCurrent && currentConversationId && !conversationsCache.some(item => item.id === currentConversationId))");
-    expect(page).toMatch(/webSearchContext = "";\s*webSearchSources = \[\];\s*await loadConversations\(\{\s*clearMissingCurrent:false\s*\}\);/);
+    expect(page).toMatch(/webSearchContext = "";\s*webSearchSources = \[\];\s*restoreConversationAfterNewMessage\(currentConversationId\);\s*await loadConversations\(\{\s*clearMissingCurrent:false\s*\}\);/);
     expect(page).toContain("if(isExpandedProject){");
     expect(page).toContain("document.getElementById(\"projectConversationMount\")");
     expect(page).toContain("if(projectMount){");

@@ -990,6 +990,28 @@ body.dark .projectRuntimeItem{
   margin-bottom:10px;
 }
 
+.conversationLoadMoreBtn{
+  width:100%;
+  min-height:32px;
+  flex:0 0 auto;
+  border:0;
+  border-radius:8px;
+  background:transparent;
+  color:var(--muted);
+  cursor:pointer;
+  font-size:12px;
+}
+
+.conversationLoadMoreBtn:hover{
+  background:rgba(148,163,184,.12);
+  color:var(--text);
+}
+
+.conversationLoadMoreBtn:disabled{
+  opacity:.6;
+  cursor:wait;
+}
+
 .historyRow{
   position:relative;
   display:flex;
@@ -3117,6 +3139,7 @@ body.dark .toolErrorNotice{
         <div class="sidebarSection chatsSection">
           <div class="sidebarSectionHeader">Conversations</div>
           <div id="conversationList" class="historyList"></div>
+          <button id="conversationLoadMoreBtn" class="conversationLoadMoreBtn" type="button" hidden>Load more</button>
         </div>
 
       </div>
@@ -3392,6 +3415,7 @@ const archivePanel = document.getElementById("archivePanel");
 const archiveToggleBtn = document.getElementById("archiveToggleBtn");
 const archiveChevron = document.getElementById("archiveChevron");
 const archiveBody = document.getElementById("archiveBody");
+const conversationLoadMoreBtn = document.getElementById("conversationLoadMoreBtn");
 const libraryPanel = document.getElementById("libraryPanel");
 const libraryToggle = document.getElementById("libraryToggle");
 const fileLibraryCount = document.getElementById("fileLibraryCount");
@@ -3430,6 +3454,13 @@ let searchResults = document.getElementById("searchResults");
 let currentConversationId = null;
 let conversationsCache = [];
 let archiveSourceConversations = [];
+let conversationPageState = {
+  projectId:"",
+  cursor:"",
+  hasMore:false,
+  loading:false,
+  searchQuery:""
+};
 let projectsCache = [];
 let projectOpenClawRuntimes = [];
 let openClawRuntimeRegistry = [];
@@ -10118,20 +10149,35 @@ async function deleteProject(projectId){
 async function loadConversations(options = {}){
   const clearMissingCurrent = options.clearMissingCurrent !== false;
   try{
-    const commonConversations = await fetchConversationsForProject(DEFAULT_PROJECT_ID);
-    renderConversationRows(conversationList, visibleConversations(commonConversations));
+    const commonPage = await fetchConversationsForProject(DEFAULT_PROJECT_ID);
+    const commonConversations = visibleConversations(commonPage.conversations);
+    renderConversationRows(conversationList, commonConversations);
     conversationList.hidden = false;
 
     if(isCommonWorkspace()){
-      archiveSourceConversations = await fetchArchiveSourceConversations([commonConversations]);
-      conversationsCache = visibleConversations(commonConversations);
+      archiveSourceConversations = await fetchArchiveSourceConversations();
+      conversationsCache = commonConversations;
+      setConversationPageState({
+        projectId:DEFAULT_PROJECT_ID,
+        cursor:commonPage.nextCursor,
+        hasMore:commonPage.hasMore,
+        searchQuery:""
+      });
     }else{
-      const projectConversations = await fetchConversationsForProject(activeProjectId || DEFAULT_PROJECT_ID);
-      archiveSourceConversations = await fetchArchiveSourceConversations([commonConversations, projectConversations]);
-      conversationsCache = visibleConversations(projectConversations);
+      const projectId = activeProjectId || DEFAULT_PROJECT_ID;
+      const projectPage = await fetchConversationsForProject(projectId);
+      const projectConversations = visibleConversations(projectPage.conversations);
+      archiveSourceConversations = await fetchArchiveSourceConversations();
+      conversationsCache = projectConversations;
+      setConversationPageState({
+        projectId,
+        cursor:projectPage.nextCursor,
+        hasMore:projectPage.hasMore,
+        searchQuery:""
+      });
       const projectMount = document.getElementById("projectConversationMount");
       if(projectMount){
-        renderConversationRows(projectMount, visibleConversations(projectConversations));
+        renderConversationRows(projectMount, projectConversations);
       }
     }
 
@@ -10147,17 +10193,39 @@ async function loadConversations(options = {}){
   }
 }
 
-async function fetchConversationsForProject(projectId){
+function normalizeConversationPage(data){
+  return {
+    conversations:data.conversations || [],
+    hasMore:Boolean(data.hasMore || data.has_more),
+    nextCursor:data.nextCursor || data.next_cursor || ""
+  };
+}
+
+async function fetchConversationsForProject(projectId, options = {}){
   const params = new URLSearchParams({
-    project_id:projectId || DEFAULT_PROJECT_ID,
-    include_archived:"1"
+    project_id:projectId || DEFAULT_PROJECT_ID
   });
+  if(options.includeArchived){
+    params.set("include_archived", "1");
+  }
+  if(options.archivedOnly){
+    params.set("archived_only", "1");
+  }
+  if(options.cursor){
+    params.set("cursor", options.cursor);
+  }
+  if(options.limit){
+    params.set("limit", String(options.limit));
+  }
+  if(options.q){
+    params.set("q", options.q);
+  }
   const res = await fetch("/api/conversations?" + params.toString());
   const data = await res.json();
   if(!res.ok || !data.ok){
     throw new Error(data.error || "load conversations failed");
   }
-  return data.conversations || [];
+  return normalizeConversationPage(data);
 }
 
 function mergeConversationLists(lists){
@@ -10172,28 +10240,18 @@ function mergeConversationLists(lists){
   return Array.from(merged.values());
 }
 
-async function fetchArchiveSourceConversations(knownLists = []){
-  const knownProjectIds = new Set();
-  knownLists.forEach(list => {
-    (list || []).forEach(item => {
-      if(item?.project_id){
-        knownProjectIds.add(item.project_id);
-      }
-    });
-  });
-  knownProjectIds.add(DEFAULT_PROJECT_ID);
-
-  const remainingProjects = realProjects()
-    .filter(project => project.id && !knownProjectIds.has(project.id));
-
-  const projectLists = await Promise.all(remainingProjects.map(project =>
-    fetchConversationsForProject(project.id).catch(err => {
-      console.warn("load archived project conversations failed", project.id, err);
+async function fetchArchiveSourceConversations(){
+  const projectIds = [
+    DEFAULT_PROJECT_ID,
+    ...realProjects().map(project => project.id).filter(Boolean)
+  ];
+  const projectLists = await Promise.all(projectIds.map(projectId =>
+    fetchConversationsForProject(projectId, { archivedOnly:true, limit:1000 }).then(page => page.conversations).catch(err => {
+      console.warn("load archived project conversations failed", projectId, err);
       return [];
     })
   ));
-
-  return mergeConversationLists([...knownLists, ...projectLists]);
+  return mergeConversationLists(projectLists);
 }
 
 const archiveExpandedGroups = new Set();
@@ -10358,6 +10416,61 @@ function renderCurrentConversationLists(){
   setActiveConversation();
 }
 
+function setConversationPageState(patch = {}){
+  conversationPageState = {
+    ...conversationPageState,
+    ...patch
+  };
+  renderConversationLoadMore();
+}
+
+function activeConversationProjectId(){
+  return isCommonWorkspace() ? DEFAULT_PROJECT_ID : (activeProjectId || DEFAULT_PROJECT_ID);
+}
+
+function activeConversationListElement(){
+  if(!isCommonWorkspace()){
+    return document.getElementById("projectConversationMount") || conversationList;
+  }
+  return conversationList;
+}
+
+function renderConversationLoadMore(){
+  const searching = Boolean(normalizedChatSearchQuery());
+  conversationLoadMoreBtn.hidden = searching || !conversationPageState.hasMore;
+  conversationLoadMoreBtn.disabled = Boolean(conversationPageState.loading);
+  conversationLoadMoreBtn.textContent = conversationPageState.loading ? "Loading..." : "Load more";
+}
+
+async function loadMoreConversations(){
+  if(conversationPageState.loading || !conversationPageState.hasMore || normalizedChatSearchQuery()){
+    return;
+  }
+  const projectId = conversationPageState.projectId || activeConversationProjectId();
+  setConversationPageState({ loading:true });
+  try{
+    const page = await fetchConversationsForProject(projectId, {
+      cursor:conversationPageState.cursor,
+      limit:50
+    });
+    const existingIds = new Set(conversationsCache.map(item => item.id));
+    const nextItems = visibleConversations(page.conversations)
+      .filter(item => item?.id && !existingIds.has(item.id));
+    conversationsCache = visibleConversations([...conversationsCache, ...nextItems]);
+    renderConversationRows(activeConversationListElement(), conversationsCache);
+    setConversationPageState({
+      projectId,
+      cursor:page.nextCursor,
+      hasMore:page.hasMore,
+      loading:false
+    });
+    setProjectStatus("");
+  }catch(err){
+    setConversationPageState({ loading:false });
+    setProjectStatus("Load more failed: " + (err.message || String(err)));
+  }
+}
+
 function mergeConversationState(conversation){
   if(!conversation?.id){
     return;
@@ -10506,19 +10619,41 @@ function renderConversationRows(targetList, conversations, options = {}){
     row.appendChild(menu);
     targetList.appendChild(row);
   });
-  applyChatSearchFilter();
+  renderConversationLoadMore();
 }
 
 function normalizedChatSearchQuery(){
   return (chatSearchInput?.value || "").trim().toLowerCase();
 }
 
-function applyChatSearchFilter(){
+let conversationSearchRequestId = 0;
+
+async function applyChatSearchFilter(){
   const query = normalizedChatSearchQuery();
-  document.querySelectorAll("#conversationList .historyRow, #projectConversationMount .historyRow").forEach(row => {
-    const title = (row.dataset.title || row.textContent || "").toLowerCase();
-    row.hidden = Boolean(query && !title.includes(query));
-  });
+  const requestId = ++conversationSearchRequestId;
+  if(!query){
+    renderConversationRows(activeConversationListElement(), conversationsCache);
+    renderConversationLoadMore();
+    setProjectStatus("");
+    return;
+  }
+
+  renderConversationLoadMore();
+  try{
+    const page = await fetchConversationsForProject(activeConversationProjectId(), {
+      q:query,
+      limit:1000
+    });
+    if(requestId !== conversationSearchRequestId){
+      return;
+    }
+    renderConversationRows(activeConversationListElement(), visibleConversations(page.conversations));
+    setProjectStatus("");
+  }catch(err){
+    if(requestId === conversationSearchRequestId){
+      setProjectStatus("Search failed: " + (err.message || String(err)));
+    }
+  }
 }
 
 async function createConversationForProject(projectId){
@@ -10764,6 +10899,7 @@ archiveToggleBtn.addEventListener("click", event => {
   event.stopPropagation();
   setArchiveOpen(!archivePanel.classList.contains("open"));
 });
+conversationLoadMoreBtn.addEventListener("click", loadMoreConversations);
 projectSettingsCloseBtn.addEventListener("click", closeProjectSettingsPopover);
 projectSettingsPopover.addEventListener("click", event => {
   event.stopPropagation();

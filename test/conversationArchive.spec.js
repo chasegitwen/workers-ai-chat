@@ -67,14 +67,43 @@ class FakeD1 {
     if (normalized.includes("from conversations c")) {
       const fallbackProjectId = bindings[1];
       const projectId = bindings[2];
-      const includeArchived = Number(bindings[3] || 0) === 1;
-      const limit = Number(bindings[4] || 50);
+      const archivedMode = Number(bindings[3] || 0);
+      const searchQuery = String(bindings[6] || "").toLowerCase();
+      const hasCursor = Number(bindings[9] || 0) === 1;
+      const cursorPinned = Number(bindings[10] || 0);
+      const cursorUpdated = Number(bindings[12] || 0);
+      const cursorId = String(bindings[14] || "");
+      const limit = Number(bindings[15] || 50);
       return [...this.conversations.values()]
         .filter(conversation => (conversation.project_id || fallbackProjectId) === projectId)
-        .filter(conversation => includeArchived || Number(conversation.is_archived || 0) === 0)
+        .filter(conversation => {
+          if (archivedMode === 2) {
+            return true;
+          }
+          if (archivedMode === 1) {
+            return Number(conversation.is_archived || 0) === 1;
+          }
+          return Number(conversation.is_archived || 0) === 0;
+        })
+        .filter(conversation => !searchQuery
+          || String(conversation.title || "").toLowerCase().includes(searchQuery)
+          || [...this.messages.values()].some(message =>
+            message.conversation_id === conversation.id
+              && String(message.content || "").toLowerCase().includes(searchQuery)
+          ))
+        .filter(conversation => {
+          if (!hasCursor) {
+            return true;
+          }
+          const pinned = Number(conversation.pinned || 0);
+          const updated = Number(conversation.updated_at || 0);
+          return pinned < cursorPinned
+            || (pinned === cursorPinned && (updated < cursorUpdated || (updated === cursorUpdated && conversation.id < cursorId)));
+        })
         .sort((left, right) => {
           const pinnedDiff = Number(right.pinned || 0) - Number(left.pinned || 0);
-          return pinnedDiff || Number(right.updated_at || 0) - Number(left.updated_at || 0);
+          const updatedDiff = Number(right.updated_at || 0) - Number(left.updated_at || 0);
+          return pinnedDiff || updatedDiff || String(right.id).localeCompare(String(left.id));
         })
         .map(conversation => {
           const messages = [...this.messages.values()]
@@ -243,6 +272,54 @@ describe("conversation archive state", () => {
     expect(body.conversations.map(item => item.id)).toEqual(["pinned-older-chat", "newer-chat"]);
   });
 
+  it("paginates active conversations with a cursor", async () => {
+    const db = new FakeD1();
+    const timestamp = Date.now();
+    for (let index = 0; index < 75; index += 1) {
+      addConversation(db, "active-chat-" + String(index).padStart(2, "0"), timestamp - index);
+    }
+
+    const firstPage = await json(await handleHistory(
+      new Request("http://example.com/api/conversations"),
+      env(db),
+      new URL("http://example.com/api/conversations")
+    ));
+    expect(firstPage.conversations).toHaveLength(50);
+    expect(firstPage.has_more).toBe(true);
+    expect(firstPage.next_cursor).toBeTruthy();
+
+    const secondPage = await json(await handleHistory(
+      new Request("http://example.com/api/conversations?cursor=" + encodeURIComponent(firstPage.next_cursor)),
+      env(db),
+      new URL("http://example.com/api/conversations?cursor=" + encodeURIComponent(firstPage.next_cursor))
+    ));
+    expect(secondPage.conversations).toHaveLength(25);
+    expect(secondPage.has_more).toBe(false);
+    const firstIds = new Set(firstPage.conversations.map(item => item.id));
+    expect(secondPage.conversations.some(item => firstIds.has(item.id))).toBe(false);
+  });
+
+  it("searches active conversations beyond the first page without returning archived results", async () => {
+    const db = new FakeD1();
+    const timestamp = Date.now();
+    for (let index = 0; index < 60; index += 1) {
+      addConversation(db, "active-chat-" + index, timestamp - index);
+    }
+    addConversation(db, "deep-search-target", timestamp - 1000);
+    addConversation(db, "deep-search-target-archived", timestamp - 1001, {
+      is_archived: 1,
+      archived_at: timestamp
+    });
+
+    const body = await json(await handleHistory(
+      new Request("http://example.com/api/conversations?q=deep-search-target"),
+      env(db),
+      new URL("http://example.com/api/conversations?q=deep-search-target")
+    ));
+
+    expect(body.conversations.map(item => item.id)).toEqual(["deep-search-target"]);
+  });
+
   it("archives, restores, pins, and deletes through the existing conversation route", async () => {
     const db = new FakeD1();
     addConversation(db, "manual-chat", Date.now());
@@ -305,6 +382,24 @@ describe("conversation archive state", () => {
     ));
 
     expect(body.conversations.some(item => item.id === "archived-chat" && item.is_archived)).toBe(true);
+  });
+
+  it("returns only archived conversations for archived-only requests", async () => {
+    const db = new FakeD1();
+    const timestamp = Date.now();
+    addConversation(db, "old-active-chat", timestamp - 1000);
+    addConversation(db, "archived-chat", timestamp - 2000, {
+      is_archived: 1,
+      archived_at: timestamp
+    });
+
+    const body = await json(await handleHistory(
+      new Request("http://example.com/api/conversations?archived_only=1"),
+      env(db),
+      new URL("http://example.com/api/conversations?archived_only=1")
+    ));
+
+    expect(body.conversations.map(item => item.id)).toEqual(["archived-chat"]);
   });
 
   it("returns a clear 404 when a conversation action targets a missing conversation", async () => {

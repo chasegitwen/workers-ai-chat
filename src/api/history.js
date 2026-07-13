@@ -151,6 +151,39 @@ function normalizeAutoArchiveDays(value) {
   return [30, 60, 90].includes(days) ? days : 90;
 }
 
+function clampConversationLimit(value, fallback = 50) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(1, Math.min(1000, parsed));
+}
+
+function parseConversationCursor(value) {
+  const parts = String(value || "").split("|");
+  if (parts.length !== 3) {
+    return null;
+  }
+  const pinned = Number.parseInt(parts[0], 10);
+  const updatedAt = Number.parseInt(parts[1], 10);
+  const id = parts[2] || "";
+  if (![0, 1].includes(pinned) || !Number.isFinite(updatedAt) || !id) {
+    return null;
+  }
+  return { pinned, updatedAt, id };
+}
+
+function conversationCursor(row) {
+  if (!row?.id) {
+    return "";
+  }
+  return [
+    Number(row.pinned || 0) === 1 ? 1 : 0,
+    Number(row.updated_at || 0),
+    row.id
+  ].join("|");
+}
+
 function isAlreadyAppliedSchemaError(err) {
   const message = String(err?.message || err || "").toLowerCase();
   return message.includes("duplicate column")
@@ -356,7 +389,13 @@ export async function handleHistory(request, env, url) {
     await ensureDefaultProject(env.DB);
     const projectId = requestProjectId(null, url) || DEFAULT_PROJECT_ID;
     const includeArchived = ["1", "true"].includes(String(url.searchParams.get("include_archived") || url.searchParams.get("includeArchived") || "").toLowerCase());
-    const conversationLimit = includeArchived ? 1000 : 50;
+    const archivedOnly = ["1", "true"].includes(String(url.searchParams.get("archived_only") || url.searchParams.get("archivedOnly") || "").toLowerCase());
+    const searchQuery = cleanTitle(url.searchParams.get("q") || url.searchParams.get("search") || "", 120);
+    const cursor = parseConversationCursor(url.searchParams.get("cursor"));
+    const requestedLimit = clampConversationLimit(url.searchParams.get("limit"), includeArchived || archivedOnly || searchQuery ? 1000 : 50);
+    const fetchLimit = Math.min(1001, requestedLimit + 1);
+    const archivedMode = archivedOnly ? 1 : (includeArchived ? 2 : 0);
+    const searchPattern = searchQuery ? "%" + searchQuery.replace(/[%_]/g, "\\$&") + "%" : "";
     await autoArchiveInactiveConversations(env.DB, projectId);
     const result = await env.DB.prepare(
       `SELECT
@@ -379,21 +418,71 @@ export async function handleHistory(request, env, url) {
        FROM conversations c
        LEFT JOIN messages m ON m.conversation_id = c.id
        WHERE COALESCE(c.project_id, ?) = ?
-         AND (? = 1 OR COALESCE(c.is_archived, 0) = 0)
+         AND (
+           ? = 2
+           OR (? = 1 AND COALESCE(c.is_archived, 0) = 1)
+           OR (? = 0 AND COALESCE(c.is_archived, 0) = 0)
+         )
+         AND (
+           ? = ''
+           OR c.title LIKE ? ESCAPE '\\'
+           OR EXISTS (
+             SELECT 1
+             FROM messages sm
+             WHERE sm.conversation_id = c.id
+               AND sm.content LIKE ? ESCAPE '\\'
+           )
+         )
+         AND (
+           ? = 0
+           OR COALESCE(c.pinned, 0) < ?
+           OR (
+             COALESCE(c.pinned, 0) = ?
+             AND (
+               c.updated_at < ?
+               OR (c.updated_at = ? AND c.id < ?)
+             )
+           )
+         )
        GROUP BY c.id, c.title, c.project_id, c.created_at, c.updated_at, c.is_archived, c.archived_at, c.pinned
-       ORDER BY COALESCE(c.is_archived, 0) ASC, COALESCE(c.pinned, 0) DESC, c.updated_at DESC
+       ORDER BY COALESCE(c.is_archived, 0) ASC, COALESCE(c.pinned, 0) DESC, c.updated_at DESC, c.id DESC
        LIMIT ?`
-    ).bind(DEFAULT_PROJECT_ID, DEFAULT_PROJECT_ID, projectId, includeArchived ? 1 : 0, conversationLimit).all();
+    ).bind(
+      DEFAULT_PROJECT_ID,
+      DEFAULT_PROJECT_ID,
+      projectId,
+      archivedMode,
+      archivedMode,
+      archivedMode,
+      searchQuery,
+      searchPattern,
+      searchPattern,
+      cursor ? 1 : 0,
+      cursor?.pinned ?? 0,
+      cursor?.pinned ?? 0,
+      cursor?.updatedAt ?? 0,
+      cursor?.updatedAt ?? 0,
+      cursor?.id ?? "",
+      fetchLimit
+    ).all();
+    const rows = result.results || [];
+    const visibleRows = rows.slice(0, requestedLimit);
+    const hasMore = rows.length > requestedLimit;
+    const lastRow = visibleRows[visibleRows.length - 1];
 
     return jsonResponse({
       ok: true,
       project_id: projectId,
-      conversations: (result.results || []).map(item => ({
+      conversations: visibleRows.map(item => ({
         ...normalizeConversation(item),
         last_message_preview: item.last_message_preview
           ? String(item.last_message_preview).replace(/\s+/g, " ").trim().slice(0, 80)
           : ""
-      }))
+      })),
+      has_more: hasMore,
+      hasMore,
+      next_cursor: hasMore ? conversationCursor(lastRow) : "",
+      nextCursor: hasMore ? conversationCursor(lastRow) : ""
     });
   }
 

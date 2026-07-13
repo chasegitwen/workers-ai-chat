@@ -356,6 +356,7 @@ export async function handleHistory(request, env, url) {
     await ensureDefaultProject(env.DB);
     const projectId = requestProjectId(null, url) || DEFAULT_PROJECT_ID;
     const includeArchived = ["1", "true"].includes(String(url.searchParams.get("include_archived") || url.searchParams.get("includeArchived") || "").toLowerCase());
+    const conversationLimit = includeArchived ? 1000 : 50;
     await autoArchiveInactiveConversations(env.DB, projectId);
     const result = await env.DB.prepare(
       `SELECT
@@ -381,8 +382,8 @@ export async function handleHistory(request, env, url) {
          AND (? = 1 OR COALESCE(c.is_archived, 0) = 0)
        GROUP BY c.id, c.title, c.project_id, c.created_at, c.updated_at, c.is_archived, c.archived_at, c.pinned
        ORDER BY COALESCE(c.is_archived, 0) ASC, COALESCE(c.pinned, 0) DESC, c.updated_at DESC
-       LIMIT 50`
-    ).bind(DEFAULT_PROJECT_ID, DEFAULT_PROJECT_ID, projectId, includeArchived ? 1 : 0).all();
+       LIMIT ?`
+    ).bind(DEFAULT_PROJECT_ID, DEFAULT_PROJECT_ID, projectId, includeArchived ? 1 : 0, conversationLimit).all();
 
     return jsonResponse({
       ok: true,

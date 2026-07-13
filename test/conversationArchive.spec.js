@@ -68,6 +68,7 @@ class FakeD1 {
       const fallbackProjectId = bindings[1];
       const projectId = bindings[2];
       const includeArchived = Number(bindings[3] || 0) === 1;
+      const limit = Number(bindings[4] || 50);
       return [...this.conversations.values()]
         .filter(conversation => (conversation.project_id || fallbackProjectId) === projectId)
         .filter(conversation => includeArchived || Number(conversation.is_archived || 0) === 0)
@@ -85,7 +86,8 @@ class FakeD1 {
             message_count: messages.length,
             last_message_preview: messages[messages.length - 1]?.content || ""
           };
-        });
+        })
+        .slice(0, limit);
     }
     return [];
   }
@@ -283,6 +285,26 @@ describe("conversation archive state", () => {
     );
     expect((await json(deleteResponse)).ok).toBe(true);
     expect(db.conversations.has("manual-chat")).toBe(false);
+  });
+
+  it("returns archived conversations even when more than 50 active conversations exist", async () => {
+    const db = new FakeD1();
+    const timestamp = Date.now();
+    for (let index = 0; index < 60; index += 1) {
+      addConversation(db, "active-chat-" + index, timestamp - index);
+    }
+    addConversation(db, "archived-chat", timestamp - 1000, {
+      is_archived: 1,
+      archived_at: timestamp
+    });
+
+    const body = await json(await handleHistory(
+      new Request("http://example.com/api/conversations?include_archived=1"),
+      env(db),
+      new URL("http://example.com/api/conversations?include_archived=1")
+    ));
+
+    expect(body.conversations.some(item => item.id === "archived-chat" && item.is_archived)).toBe(true);
   });
 
   it("returns a clear 404 when a conversation action targets a missing conversation", async () => {

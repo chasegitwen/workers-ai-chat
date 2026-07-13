@@ -90,6 +90,25 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).not.toContain(mojibakeSecond);
   });
 
+  it("keeps per-message model display behind a persisted setting and hides old messages without metadata", () => {
+    const page = htmlPage();
+
+    expect(page).toContain("id=\"showPerMessageModelInfoCheck\"");
+    expect(page).toContain("showPerMessageModelInfo:Boolean(base.showPerMessageModelInfo)");
+    expect(page).toContain("showPerMessageModelInfoCheck.checked = Boolean(modelSettingsState?.showPerMessageModelInfo);");
+    expect(page).toContain("modelSettingsState.showPerMessageModelInfo = showPerMessageModelInfoCheck.checked;");
+    expect(page).toContain(".messageModelInfo");
+    expect(page).toContain("function normalizeMessageModelMetadata(metadata)");
+    expect(page).toContain("if(!metadata || typeof metadata !== \"object\")");
+    expect(page).toContain("function renderMessageModelInfo(element, metadata)");
+    expect(page).toContain("if(!displayModelInfoEnabled())");
+    expect(page).toContain("if(!text)");
+    expect(page).toContain("renderMessageModelInfo(div, message.metadata);");
+    expect(page).toContain("state.modelMetadata = doneEventModelMetadata(data);");
+    expect(page).toContain("renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug, state.diagnostics, state.modelMetadata);");
+    expect(page).toContain("metadata:streamResult.modelMetadata || null");
+  });
+
   it("sends an explicit Seattle runtime_id when the selected OpenClaw model is Seattle", () => {
     const page = htmlPage();
 
@@ -104,9 +123,9 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).not.toContain("id=\"commonChatsBtn\"");
     expect(page).not.toContain("id=\"projectSelect\"");
     expect(page).toContain("id=\"chatSearchInput\"");
-    expect(page).toContain("placeholder=\"Search Chats\"");
+    expect(page).toContain("placeholder=\"Search Conversations\"");
     expect(page).toContain("id=\"projectList\"");
-    expect(page).toContain("class=\"sidebarSectionHeader\">Chats</div>");
+    expect(page).toContain("class=\"sidebarSectionHeader\">Conversations</div>");
     expect(page).toContain("id=\"conversationList\"");
     expect(page).toMatch(/<div id="projectStatus" class="projectStatus"><\/div>[\s\S]*?<div class="sidebarSection chatsSection">/);
     expect(page).toMatch(/<\/aside>\s*<div id="projectSettingsPopover" class="projectSettingsPopover" hidden>/);

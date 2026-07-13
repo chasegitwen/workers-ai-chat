@@ -11,6 +11,7 @@ import {
 import { getRelevantFileChunksByIds } from "./files.js";
 import {
   ensureConversation,
+  ensureMessageMetadataSchema,
   saveMessage,
   titleFromMessage
 } from "./history.js";
@@ -152,6 +153,66 @@ function inferOpenClawRuntimeIdFromSelection(provider, model) {
     return "hillsboro-openclaw";
   }
   return "";
+}
+
+function modelMetadataLabel(value) {
+  return String(value || "").trim();
+}
+
+function messageModelMetadata({
+  provider = null,
+  model = null,
+  result = null,
+  runtime = null,
+  task = null,
+  executionMode = ""
+} = {}) {
+  const providerId = modelMetadataLabel(result?.provider || provider?.id || provider);
+  const modelId = modelMetadataLabel(result?.model || model?.id || result?.modelName || model?.modelName || model);
+  const metadata = {
+    provider: providerId,
+    provider_label: modelMetadataLabel(provider?.label || provider?.providerName || providerId),
+    model: modelId,
+    model_label: modelMetadataLabel(model?.label || model?.displayName || modelId),
+    runtime: modelMetadataLabel(runtime?.display_name || runtime?.runtime?.display_name || task?.runtimeSlug || task?.runtime_id || task?.runtimeId || ""),
+    runtime_id: modelMetadataLabel(runtime?.runtime_id || runtime?.id || task?.runtime_id || task?.runtimeId || ""),
+    agent: modelMetadataLabel(runtime?.agent_id || task?.selectedAgentId || task?.selected_agent_id || task?.agent_id || ""),
+    execution_mode: modelMetadataLabel(executionMode || runtime?.execution_mode || task?.executionMode || task?.execution_mode || "")
+  };
+  return Object.fromEntries(Object.entries(metadata).filter(([, value]) => Boolean(value)));
+}
+
+function openClawTaskMessageMetadata(task) {
+  return messageModelMetadata({
+    provider: task?.provider || "",
+    model: {
+      id: task?.model || "",
+      label: task?.upstreamModelName || task?.upstream_model_name || task?.model || ""
+    },
+    runtime: {
+      runtime_id: task?.runtimeId || task?.runtime_id || "",
+      display_name: task?.runtimeSlug || task?.runtime_slug || task?.runtimeId || task?.runtime_id || "",
+      agent_id: task?.selectedAgentId || task?.selected_agent_id || ""
+    },
+    task,
+    executionMode: task?.executionMode || task?.execution_mode || ""
+  });
+}
+
+function messageMetadataForModelResult(providerCatalog, requestedProvider, requestedModel, result) {
+  const resultProvider = result?.provider || requestedProvider || "";
+  const resultModel = result?.model || result?.modelName || requestedModel || "";
+  let match = { provider: null, model: null };
+  try {
+    match = findProviderModel(providerCatalog, resultProvider, resultModel);
+  } catch (err) {
+    match = { provider: { id: resultProvider }, model: { id: resultModel } };
+  }
+  return messageModelMetadata({
+    provider: match.provider || resultProvider,
+    model: match.model || resultModel,
+    result
+  });
 }
 
 function openClawTaskMetadata(extra = {}) {
@@ -836,13 +897,14 @@ async function applyOpenClawBridgeFinalCallback(env, task, payload) {
   const now = Date.now();
   let assistantMessage = null;
   const assistantMessageId = String(payload?.assistant_message_id || task.assistantMessageId || task.assistant_message_id || "").trim();
+  const metadata = openClawTaskMessageMetadata(task);
   if (assistantMessageId) {
-    assistantMessage = await updateAssistantMessageContent(env, assistantMessageId, finalText);
+    assistantMessage = await updateAssistantMessageContent(env, assistantMessageId, finalText, metadata);
   }
   if (!assistantMessage?.id) {
     const conversationId = String(payload?.conversation_id || task.conversationId || task.conversation_id || "").trim();
     if (conversationId) {
-      assistantMessage = await saveMessage(env.DB, conversationId, "assistant", finalText);
+      assistantMessage = await saveMessage(env.DB, conversationId, "assistant", finalText, metadata);
     }
   }
   const sequence = bridgeCallbackSequence(payload);
@@ -1736,25 +1798,29 @@ async function readAssistantMessageById(env, messageId) {
   if (!env.DB || !messageId) {
     return null;
   }
+  await ensureMessageMetadataSchema(env.DB);
   return env.DB.prepare(
-    `SELECT id, conversation_id, role, content, created_at
+    `SELECT id, conversation_id, role, content, created_at, metadata
       FROM messages
       WHERE id = ? AND role = 'assistant'
       LIMIT 1`
   ).bind(messageId).first();
 }
 
-async function updateAssistantMessageContent(env, messageId, content) {
+async function updateAssistantMessageContent(env, messageId, content, metadata = null) {
   if (!env.DB || !messageId) {
     return null;
   }
+  await ensureMessageMetadataSchema(env.DB);
   const now = Date.now();
+  const metadataJson = metadata && Object.keys(metadata).length ? JSON.stringify(metadata) : null;
   await env.DB.batch([
     env.DB.prepare(
       `UPDATE messages
-        SET content = ?
+        SET content = ?,
+          metadata = COALESCE(?, metadata)
         WHERE id = ? AND role = 'assistant'`
-    ).bind(content || "", messageId),
+    ).bind(content || "", metadataJson, messageId),
     env.DB.prepare(
       `UPDATE conversations
         SET updated_at = ?
@@ -2011,9 +2077,9 @@ async function finalizeOpenClawTaskResult(env, task) {
     };
   }
   const assistantMessage = recoverableAssistantMessage?.id
-    ? await updateAssistantMessageContent(env, recoverableAssistantMessage.id, reply)
+    ? await updateAssistantMessageContent(env, recoverableAssistantMessage.id, reply, openClawTaskMessageMetadata(refreshedTask))
     : env.DB
-      ? await saveMessage(env.DB, refreshedTask.conversationId || refreshedTask.conversation_id, "assistant", reply)
+      ? await saveMessage(env.DB, refreshedTask.conversationId || refreshedTask.conversation_id, "assistant", reply, openClawTaskMessageMetadata(refreshedTask))
       : null;
   if (env.DB) {
     await maybeUpdateConversationSummary(env, refreshedTask.conversationId || refreshedTask.conversation_id);
@@ -4241,7 +4307,7 @@ async function continueOpenClawAsyncStreamToCompletion({
     }
 
     const assistantMessage = env.DB
-      ? await saveMessage(env.DB, refreshedTask.conversationId || refreshedTask.conversation_id, "assistant", reply)
+      ? await saveMessage(env.DB, refreshedTask.conversationId || refreshedTask.conversation_id, "assistant", reply, openClawTaskMessageMetadata(refreshedTask))
       : null;
     if (env.DB) {
       await maybeUpdateConversationSummary(env, refreshedTask.conversationId || refreshedTask.conversation_id);
@@ -4365,7 +4431,7 @@ async function runOpenClawAsyncTaskInBackground({
     }
 
     const assistantMessage = env.DB
-      ? await saveMessage(env.DB, refreshedTask.conversationId || refreshedTask.conversation_id, "assistant", reply)
+      ? await saveMessage(env.DB, refreshedTask.conversationId || refreshedTask.conversation_id, "assistant", reply, openClawTaskMessageMetadata(refreshedTask))
       : null;
     if (env.DB) {
       await maybeUpdateConversationSummary(env, refreshedTask.conversationId || refreshedTask.conversation_id);
@@ -4603,7 +4669,13 @@ async function submitOpenClawAsyncTask({
 
     if (streamDone && replyState.value) {
       const assistantMessage = env.DB
-        ? await saveMessage(env.DB, conversationId, "assistant", replyState.value)
+        ? await saveMessage(env.DB, conversationId, "assistant", replyState.value, messageModelMetadata({
+          provider,
+          model,
+          result,
+          task,
+          executionMode: task?.executionMode || task?.execution_mode || ""
+        }))
         : null;
       if (env.DB) {
         await maybeUpdateConversationSummary(env, conversationId);
@@ -4969,9 +5041,12 @@ function streamChatWithToolStatus({
         const latencyMs = activeCallStartedAt ? Date.now() - activeCallStartedAt : 0;
 
         let assistantMessage = null;
+        const assistantMetadata = activeOpenClawTask
+          ? openClawTaskMessageMetadata(activeOpenClawTask)
+          : messageMetadataForModelResult(providerCatalog, provider, model || DEFAULT_TEXT_MODEL, activeResult);
 
         if (env.DB && replyState.value) {
-          assistantMessage = await saveMessage(env.DB, conversationId, "assistant", replyState.value);
+          assistantMessage = await saveMessage(env.DB, conversationId, "assistant", replyState.value, assistantMetadata);
           await maybeUpdateConversationSummary(env, conversationId);
         }
 
@@ -5007,6 +5082,7 @@ function streamChatWithToolStatus({
         enqueueText(encodeSseEvent("done", {
           provider: activeResult?.provider || "",
           model: activeResult?.model || activeResult?.modelName || "",
+          metadata: assistantMetadata,
           latencyMs,
           fallbackCount
         }));
@@ -5063,7 +5139,7 @@ function streamChatWithToolStatus({
   });
 }
 
-function streamWithHistorySave(result, env, conversationId, sources = [], toolSources = []) {
+function streamWithHistorySave(result, env, conversationId, sources = [], toolSources = [], metadata = null) {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
   let buffer = "";
@@ -5101,7 +5177,7 @@ function streamWithHistorySave(result, env, conversationId, sources = [], toolSo
       }
 
       if (env.DB && reply) {
-        await saveMessage(env.DB, conversationId, "assistant", reply);
+        await saveMessage(env.DB, conversationId, "assistant", reply, metadata);
         await maybeUpdateConversationSummary(env, conversationId);
       }
 
@@ -5122,7 +5198,7 @@ function streamWithHistorySave(result, env, conversationId, sources = [], toolSo
       controller.enqueue(encoder.encode(
         "data: " + JSON.stringify({ conversationId }) + "\n\n"
       ));
-      controller.enqueue(encoder.encode("event: done\ndata: {}\n\n"));
+      controller.enqueue(encoder.encode("event: done\ndata: " + JSON.stringify({ metadata: metadata || null }) + "\n\n"));
       controller.enqueue(encoder.encode("data: [DONE]\n\n"));
     }
   }));
@@ -5275,7 +5351,10 @@ export async function handleChat(request, env, ctx) {
       const reply = result.response.response || JSON.stringify(result.response);
 
       if (env.DB) {
-        await saveMessage(env.DB, conversation.id, "assistant", reply);
+        await saveMessage(env.DB, conversation.id, "assistant", reply, messageModelMetadata({
+          provider: "workers-ai",
+          model: "@cf/meta/llama-3.2-11b-vision-instruct"
+        }));
         await maybeUpdateConversationSummary(env, conversation.id);
       }
 

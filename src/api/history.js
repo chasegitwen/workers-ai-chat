@@ -1,6 +1,11 @@
 import { jsonResponse } from "../utils/response.js";
 import { DEFAULT_PROJECT_ID, ensureDefaultProject, resolveProjectId } from "./projects.js";
 
+const messageMetadataSchemaReady = new WeakSet();
+const messageMetadataSchemaStatements = [
+  "ALTER TABLE messages ADD COLUMN metadata TEXT"
+];
+
 export function createId() {
   return crypto.randomUUID();
 }
@@ -28,6 +33,69 @@ export function cleanSummary(summary) {
   }
 
   return summary.trim().slice(0, 8000);
+}
+
+function normalizeMessageMetadata(value) {
+  if (!value) {
+    return null;
+  }
+  if (typeof value === "object") {
+    return value;
+  }
+  try {
+    const parsed = JSON.parse(String(value || ""));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function cleanMessageMetadata(metadata) {
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+  const cleaned = {};
+  [
+    "provider",
+    "provider_label",
+    "model",
+    "model_label",
+    "runtime",
+    "runtime_id",
+    "agent",
+    "execution_mode"
+  ].forEach(key => {
+    const value = String(metadata[key] || "").trim();
+    if (value) {
+      cleaned[key] = value.slice(0, 160);
+    }
+  });
+  return Object.keys(cleaned).length ? cleaned : null;
+}
+
+function isAlreadyAppliedSchemaError(err) {
+  const message = String(err?.message || err || "").toLowerCase();
+  return message.includes("duplicate column")
+    || message.includes("already exists")
+    || message.includes("duplicate column name");
+}
+
+export async function ensureMessageMetadataSchema(db) {
+  if (!db || messageMetadataSchemaReady.has(db)) {
+    return;
+  }
+
+  for (const statement of messageMetadataSchemaStatements) {
+    try {
+      await db.prepare(statement).run();
+    } catch (err) {
+      if (!isAlreadyAppliedSchemaError(err)) {
+        throw err;
+      }
+    }
+  }
+
+  messageMetadataSchemaReady.add(db);
 }
 
 export function titleFromMessage(content) {
@@ -102,14 +170,17 @@ export async function ensureConversation(db, conversationId, title, projectId = 
   return createConversation(db, nextTitle, resolvedProjectId);
 }
 
-export async function saveMessage(db, conversationId, role, content) {
+export async function saveMessage(db, conversationId, role, content, metadata = null) {
+  await ensureMessageMetadataSchema(db);
+
   const timestamp = now();
   const id = createId();
+  const cleanMetadata = cleanMessageMetadata(metadata);
 
   await db.batch([
     db.prepare(
-      "INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)"
-    ).bind(id, conversationId, role, content || "", timestamp),
+      "INSERT INTO messages (id, conversation_id, role, content, created_at, metadata) VALUES (?, ?, ?, ?, ?, ?)"
+    ).bind(id, conversationId, role, content || "", timestamp, cleanMetadata ? JSON.stringify(cleanMetadata) : null),
     db.prepare(
       "UPDATE conversations SET updated_at = ? WHERE id = ?"
     ).bind(timestamp, conversationId)
@@ -120,13 +191,16 @@ export async function saveMessage(db, conversationId, role, content) {
     conversation_id: conversationId,
     role,
     content: content || "",
-    created_at: timestamp
+    created_at: timestamp,
+    metadata: cleanMetadata
   };
 }
 
 export async function getRecentMessages(db, conversationId, limit = 20) {
+  await ensureMessageMetadataSchema(db);
+
   const result = await db.prepare(
-    `SELECT role, content, created_at
+    `SELECT role, content, created_at, metadata
      FROM messages
      WHERE conversation_id = ?
      ORDER BY created_at DESC
@@ -137,7 +211,8 @@ export async function getRecentMessages(db, conversationId, limit = 20) {
     .reverse()
     .map(message => ({
       role: message.role,
-      content: message.content
+      content: message.content,
+      metadata: normalizeMessageMetadata(message.metadata)
     }));
 }
 
@@ -148,6 +223,8 @@ export async function handleHistory(request, env, url) {
       error: "D1 binding DB is not configured"
     }, 500);
   }
+
+  await ensureMessageMetadataSchema(env.DB);
 
   if (request.method === "GET" && url.pathname === "/api/conversations") {
     await ensureDefaultProject(env.DB);
@@ -202,7 +279,7 @@ export async function handleHistory(request, env, url) {
   if (request.method === "GET" && messagesMatch) {
     const conversationId = messagesMatch[1];
     const result = await env.DB.prepare(
-      `SELECT id, conversation_id, role, content, created_at
+      `SELECT id, conversation_id, role, content, created_at, metadata
        FROM messages
        WHERE conversation_id = ?
        ORDER BY created_at ASC`
@@ -210,7 +287,10 @@ export async function handleHistory(request, env, url) {
 
     return jsonResponse({
       ok: true,
-      messages: result.results || []
+      messages: (result.results || []).map(message => ({
+        ...message,
+        metadata: normalizeMessageMetadata(message.metadata)
+      }))
     });
   }
 

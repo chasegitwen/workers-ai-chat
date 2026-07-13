@@ -282,6 +282,7 @@ export function normalizeModelSettings(settings) {
   }
   const normalized = { ...settings };
   const providers = sourceProviders(normalized);
+  normalized.showPerMessageModelInfo = Boolean(normalized.showPerMessageModelInfo);
 
   if (providers.length) {
     normalized.providers = providers;

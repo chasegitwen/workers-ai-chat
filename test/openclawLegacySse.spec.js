@@ -18,6 +18,7 @@ function frontendStreamFunctions() {
     "function isOpenClawNetworkLost(){ return false; }\n" +
     "function isOpenClawProviderError(){ return false; }\n" +
     "function openClawFriendlyError(error){ return error.message || String(error); }\n" +
+    "function doneEventModelMetadata(){ return null; }\n" +
     "async function tryAutoResumeOpenClawTask(){ return { handled:false }; }\n" +
     script.slice(start, end) +
     "\nreturn { readStreamChunk, handleStreamEvent };"

@@ -47,6 +47,22 @@ async function catalogProvider(savedProviders, requestProviders = [], customMode
 }
 
 describe("OpenClaw execution mode settings persistence", () => {
+  it("persists the per-message model info display preference", () => {
+    const settings = normalizeModelSettings({
+      showPerMessageModelInfo: true,
+      providers: [provider("openclaw-hillsboro", "bridge")]
+    });
+
+    expect(settings.showPerMessageModelInfo).toBe(true);
+
+    const merged = mergeModelSettings({ showPerMessageModelInfo: false }, {
+      showPerMessageModelInfo: true,
+      providers: [provider("openclaw-hillsboro", "bridge")]
+    });
+
+    expect(merged.showPerMessageModelInfo).toBe(true);
+  });
+
   it("normalizes missing OpenClaw execution mode to legacy on load", () => {
     const settings = normalizeModelSettings({
       providers: [{

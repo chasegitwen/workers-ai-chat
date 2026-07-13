@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { handleHistory } from "../src/api/history.js";
+import { handleHistory, saveMessage } from "../src/api/history.js";
 import { resolveOpenClawRuntimeForProject } from "../src/api/openclawRuntimes.js";
 import { DEFAULT_PROJECT_ID, ensureDefaultProject, handleProjects } from "../src/api/projects.js";
 
@@ -96,6 +96,12 @@ class FakeD1 {
 
   prepare(sql) {
     return new FakeStatement(this, sql);
+  }
+
+  async batch(statements) {
+    for (const statement of statements) {
+      await statement.run();
+    }
   }
 
   normalize(sql) {
@@ -202,6 +208,29 @@ class FakeD1 {
         updated_at: updatedAt,
         project_id: projectId
       });
+      return;
+    }
+    if (normalized.startsWith("insert into messages")) {
+      const [id, conversationId, role, content, createdAt, metadata] = bindings;
+      this.messages.set(id, {
+        id,
+        conversation_id: conversationId,
+        role,
+        content,
+        created_at: createdAt,
+        metadata: metadata || null
+      });
+      return;
+    }
+    if (normalized.startsWith("update conversations") && normalized.includes("set updated_at = ?")) {
+      const [updatedAt, id] = bindings;
+      const conversation = this.conversations.get(id);
+      if (conversation) {
+        this.conversations.set(id, {
+          ...conversation,
+          updated_at: updatedAt
+        });
+      }
       return;
     }
     if (normalized.startsWith("update projects") && normalized.includes("set is_archived = 1")) {
@@ -418,8 +447,52 @@ describe("Project workspace foundation", () => {
       conversation_id: "legacy-conversation",
       role: "user",
       content: "hello",
-      created_at: 1
+      created_at: 1,
+      metadata: null
     }]);
+  });
+
+  it("persists assistant message metadata and returns it from history", async () => {
+    const db = new FakeD1();
+    db.conversations.set("metadata-conversation", {
+      id: "metadata-conversation",
+      title: "Metadata Conversation",
+      project_id: DEFAULT_PROJECT_ID,
+      created_at: 1,
+      updated_at: 1
+    });
+
+    const saved = await saveMessage(db, "metadata-conversation", "assistant", "hello", {
+      provider: "openai",
+      provider_label: "OpenAI",
+      model: "gpt-5.5",
+      model_label: "GPT-5.5",
+      runtime: "OpenClaw Hillsboro",
+      runtime_id: "hillsboro-openclaw",
+      agent: "openclaw",
+      execution_mode: "bridge",
+      ignored: "not persisted"
+    });
+
+    expect(saved.metadata).toEqual({
+      provider: "openai",
+      provider_label: "OpenAI",
+      model: "gpt-5.5",
+      model_label: "GPT-5.5",
+      runtime: "OpenClaw Hillsboro",
+      runtime_id: "hillsboro-openclaw",
+      agent: "openclaw",
+      execution_mode: "bridge"
+    });
+
+    const response = await handleHistory(
+      new Request("http://example.com/api/conversations/metadata-conversation/messages"),
+      env(db),
+      new URL("http://example.com/api/conversations/metadata-conversation/messages")
+    );
+    const body = await json(response);
+
+    expect(body.messages[0].metadata).toEqual(saved.metadata);
   });
 
   it("hides archived projects unless requested", async () => {

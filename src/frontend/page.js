@@ -11621,7 +11621,18 @@ async function sendMessage(){
 
   try{
     const fallbackModel = modelSettingsState?.fallbackModels?.[0] || "";
-    const selectedModelConfig = getModelConfigForRequest(modelSelect.value);
+    let selectedModelConfig = getModelConfigForRequest(modelSelect.value);
+    if(conversationAttachmentIdsToSend.length && selectedModelConfig){
+      selectedModelConfig = {
+        ...selectedModelConfig,
+        capabilities:{
+          text:true,
+          streaming:true,
+          ...(selectedModelConfig.capabilities || {}),
+          cloudflareDocumentAttachment:true
+        }
+      };
+    }
     const fallbackModelConfig = getModelConfigForRequest(fallbackModel);
     const selectedOpenClawRuntimeId = getOpenClawRuntimeIdForRequest(modelSelect.value);
     console.log("[phase10.3] frontend image count", (legacyImageToSend ? 1 : 0) + extraAttachmentsToSend.length);

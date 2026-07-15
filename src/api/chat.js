@@ -3238,10 +3238,21 @@ function mergeProviders(baseProviders, nextProviders, {
     }
 
     const models = new Map((existing.models || []).map(model => [model.id, model]));
-    (normalized.models || []).forEach(model => models.set(model.id, {
-      ...models.get(model.id),
-      ...model
-    }));
+    (normalized.models || []).forEach(model => {
+      const existingModel = models.get(model.id) || {};
+      const capabilities = {
+        ...(existingModel.capabilities || {}),
+        ...(model.capabilities || {})
+      };
+      if (existingModel.capabilities?.cloudflareDocumentAttachment === true) {
+        capabilities.cloudflareDocumentAttachment = true;
+      }
+      models.set(model.id, {
+        ...existingModel,
+        ...model,
+        capabilities
+      });
+    });
 
     const mergedProvider = {
       ...existing,
@@ -5436,8 +5447,7 @@ export async function handleChat(request, env, ctx) {
   let persistentConversationAttachmentRefs = [];
   if (!hasConversationAttachments
     && !isOpenClawRequest
-    && conversation?.id
-    && capabilityEnablesCloudflareDocumentAttachment(requestedTarget.model?.capabilities)) {
+    && conversation?.id) {
     const refResult = await listActiveConversationAttachmentRefs(env, conversation.id);
     if (!refResult.ok) {
       return new Response(JSON.stringify({

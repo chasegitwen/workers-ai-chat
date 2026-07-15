@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { readFile } from "node:fs/promises";
-import { handleChat, resolveConversationAttachmentMode } from "../src/api/chat.js";
+import {
+  buildModelProviderCatalog,
+  handleChat,
+  resolveConversationAttachmentMode
+} from "../src/api/chat.js";
 import {
   buildCloudflareDocumentAttachmentUserContent,
   convertConversationAttachmentsWithCloudflare
@@ -115,6 +118,44 @@ function providerConfig(capabilities = {}, options = {}) {
     ...(options.providerCapabilities ? { capabilities: options.providerCapabilities } : {}),
     models
   }];
+}
+
+function openAiCompatibleProviderConfig(capabilities = {}) {
+  return [{
+    id: "glm",
+    label: "GLM",
+    providerType: "openai-compatible",
+    apiBase: "https://example.com/v1",
+    apiKeyEnv: "GLM_API_KEY",
+    enabled: true,
+    models: [{
+      id: "glm-5.1",
+      label: "GLM 5.1",
+      modelName: "glm-5.1",
+      providerType: "openai-compatible",
+      apiBase: "https://example.com/v1",
+      apiKeyEnv: "GLM_API_KEY",
+      capabilities: {
+        text: true,
+        streaming: true,
+        ...capabilities
+      },
+      enabled: true
+    }]
+  }];
+}
+
+function openAiCompatibleCustomModelConfig(capabilities) {
+  return {
+    id: "glm-5.1",
+    label: "GLM 5.1",
+    provider: "glm",
+    providerType: "openai-compatible",
+    apiBase: "https://example.com/v1",
+    apiKeyEnv: "GLM_API_KEY",
+    modelName: "glm-5.1",
+    ...(capabilities ? { capabilities } : {})
+  };
 }
 
 function fakeChatDb({ existingConversation = true, attachmentRefs = [], settings = null } = {}) {
@@ -258,6 +299,19 @@ async function chatRequestWithBody(env, body) {
   }), env, {});
 }
 
+function openAiCompatibleStreamResponse(text = "provider ok") {
+  return new Response(
+    "data: " + JSON.stringify({ choices: [{ delta: { content: text } }] }) + "\n\n"
+      + "data: [DONE]\n\n",
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8"
+      }
+    }
+  );
+}
+
 describe("Cloudflare document attachment adapter", () => {
   it("resolves native_file before cloudflare_document", () => {
     expect(resolveConversationAttachmentMode({
@@ -334,6 +388,61 @@ describe("Cloudflare document attachment adapter", () => {
     expect(data.error).toBe("native_attachment_unsupported");
     expect(env.AI.toMarkdown).not.toHaveBeenCalled();
     expect(env.AI.run).not.toHaveBeenCalled();
+  });
+
+  it("preserves request model Cloudflare capability when customModelConfig is merged", async () => {
+    const catalog = await buildModelProviderCatalog(
+      {},
+      openAiCompatibleProviderConfig({ cloudflareDocumentAttachment: true }),
+      openAiCompatibleCustomModelConfig(),
+      null
+    );
+    const provider = catalog.find(item => item.id === "glm");
+    const model = provider.models.find(item => item.id === "glm-5.1");
+
+    expect(model.capabilities).toMatchObject({
+      text: true,
+      streaming: true,
+      cloudflareDocumentAttachment: true
+    });
+  });
+
+  it("does not reject first-turn ordinary custom model source reading as unsupported", async () => {
+    const env = envWithAttachmentSupport(files => files.map(file => ({
+      name: file.name,
+      mimeType: file.blob.type,
+      format: "markdown",
+      tokens: 4,
+      data: "Converted ordinary custom model document"
+    })));
+    env.GLM_API_KEY = "test-key";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(openAiCompatibleStreamResponse());
+    const attachment = await uploadAttachment(env, {
+      conversationId: "",
+      filename: "ordinary.pdf",
+      mimeType: "application/pdf"
+    });
+
+    try {
+      const response = await chatRequestWithBody(env, {
+        provider: "glm",
+        model: "glm-5.1",
+        providers: openAiCompatibleProviderConfig({ cloudflareDocumentAttachment: true }),
+        customModelConfig: openAiCompatibleCustomModelConfig(),
+        conversationId: "",
+        conversationAttachmentIds: [attachment.id],
+        draftId: "draft-1"
+      });
+
+      expect(response.status).toBe(200);
+      expect(env.AI.toMarkdown).toHaveBeenCalledOnce();
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      const requestBody = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      const finalUserMessage = requestBody.messages[requestBody.messages.length - 1];
+      expect(finalUserMessage.content).toContain("Converted ordinary custom model document");
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it("preserves multi-attachment order and injects untrusted document wrappers", async () => {
@@ -514,7 +623,7 @@ describe("Cloudflare document attachment adapter", () => {
     });
 
     const secondResponse = await chatRequestWithBody(env, {
-      providers: providerConfig({ cloudflareDocumentAttachment: true }),
+      providers: providerConfig(),
       conversationId: "conversation-1",
       messages: [{ role: "user", content: "What does the same document say?" }]
     });
@@ -548,7 +657,7 @@ describe("Cloudflare document attachment adapter", () => {
     expect(db.attachmentRefs).toHaveLength(1);
 
     const secondResponse = await chatRequestWithBody(env, {
-      providers: providerConfig({ cloudflareDocumentAttachment: true }),
+      providers: providerConfig(),
       conversationId: "conversation-1",
       messages: [{ role: "user", content: "Read the same text file again." }]
     });
@@ -613,7 +722,7 @@ describe("Cloudflare document attachment adapter", () => {
     expect(db.attachmentRefs.map(ref => ref.filename)).toEqual(["a.pdf", "b.docx"]);
 
     const secondResponse = await chatRequestWithBody(env, {
-      providers: providerConfig({ cloudflareDocumentAttachment: true }),
+      providers: providerConfig(),
       conversationId: "conversation-1",
       messages: [{ role: "user", content: "Compare the documents again." }]
     });
@@ -652,7 +761,7 @@ describe("Cloudflare document attachment adapter", () => {
     });
 
     const response = await chatRequestWithBody(env, {
-      providers: providerConfig({ cloudflareDocumentAttachment: true }),
+      providers: providerConfig(),
       conversationId: "conversation-1",
       messages: [{ role: "user", content: "Read the persisted attachment." }]
     });
@@ -761,8 +870,6 @@ describe("Cloudflare document attachment adapter", () => {
   });
 
   it("does not contain the old disabled conversation attachment guard", async () => {
-    const source = await readFile(new URL("../src/api/chat.js", import.meta.url), "utf8");
-
-    expect(source).not.toContain("if (false && hasConversationAttachments)");
+    expect(handleChat.toString()).not.toContain("if (false && hasConversationAttachments)");
   });
 });

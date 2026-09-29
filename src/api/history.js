@@ -184,39 +184,6 @@ function conversationCursor(row) {
   ].join("|");
 }
 
-function isAlreadyAppliedSchemaError(err) {
-  const message = String(err?.message || err || "").toLowerCase();
-  return message.includes("duplicate column")
-    || message.includes("already exists")
-    || message.includes("duplicate column name");
-}
-
-async function runSchemaStatement(db, statement) {
-  const prepared = db.prepare(statement);
-  if (typeof prepared.run === "function") {
-    return prepared.run();
-  }
-  return prepared.bind().run();
-}
-
-export async function ensureConversationArchiveSchema(db) {
-  if (!db || conversationArchiveSchemaReady.has(db)) {
-    return;
-  }
-
-  for (const statement of conversationArchiveSchemaStatements) {
-    try {
-      await runSchemaStatement(db, statement);
-    } catch (err) {
-      if (!isAlreadyAppliedSchemaError(err)) {
-        throw err;
-      }
-    }
-  }
-
-  conversationArchiveSchemaReady.add(db);
-}
-
 async function readAutoArchiveDays(db) {
   try {
     const row = await db.prepare(

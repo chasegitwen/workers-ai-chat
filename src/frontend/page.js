@@ -1073,19 +1073,6 @@ body.dark .projectRuntimeItem{
   font-weight:600;
 }
 
-.historyRow.pinned .historyItem{
-  font-weight:600;
-}
-
-.historyPinMark{
-  display:inline-flex;
-  align-items:center;
-  margin-right:4px;
-  color:var(--primary);
-  font-size:10px;
-  font-weight:700;
-}
-
 .historyTime{
   flex:0 0 auto;
   max-width:58px;

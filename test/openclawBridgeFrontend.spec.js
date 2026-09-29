@@ -273,7 +273,7 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("async function loadConversations(options = {})");
     expect(page).toContain("const clearMissingCurrent = options.clearMissingCurrent !== false;");
     expect(page).toContain("if(clearMissingCurrent && currentConversationId && !conversationsCache.some(item => item.id === currentConversationId))");
-    expect(page).toMatch(/webSearchContext = "";\s*webSearchSources = \[\];\s*await loadConversations\(\{\s*clearMissingCurrent:false\s*\}\);/);
+    expect(page).toMatch(/webSearchContext = "";\s*webSearchSources = \[\];\s*restoreConversationAfterNewMessage\(currentConversationId\);\s*await loadConversations\(\{\s*clearMissingCurrent:false\s*\}\);/);
     expect(page).toContain("if(isExpandedProject){");
     expect(page).toContain("document.getElementById(\"projectConversationMount\")");
     expect(page).toContain("if(projectMount){");

@@ -10,6 +10,7 @@ import {
 } from "./cloudflareDocumentAttachments.js";
 import { getRelevantFileChunksByIds } from "./files.js";
 import {
+  ensureConversationArchiveSchema,
   ensureConversation,
   ensureMessageMetadataSchema,
   saveMessage,
@@ -1798,6 +1799,7 @@ async function readAssistantMessageById(env, messageId) {
   if (!env.DB || !messageId) {
     return null;
   }
+  await ensureConversationArchiveSchema(env.DB);
   await ensureMessageMetadataSchema(env.DB);
   return env.DB.prepare(
     `SELECT id, conversation_id, role, content, created_at, metadata
@@ -1811,6 +1813,7 @@ async function updateAssistantMessageContent(env, messageId, content, metadata =
   if (!env.DB || !messageId) {
     return null;
   }
+  await ensureConversationArchiveSchema(env.DB);
   await ensureMessageMetadataSchema(env.DB);
   const now = Date.now();
   const metadataJson = metadata && Object.keys(metadata).length ? JSON.stringify(metadata) : null;
@@ -1823,7 +1826,9 @@ async function updateAssistantMessageContent(env, messageId, content, metadata =
     ).bind(content || "", metadataJson, messageId),
     env.DB.prepare(
       `UPDATE conversations
-        SET updated_at = ?
+        SET updated_at = ?,
+          is_archived = 0,
+          archived_at = NULL
         WHERE id = (
           SELECT conversation_id
           FROM messages
@@ -5235,8 +5240,9 @@ async function readExistingConversation(env, conversationId) {
   if (!env.DB || !id) {
     return null;
   }
+  await ensureConversationArchiveSchema(env.DB);
   return env.DB.prepare(
-    "SELECT id, title, project_id, created_at, updated_at FROM conversations WHERE id = ?"
+    "SELECT id, title, project_id, created_at, updated_at, is_archived, archived_at, pinned FROM conversations WHERE id = ?"
   ).bind(id).first();
 }
 

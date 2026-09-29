@@ -109,6 +109,46 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("metadata:streamResult.modelMetadata || null");
   });
 
+  it("adds an archive sidebar UI without changing conversation APIs", () => {
+    const page = htmlPage();
+
+    expect(page).toMatch(/<div id="archivePanel" class="archivePanel">[\s\S]*?<button id="archiveToggleBtn"[\s\S]*?<span>Archive<\/span>[\s\S]*?<div id="archiveBody" class="archiveBody"><\/div>[\s\S]*?<div class="modelArea">/);
+    expect(page).toContain("archived_only");
+    expect(page).toContain("id=\"autoArchiveDaysSelect\"");
+    expect(page).toContain("autoArchiveDays:normalizeAutoArchiveDays(base.autoArchiveDays)");
+    expect(page).toContain("modelSettingsState.autoArchiveDays = normalizeAutoArchiveDays(autoArchiveDaysSelect.value);");
+    expect(page).toContain("autoArchiveDaysSelect.value = normalizeAutoArchiveDays(modelSettingsState?.autoArchiveDays);");
+    expect(page).toContain("function isConversationArchived(item)");
+    expect(page).toContain("return Boolean(item.archived || item.is_archived || item.status === \"archived\");");
+    expect(page).toContain("function visibleConversations(conversations)");
+    expect(page).toContain("const pinnedDiff = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));");
+    expect(page).toContain("async function fetchArchiveSourceConversations()");
+    expect(page).toContain("archiveSourceConversations = await fetchArchiveSourceConversations();");
+    expect(page).toContain("fetchConversationsForProject(projectId, { archivedOnly:true, limit:1000 })");
+    expect(page).toContain("function groupedArchiveConversations(conversations)");
+    expect(page).toContain("function conversationArchivedAt(item)");
+    expect(page).toContain("\"Today\"");
+    expect(page).toContain("\"Yesterday\"");
+    expect(page).toContain("\"Last 7 Days\"");
+    expect(page).toContain("\"This Month\"");
+    expect(page).toContain("\"Older...\"");
+    expect(page).toContain("appendConversationMenuItem(menu, \"Restore\", () => restoreArchivedConversation(item.id));");
+    expect(page).toContain("appendConversationMenuItem(menu, item.pinned ? \"Unpin\" : \"Pin\", () => togglePinnedConversation(item));");
+    expect(page).toContain("appendConversationMenuItem(menu, \"Archive\", () => archiveConversation(item.id));");
+    expect(page).toContain("appendConversationMenuItem(menu, \"Delete\", () => deleteConversation(item.id, item.title || \"New Chat\"));");
+    expect(page).toContain("JSON.stringify({ action })");
+    expect(page).toContain("await loadConversations({ clearMissingCurrent:false });");
+    expect(page).toContain("async function loadMoreConversations()");
+    expect(page).toContain("conversationLoadMoreBtn.addEventListener(\"click\", loadMoreConversations)");
+    expect(page).toContain("let commonConversationsCache = [];");
+    expect(page).toContain("projectId:DEFAULT_PROJECT_ID");
+    expect(page).toContain("commonConversationsCache = visibleConversations([...commonConversationsCache, ...nextItems]);");
+    expect(page).toContain("pinMark.textContent = \"PIN\";");
+    expect(page).toContain("row.addEventListener(\"contextmenu\"");
+    expect(page).toContain("restoreConversationAfterNewMessage(currentConversationId);");
+    expect(page).not.toContain("wa_archived_conversation_ids");
+  });
+
   it("sends an explicit Seattle runtime_id when the selected OpenClaw model is Seattle", () => {
     const page = htmlPage();
 
@@ -127,6 +167,7 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("id=\"projectList\"");
     expect(page).toContain("class=\"sidebarSectionHeader\">Conversations</div>");
     expect(page).toContain("id=\"conversationList\"");
+    expect(page).toContain("id=\"conversationLoadMoreBtn\"");
     expect(page).toMatch(/<div id="projectStatus" class="projectStatus"><\/div>[\s\S]*?<div class="sidebarSection chatsSection">/);
     expect(page).toMatch(/<\/aside>\s*<div id="projectSettingsPopover" class="projectSettingsPopover" hidden>/);
     expect(page).toContain("id=\"modelSelect\"");
@@ -206,6 +247,9 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("renderConversationRows(conversationList, commonConversations)");
     expect(page).toContain("conversationList.hidden = false");
     expect(page).toContain("applyChatSearchFilter");
+    expect(page).toContain("params.set(\"cursor\", options.cursor);");
+    expect(page).toContain("params.set(\"q\", options.q);");
+    expect(page).toContain("return normalizeConversationPage(data);");
     expect(page).toContain("runtimeCapabilityLabel");
     expect(page).toContain("renderRuntimeBinding");
     expect(page).toContain("runtimeCanBeBridgeDefault");
@@ -229,7 +273,7 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("async function loadConversations(options = {})");
     expect(page).toContain("const clearMissingCurrent = options.clearMissingCurrent !== false;");
     expect(page).toContain("if(clearMissingCurrent && currentConversationId && !conversationsCache.some(item => item.id === currentConversationId))");
-    expect(page).toMatch(/webSearchContext = "";\s*webSearchSources = \[\];\s*await loadConversations\(\{\s*clearMissingCurrent:false\s*\}\);/);
+    expect(page).toMatch(/webSearchContext = "";\s*webSearchSources = \[\];\s*restoreConversationAfterNewMessage\(currentConversationId\);\s*await loadConversations\(\{\s*clearMissingCurrent:false\s*\}\);/);
     expect(page).toContain("if(isExpandedProject){");
     expect(page).toContain("document.getElementById(\"projectConversationMount\")");
     expect(page).toContain("if(projectMount){");

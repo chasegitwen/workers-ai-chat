@@ -11458,21 +11458,79 @@ function restoreMarkdownCode(markdown, protectedParts){
   return String(markdown || "").replace(new RegExp("%%MD_PROTECTED_([0-9]+)%%", "g"), (_, index) => protectedParts[Number(index)] || "");
 }
 
+function mathMarkupHtml(expression, displayMode){
+  const cleanExpression = String(expression || "").trim();
+  const tag = displayMode ? "div" : "span";
+  const className = displayMode ? "mathBlock" : "mathInline";
+  const fallback = displayMode
+    ? "$$" + escapeHtml(cleanExpression) + "$$"
+    : "$" + escapeHtml(cleanExpression) + "$";
+  return "<" + tag + " class='" + className + " mathFallback' data-math-display='" + (displayMode ? "1" : "0") + "' data-latex='" + encodeMathLatex(cleanExpression) + "'>" + fallback + "</" + tag + ">";
+}
+
+function protectDelimitedMath(markdown, opening, closing, displayMode, protectedParts){
+  const source = String(markdown || "");
+  let cursor = 0;
+  let output = "";
+
+  while(cursor < source.length){
+    const start = source.indexOf(opening, cursor);
+    if(start < 0){
+      output += source.slice(cursor);
+      break;
+    }
+    const end = source.indexOf(closing, start + opening.length);
+    if(end < 0){
+      output += source.slice(cursor);
+      break;
+    }
+
+    const expression = source.slice(start + opening.length, end).trim();
+    output += source.slice(cursor, start);
+    if(expression){
+      const key = "%%MATH_PROTECTED_" + protectedParts.length + "%%";
+      protectedParts.push(mathMarkupHtml(expression, displayMode));
+      output += key;
+    }else{
+      output += source.slice(start, end + closing.length);
+    }
+    cursor = end + closing.length;
+  }
+
+  return output;
+}
+
+function restoreProtectedMath(markdown, protectedParts){
+  return String(markdown || "").replace(new RegExp("%%MATH_PROTECTED_([0-9]+)%%", "g"), (_, index) => protectedParts[Number(index)] || "");
+}
+
 function renderMathMarkup(markdown){
   const protectedMarkdown = protectMarkdownCode(markdown);
+  const protectedMath = [];
   const backslash = String.fromCharCode(92);
   const dollar = String.fromCharCode(36);
   const literalDollar = backslash + dollar;
   const newline = String.fromCharCode(10);
   const blockMathPattern = new RegExp(literalDollar + literalDollar + "([^]*?)" + literalDollar + literalDollar, "g");
   const inlineMathPattern = new RegExp("(^|[^" + backslash + backslash + dollar + "])" + literalDollar + "([^" + newline + dollar + "]+?)" + literalDollar, "g");
-  const withMath = protectedMarkdown.text
-    .replace(blockMathPattern, (_, expression) => (
-      "<div class='mathBlock mathFallback' data-math-display='1' data-latex='" + encodeMathLatex(expression.trim()) + "'>$$" + escapeHtml(expression.trim()) + "$$</div>"
-    ))
-    .replace(inlineMathPattern, (_, prefix, expression) => (
-      prefix + "<span class='mathInline mathFallback' data-math-display='0' data-latex='" + encodeMathLatex(expression.trim()) + "'>$" + escapeHtml(expression.trim()) + "$</span>"
-    ));
+  const withSlashBlocks = protectDelimitedMath(
+    protectedMarkdown.text,
+    backslash + "[",
+    backslash + "]",
+    true,
+    protectedMath
+  );
+  const withSlashMath = protectDelimitedMath(
+    withSlashBlocks,
+    backslash + "(",
+    backslash + ")",
+    false,
+    protectedMath
+  );
+  const withDollarMath = withSlashMath
+    .replace(blockMathPattern, (_, expression) => mathMarkupHtml(expression, true))
+    .replace(inlineMathPattern, (_, prefix, expression) => prefix + mathMarkupHtml(expression, false));
+  const withMath = restoreProtectedMath(withDollarMath, protectedMath);
   return restoreMarkdownCode(withMath, protectedMarkdown.protectedParts);
 }
 

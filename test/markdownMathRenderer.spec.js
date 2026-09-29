@@ -48,6 +48,18 @@ describe("assistant Markdown math rendering", () => {
     expect(rendered.match(/data-math-display='0'/g)).toHaveLength(2);
   });
 
+  it("keeps derivative primes inside the encoded math attribute", () => {
+    const { renderMathMarkup } = frontendMathRenderer();
+    const rendered = renderMathMarkup(
+      "Transform $x \\to x'$ and derivative \\(f'(x)\\)"
+    );
+
+    expect(rendered).toContain("data-latex='x%20%5Cto%20x%27'");
+    expect(rendered).toContain("data-latex='f%27(x)'");
+    expect(rendered).toContain("$x \\to x&#39;$");
+    expect(rendered).not.toContain("data-latex='x%20%5Cto%20x''");
+  });
+
   it("does not render math delimiters inside inline or fenced code", () => {
     const { renderMathMarkup } = frontendMathRenderer();
     const markdown = "`\\(inline code\\)`\n\n```text\n\\[block code\\]\n```";

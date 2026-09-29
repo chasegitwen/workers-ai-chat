@@ -11363,7 +11363,7 @@ function escapeHtml(value){
 }
 
 function encodeMathLatex(value){
-  return encodeURIComponent(String(value || ""));
+  return encodeURIComponent(String(value || "")).replace(/'/g, "%27");
 }
 
 function decodeMathLatex(value){

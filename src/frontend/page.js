@@ -11999,6 +11999,11 @@ async function handleStreamEvent(eventText, state, element){
   if(event.type === "provider_error"){
     try{
       state.diagnostics.providerError = JSON.parse(event.data || "{}");
+      if(["provider_refusal", "output_limit", "empty_response"].includes(state.diagnostics.providerError.code)){
+        state.reply = state.diagnostics.providerError.message;
+        state.providerFriendlyError = true;
+        setContextStatus(state.reply);
+      }
       if(state.isOpenClawRequest
         && isOpenClawNetworkLost(state.diagnostics.providerError)
         && (isOpenClawProviderError(state.diagnostics.providerError) || !state.diagnostics.providerError.provider)){
@@ -12031,7 +12036,7 @@ async function handleStreamEvent(eventText, state, element){
       state.diagnostics.done = data;
       state.modelMetadata = doneEventModelMetadata(data);
       const chunk = readStreamChunk(event.data);
-      if(chunk.text && !state.openClawFriendlyError){
+      if(chunk.text && !state.openClawFriendlyError && !state.providerFriendlyError){
         state.reply += chunk.text;
       }
       renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug, state.diagnostics, state.modelMetadata);
@@ -12053,7 +12058,7 @@ async function handleStreamEvent(eventText, state, element){
   }
 
   if(chunk.text){
-    if(!state.openClawFriendlyError){
+    if(!state.openClawFriendlyError && !state.providerFriendlyError){
       state.reply += chunk.text;
     }
     renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug, state.diagnostics);

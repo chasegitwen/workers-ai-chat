@@ -4989,7 +4989,8 @@ function streamChatWithToolStatus({
           });
           activeResult = result;
         } catch (err) {
-          if (!autoFallbackEnabled || !fallbackModel || fallbackModel === model) {
+          if (["provider_refusal", "output_limit", "empty_response"].includes(err?.code)
+            || !autoFallbackEnabled || !fallbackModel || fallbackModel === model) {
             throw err;
           }
 
@@ -5133,7 +5134,9 @@ function streamChatWithToolStatus({
         enqueueText(encodeSseEvent("provider_error", providerError));
         enqueueText("data: " + JSON.stringify({
           response:
-            "AI \u8bf7\u6c42\u5931\u8d25\uff1a\n\n" +
+            ["provider_refusal", "output_limit", "empty_response"].includes(providerError.code)
+              ? providerError.message
+              : "AI \u8bf7\u6c42\u5931\u8d25\uff1a\n\n" +
             "provider: " + providerError.provider + "\n" +
             "model: " + providerError.model + "\n" +
             "status: " + (providerError.status || "") + "\n" +

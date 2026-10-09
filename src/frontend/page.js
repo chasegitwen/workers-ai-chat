@@ -3226,7 +3226,7 @@ body.dark .toolErrorNotice{
 
   <div id="openClawTaskBanner" class="openClawTaskBanner" aria-live="polite"></div>
 
-  <button id="openClawTaskHistoryToggle" class="openClawTaskHistoryToggle" type="button">OpenClaw Tasks</button>
+  <button id="openClawTaskHistoryToggle" class="openClawTaskHistoryToggle" type="button" hidden>OpenClaw Tasks</button>
 
   <div id="openClawTaskHistoryPanel" class="openClawTaskHistory" hidden>
     <div class="openClawTaskHistoryHeader">
@@ -3850,6 +3850,7 @@ function selectInitialModel(){
     nextModel = modelOptions[0]?.id || "";
   }
   modelSelect.value = nextModel;
+  syncOpenClawTaskVisibility();
 }
 
 function refreshSettingsControls(){
@@ -7051,6 +7052,7 @@ function refreshSettingsControls(){
   if(settingsPanel){
     settingsPanel.scrollTop = settingsScrollTop;
   }
+  syncOpenClawTaskVisibility();
 }
 
 async function loadModels(){
@@ -8534,9 +8536,22 @@ function openClawTaskBannerDisclaimer(task){
     : "This is a Worker local record. It cannot confirm VPS-side progress or restore remote stream.";
 }
 
+function syncOpenClawTaskVisibility(){
+  const hasConversationTask = Boolean(currentConversationId) && [...openClawTasks, activeOpenClawTask]
+    .some(task => task?.id && openClawTaskConversationId(task) === currentConversationId);
+  const visible = isSelectedOpenClawRequest(modelSelect.value) || hasConversationTask;
+  openClawTaskHistoryToggle.hidden = !visible;
+  if(!visible){
+    openClawTaskHistoryPanel.hidden = true;
+    openClawTaskHistoryToggle.classList.remove("active");
+  }
+}
+
 function renderOpenClawTaskBanner(){
+  syncOpenClawTaskVisibility();
   const task = currentPendingOpenClawTask() || activeOpenClawTask;
-  if(!task || ignoredOpenClawTaskIds.has(task.id)){
+  if(!task || !currentConversationId || openClawTaskConversationId(task) !== currentConversationId
+    || ignoredOpenClawTaskIds.has(task.id)){
     openClawTaskBanner.classList.remove("open");
     openClawTaskBanner.innerHTML = "";
     openClawTaskBanner.dataset.mode = "";
@@ -10908,6 +10923,7 @@ chat.addEventListener("click", event => {
   handleCopyClick(event);
 });
 modelSelect.addEventListener("change", () => {
+  syncOpenClawTaskVisibility();
   if(modelSettingsState?.rememberLastModel && modelSelect.value){
     modelSettingsState.lastModel = modelSelect.value;
     writeSettingsCache(modelSettingsState);

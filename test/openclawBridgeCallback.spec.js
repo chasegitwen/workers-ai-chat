@@ -114,10 +114,10 @@ class FakeStatement {
   }
 
   async run() {
-    this.fakeDb.run(this.sql, this.bindings);
+    const changes = this.fakeDb.run(this.sql, this.bindings);
     return {
       success: true,
-      meta: { changes: 1 }
+      meta: { changes: changes ?? 1 }
     };
   }
 }
@@ -143,6 +143,17 @@ class FakeD1 {
   first(sql, bindings) {
     const normalized = sql.replace(/\s+/g, " ").trim().toLowerCase();
     if (normalized.includes("from bridge_events")) {
+      if (normalized.includes("task_id in")) {
+        const ids = bindings.slice(0, -2);
+        const [projectId, runtimeId] = bindings.slice(-2);
+        const events = [...this.bridgeEvents.values()].filter(event => ids.includes(event.task_id)
+          && String(event.project_id || "") === projectId && String(event.runtime_id || "") === runtimeId);
+        if (normalized.includes("event_type = 'bridge.final'")) {
+          return events.filter(event => event.event_type === "bridge.final")
+            .sort((a, b) => Number(b.applied) - Number(a.applied) || String(a.received_at).localeCompare(String(b.received_at)))[0] || null;
+        }
+        return events.find(event => ["bridge.started", "bridge.activity", "bridge.tool_call", "bridge.tool_result", "bridge.heartbeat"].includes(event.event_type)) || null;
+      }
       const event = this.bridgeEvents.get(bindings[0]);
       return event ? { ...event } : null;
     }
@@ -151,6 +162,10 @@ class FakeD1 {
       const task = [...this.openclawTasks.values()].find(item =>
         item.bridge_task_id === taskId || item.remote_task_id === taskId || item.id === taskId
       );
+      return task ? { ...task } : null;
+    }
+    if (normalized.includes("from openclaw_tasks") && normalized.includes("where id = ?")) {
+      const task = this.openclawTasks.get(bindings[0]);
       return task ? { ...task } : null;
     }
     if (normalized.includes("from openclaw_tasks") && normalized.includes("assistant_message_id")) {
@@ -220,6 +235,20 @@ class FakeD1 {
       }
       return;
     }
+    if (normalized.startsWith("insert or ignore into messages")) {
+      if (this.messages.has(bindings[0])) {
+        return 0;
+      }
+      this.messages.set(bindings[0], {
+        id: bindings[0],
+        conversation_id: bindings[1],
+        role: "assistant",
+        content: bindings[2],
+        created_at: bindings[3],
+        metadata: bindings[4] || null
+      });
+      return 1;
+    }
     if (normalized.startsWith("insert into messages")) {
       this.messages.set(bindings[0], {
         id: bindings[0],
@@ -235,6 +264,7 @@ class FakeD1 {
       const messageId = normalized.includes("metadata = coalesce") ? bindings[2] : bindings[1];
       const message = this.messages.get(messageId);
       if (message?.role === "assistant") {
+        if (normalized.includes("json_extract") && JSON.parse(message.metadata || "{}").openclaw_completion?.source === "callback") return 0;
         message.content = bindings[0] || "";
         if (normalized.includes("metadata = coalesce") && bindings[1]) {
           message.metadata = bindings[1];
@@ -246,6 +276,41 @@ class FakeD1 {
       const conversationId = normalized.includes("where id = (") ? null : bindings[1];
       if (conversationId && this.conversations.has(conversationId)) {
         this.conversations.get(conversationId).updated_at = bindings[0];
+      }
+      return;
+    }
+    if (normalized.startsWith("update openclaw_tasks") && normalized.includes("cancelled_at = coalesce")) {
+      const task = this.openclawTasks.get(bindings[8]);
+      if (task) {
+        const message = this.messages.get(task.assistant_message_id) || this.messages.get("openclaw-assistant-" + task.id);
+        if (normalized.includes("and not exists") && JSON.parse(message?.metadata || "{}").openclaw_completion?.source === "callback") return 0;
+        task.status = bindings[0];
+        task.updated_at = bindings[1];
+        task.completed_at = bindings[2] || task.completed_at;
+        task.error = bindings[3];
+        task.remote_status = bindings[4];
+        task.remote_progress = bindings[5];
+        task.remote_message = bindings[6];
+        task.cancelled_at = bindings[7] || task.cancelled_at;
+      }
+      return;
+    }
+    if (normalized.startsWith("update openclaw_tasks") && normalized.includes("latency_ms = ?") && bindings.length === 7) {
+      const task = this.openclawTasks.get(bindings[6]);
+      if (task) {
+        task.status = bindings[0];
+        task.updated_at = bindings[1];
+        task.completed_at = bindings[2];
+        task.error = bindings[3];
+        task.latency_ms = bindings[4];
+        task.assistant_message_id = bindings[5];
+      }
+      return;
+    }
+    if (normalized.startsWith("update openclaw_tasks") && normalized.includes("set bridge_result_hash = ?") && bindings.length === 2) {
+      const task = this.openclawTasks.get(bindings[1]);
+      if (task) {
+        task.bridge_result_hash = bindings[0];
       }
       return;
     }
@@ -356,6 +421,7 @@ describe("OpenClaw bridge callback endpoint", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("accepts a valid bridge.started callback", async () => {
@@ -563,6 +629,309 @@ describe("OpenClaw bridge callback endpoint", () => {
       model: "openclaw/glm5-2",
       model_label: "zai/glm-5.2"
     });
+  });
+
+  it("completes a task only once when final callbacks use different event_id values", async () => {
+    const firstPayload = basePayload({
+      event_id: "evt_final_first",
+      event_type: "bridge.final",
+      sequence: 4,
+      content: { final_answer: "First final answer" }
+    });
+    const retryPayload = basePayload({
+      event_id: "evt_final_retry",
+      event_type: "bridge.final",
+      sequence: 5,
+      content: { final_answer: "Retry must not overwrite" }
+    });
+
+    const first = await postCallback(firstPayload);
+    const retry = await postCallback(retryPayload);
+    const task = await readTask();
+
+    expect(await first.json()).toMatchObject({ applied: true, duplicate: false });
+    expect(await retry.json()).toMatchObject({ applied: false, duplicate: false });
+    expect(db.messages.size).toBe(1);
+    expect(db.messages.get(task.assistant_message_id).content).toBe("First final answer");
+    expect(db.bridgeEvents.get("evt_final_retry").error).toBe("final_not_applied");
+  });
+
+  it("converges concurrent final callbacks on one assistant message", async () => {
+    const responses = await Promise.all([
+      postCallback(basePayload({
+        event_id: "evt_concurrent_final_a",
+        event_type: "bridge.final",
+        sequence: 8,
+        content: { final_answer: "Concurrent final A" }
+      })),
+      postCallback(basePayload({
+        event_id: "evt_concurrent_final_b",
+        event_type: "bridge.final",
+        sequence: 9,
+        content: { final_answer: "Concurrent final B" }
+      }))
+    ]);
+    const bodies = await Promise.all(responses.map(response => response.json()));
+    const task = await readTask();
+
+    expect(bodies.filter(body => body.applied).length).toBe(1);
+    expect(db.messages.size).toBe(1);
+    expect(db.messages.get(task.assistant_message_id).content).toMatch(/^Concurrent final [AB]$/);
+  });
+
+  it("keeps a polling-completed assistant message when a callback arrives later", async () => {
+    const task = await readTask();
+    task.status = "completed";
+    task.remote_status = "completed";
+    task.assistant_message_id = "polling-message";
+    task.bridge_result_hash = "polling-result-hash";
+    db.messages.set("polling-message", {
+      id: "polling-message",
+      conversation_id: task.conversation_id,
+      role: "assistant",
+      content: "Polling final answer",
+      created_at: Date.now(),
+      metadata: null
+    });
+
+    const response = await postCallback(basePayload({
+      event_id: "evt_callback_after_polling",
+      event_type: "bridge.final",
+      sequence: 9,
+      content: { final_answer: "Late callback answer" }
+    }));
+
+    expect(await response.json()).toMatchObject({ applied: false, duplicate: false });
+    expect(db.messages.size).toBe(1);
+    expect(db.messages.get("polling-message").content).toBe("Polling final answer");
+  });
+
+  it("repairs a polling-completed intermediate message when the authoritative final callback arrives", async () => {
+    await postCallback(basePayload({ event_type: "bridge.started", sequence: 1 }));
+    const task = await readTask();
+    task.status = "completed";
+    task.remote_status = "completed";
+    task.bridge_last_sequence = 1;
+    task.assistant_message_id = "polling-intermediate-message";
+    task.bridge_result_hash = "polling-intermediate-hash";
+    db.messages.set("polling-intermediate-message", {
+      id: "polling-intermediate-message",
+      conversation_id: task.conversation_id,
+      role: "assistant",
+      content: "即时 `top` 那一秒显示 CPU 系统态偏高，但负载很低、`vmstat` 后两秒基本空闲，像是采样瞬间波动。我再补一组 5 秒平均和关键服务资源占用，避免误判。",
+      created_at: Date.now(),
+      metadata: null
+    });
+
+    const response = await postCallback(basePayload({
+      event_id: "evt_authoritative_final_after_polling",
+      event_type: "bridge.final",
+      sequence: 21,
+      content: { final_answer: "当前 VPS 状态正常。CPU 约 93%-100% idle，内存可用约 650MiB。" }
+    }));
+
+    expect(await response.json()).toMatchObject({ applied: true, duplicate: false });
+    expect(db.messages.size).toBe(1);
+    expect(task.assistant_message_id).toBe("polling-intermediate-message");
+    expect(db.messages.get("polling-intermediate-message").content).toContain("93%-100% idle");
+    expect(task.bridge_last_sequence).toBe(21);
+  });
+
+  it("waits for the terminal callback regardless of the wording of a polling snapshot", async () => {
+    const intermediate = "当前看起来负载很低，内存还有余量，swap 有少量使用。我再过滤一下过去 24 小时的系统日志，确认有没有 OOM、重启、服务失败或内存压力记录。";
+    await postCallback(basePayload({ event_type: "bridge.started", sequence: 1 }));
+    vi.stubGlobal("fetch", vi.fn(async input => Response.json({
+      task: { task_id: "bridge_task_callback", status: "completed", final_answer: intermediate }
+    })));
+    const task = await readTask();
+    const response = await worker.fetch(new Request(
+      "http://example.com/api/openclaw/tasks/" + task.id + "/status",
+      { headers: { Cookie: await authCookie() } }
+    ), { ...callbackEnv(), OPENCLAW_BRIDGE_BASE_URL: "https://bridge.example.test" }, {});
+    expect(await response.json()).toMatchObject({
+      task: { status: "recovering" }, resultRecovery: { incomplete: true, result_finality: "awaiting_final_event" }
+    });
+    expect(db.messages.size).toBe(0);
+    expect(await (await postCallback(basePayload({ event_type: "bridge.activity", sequence: 43, content: { text: "采样仍在进行" } }))).json()).toMatchObject({ applied: true });
+    const final = "CPU 正常。内存正常。Swap 正常。资源正常。资源正常。";
+    expect(await (await postCallback(basePayload({ event_type: "bridge.final", sequence: 44, content: { final_answer: final } }))).json()).toMatchObject({ applied: true });
+    expect(db.messages.size).toBe(1);
+    expect(db.messages.get(task.assistant_message_id).content).toBe(final);
+    expect(task.bridge_last_sequence).toBe(44);
+  });
+
+  it("recovers an older rejected final from the authenticated event ledger on /result without another Bridge request", async () => {
+    await postCallback(basePayload({ event_type: "bridge.started", sequence: 1 }));
+    const task = await readTask();
+    task.status = "completed";
+    task.assistant_message_id = "old-polling-snapshot";
+    db.messages.set(task.assistant_message_id, {
+      id: task.assistant_message_id, conversation_id: task.conversation_id, role: "assistant",
+      content: "一段未被句式分类器识别的过程说明", metadata: null
+    });
+    const payload = basePayload({ event_id: "evt_old_rejected_final", event_type: "bridge.final", sequence: 44, content: { final_answer: "检查完了。CPU、内存和 Swap 的完整数据。" } });
+    db.bridgeEvents.set(payload.event_id, {
+      ...payload, payload_json: JSON.stringify(payload), applied: 0, error: "final_not_applied", received_at: new Date().toISOString()
+    });
+    const bridgeFetch = vi.fn();
+    vi.stubGlobal("fetch", bridgeFetch);
+    const response = await worker.fetch(new Request("http://example.com/api/openclaw/tasks/" + task.id + "/result", {
+      headers: { Cookie: await authCookie() }
+    }), callbackEnv(), {});
+    expect(await response.json()).toMatchObject({ ok: true, saved: true, result: payload.content.final_answer });
+    expect(db.messages.size).toBe(1);
+    expect(db.messages.get(task.assistant_message_id).content).toBe(payload.content.final_answer);
+    expect(db.bridgeEvents.get(payload.event_id)).toMatchObject({ applied: 1, error: "" });
+    expect(bridgeFetch).not.toHaveBeenCalled();
+  });
+
+  it("accepts a verifiable polling final when progress callbacks arrived but the final callback was lost", async () => {
+    await postCallback(basePayload({ event_type: "bridge.started", sequence: 1 }));
+    const final = "资源正常。CPU idle 99%，内存可用 680MiB，Swap 251MiB。";
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      task: { task_id: "bridge_task_callback", status: "completed", final_answer: "尚在检查", events: [
+        { event_type: "bridge.final", sequence: 44, content: { final_answer: final } }
+      ] }
+    })));
+    const task = await readTask();
+    const response = await worker.fetch(new Request("http://example.com/api/openclaw/tasks/" + task.id + "/result", {
+      headers: { Cookie: await authCookie() }
+    }), { ...callbackEnv(), OPENCLAW_BRIDGE_BASE_URL: "https://bridge.example.test" }, {});
+    expect(await response.json()).toMatchObject({ ok: true, saved: true, result: final });
+    expect(db.messages.size).toBe(1);
+    expect(db.messages.get(task.assistant_message_id).content).toBe(final);
+    expect(await (await postCallback(basePayload({ event_type: "bridge.final", sequence: 44, content: { final_answer: final } }))).json()).toMatchObject({ applied: false });
+  });
+
+  it("does not let a polling result in flight demote a terminal callback to recovering", async () => {
+    await postCallback(basePayload({ event_type: "bridge.started", sequence: 1 }));
+    const task = await readTask();
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      await postCallback(basePayload({ event_type: "bridge.final", sequence: 44, content: { final_answer: "完整答案" } }));
+      return Response.json({ task: { task_id: task.bridge_task_id, status: "completed", final_answer: "较早快照" } });
+    }));
+    await worker.fetch(new Request("http://example.com/api/openclaw/tasks/" + task.id + "/result", {
+      headers: { Cookie: await authCookie() }
+    }), { ...callbackEnv(), OPENCLAW_BRIDGE_BASE_URL: "https://bridge.example.test" }, {});
+    expect(task.status).toBe("completed");
+    expect(db.messages.get(task.assistant_message_id).content).toBe("完整答案");
+  });
+
+  it("ignores final ledger entries belonging to another runtime or task", async () => {
+    const task = await readTask();
+    task.project_id = "project_current";
+    task.runtime_id = "hillsboro-openclaw";
+    const started = await postCallback(basePayload({ event_type: "bridge.started", sequence: 1, project_id: task.project_id, runtime_id: task.runtime_id }));
+    expect(await started.json()).toMatchObject({ applied: true });
+    for (const [id, taskId, runtimeId] of [
+      ["evt_other_task", "another_bridge_task", task.runtime_id],
+      ["evt_other_runtime", task.bridge_task_id, "another_runtime"]
+    ]) {
+      const payload = basePayload({ event_id: id, task_id: taskId, runtime_id: runtimeId, project_id: task.project_id,
+        event_type: "bridge.final", sequence: 44, content: { final_answer: "不属于当前任务的完整答案" } });
+      db.bridgeEvents.set(id, { ...payload, payload_json: JSON.stringify(payload), applied: 1, received_at: new Date().toISOString() });
+    }
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ task: { status: "completed", final_answer: "当前任务的过程快照" } })));
+    const response = await worker.fetch(new Request("http://example.com/api/openclaw/tasks/" + task.id + "/result", {
+      headers: { Cookie: await authCookie() }
+    }), { ...callbackEnv(), OPENCLAW_BRIDGE_BASE_URL: "https://bridge.example.test" }, {});
+    expect(await response.json()).toMatchObject({ ok: false, result_finality: "awaiting_final_event" });
+    expect(db.messages.size).toBe(0);
+  });
+
+  it("keeps a remotely completed Bridge task recovering while /result is still intermediate", async () => {
+    const intermediate = "即时 `top` 那一秒显示 CPU 系统态偏高，但负载很低、`vmstat` 后两秒基本空闲，像是采样瞬间波动。我再补一组 5 秒平均和关键服务资源占用，避免误判。";
+    const finalAnswer = "当前 VPS 状态正常。CPU 约 93%-100% idle，内存可用约 650MiB。";
+    let resultRequests = 0;
+    const bridgeFetch = vi.fn(async input => {
+      const url = String(input);
+      if (url.endsWith("/status")) {
+        return Response.json({
+          task: {
+            task_id: "bridge_task_callback",
+            status: "completed",
+            progress: 100
+          }
+        });
+      }
+      if (url.endsWith("/result")) {
+        resultRequests += 1;
+        return Response.json({
+          task: {
+            task_id: "bridge_task_callback",
+            status: "completed",
+            final_answer: resultRequests === 1 ? intermediate : finalAnswer
+          }
+        });
+      }
+      return Response.json({ error: "unexpected_url" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", bridgeFetch);
+
+    const task = await readTask();
+    const response = await worker.fetch(new Request(
+      "http://example.com/api/openclaw/tasks/" + encodeURIComponent(task.id) + "/status",
+      { headers: { Cookie: await authCookie() } }
+    ), {
+      ...callbackEnv(),
+      OPENCLAW_BRIDGE_BASE_URL: "https://bridge.example.test",
+      OPENCLAW_BRIDGE_TOKEN: "bridge-token"
+    }, {});
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.task.status).toBe("recovering");
+    expect(body.task.remote_status).toBe("completed");
+    expect(body.resultRecovery).toMatchObject({
+      ok: false,
+      incomplete: true,
+      recoverable: true,
+      result_finality: "suspect_incomplete"
+    });
+    expect(db.messages.size).toBe(0);
+
+    const recoveredResponse = await worker.fetch(new Request(
+      "http://example.com/api/openclaw/tasks/" + encodeURIComponent(task.id) + "/status",
+      { headers: { Cookie: await authCookie() } }
+    ), {
+      ...callbackEnv(),
+      OPENCLAW_BRIDGE_BASE_URL: "https://bridge.example.test",
+      OPENCLAW_BRIDGE_TOKEN: "bridge-token"
+    }, {});
+    const recoveredBody = await recoveredResponse.json();
+
+    expect(recoveredResponse.status).toBe(200);
+    expect(recoveredBody.task.status).toBe("completed");
+    expect(recoveredBody.resultRecovery).toMatchObject({
+      ok: true,
+      incomplete: false,
+      result_finality: "final"
+    });
+    expect(db.messages.size).toBe(1);
+    expect([...db.messages.values()][0].content).toBe(finalAnswer);
+    expect((await readTask()).bridge_result_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(bridgeFetch).toHaveBeenCalledTimes(4);
+  });
+
+  it("treats polling result finalization after callback completion as a duplicate", async () => {
+    await postCallback(basePayload({
+      event_id: "evt_callback_before_polling",
+      event_type: "bridge.final",
+      sequence: 7,
+      content: { final_answer: "Callback final answer" }
+    }));
+    const task = await readTask();
+
+    const response = await worker.fetch(new Request(
+      "http://example.com/api/openclaw/tasks/" + encodeURIComponent(task.id) + "/result",
+      { headers: { Cookie: await authCookie() } }
+    ), callbackEnv(), {});
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, saved: false, duplicate: true });
+    expect(db.messages.size).toBe(1);
+    expect(db.messages.get(task.assistant_message_id).content).toBe("Callback final answer");
   });
 
   it("treats duplicate event_id as idempotent", async () => {

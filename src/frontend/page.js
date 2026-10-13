@@ -8279,13 +8279,13 @@ function isOpenClawNetworkLost(error){
 }
 
 function isOpenClawTaskPending(task){
-  return ["running", "pending", "disconnected", "expired", "cancel_requested"].includes(String(task?.status || ""));
+  return ["running", "recovering", "pending", "disconnected", "expired", "cancel_requested"].includes(String(task?.status || ""));
 }
 
 function isOpenClawAutoResumeRunningTask(task){
   const status = String(task?.status || "").toLowerCase();
   const remoteStatus = String(openClawTaskRemoteStatus(task) || "").toLowerCase();
-  const runningStatuses = ["queued", "started", "running", "active", "in_progress"];
+  const runningStatuses = ["queued", "started", "running", "recovering", "active", "in_progress"];
   return runningStatuses.includes(status) || runningStatuses.includes(remoteStatus);
 }
 
@@ -8391,7 +8391,7 @@ function isOpenClawTaskTerminal(task){
 function shouldPollOpenClawTask(task){
   const status = String(task?.status || "");
   const remoteStatus = String(openClawTaskRemoteStatus(task) || "").toLowerCase();
-  return ["running", "pending", "disconnected", "expired", "cancel_requested"].includes(status)
+  return ["running", "recovering", "pending", "disconnected", "expired", "cancel_requested"].includes(status)
     || ["running", "pending", "queued", "in_progress", "processing", "cancel_requested", "cancelling", "canceling"].includes(remoteStatus);
 }
 
@@ -8685,7 +8685,6 @@ async function tryAutoResumeOpenClawTask({ element, state } = {}){
   }
 
   if(isOpenClawAutoResumeCompletedTask(latestTask)){
-    stopOpenClawReconnectPolling();
     if(state){
       state.reply = "";
       state.openClawAutoResume = { handled:true, mode:"completed", taskId:latestTask.id };
@@ -8696,9 +8695,20 @@ async function tryAutoResumeOpenClawTask({ element, state } = {}){
         latestTask = await finalizeOpenClawTaskResult(latestTask.id) || latestTask;
       }catch(err){
         console.warn("finalize completed OpenClaw Bridge task failed", err);
-        setContextStatus("OpenClaw task completed, but result recovery is incomplete: " + (err.message || String(err)));
+        setContextStatus("OpenClaw task result is not final yet; waiting for the final answer.");
+        activeOpenClawTask = latestTask;
+        openClawReconnectTask = latestTask;
+        const streamStarted = startOpenClawBridgeEventStream(latestTask.id, element, latestTask);
+        if(!streamStarted){
+          startOpenClawReconnectPolling(latestTask.id);
+        }
+        if(state){
+          state.openClawAutoResume = { handled:true, mode:"recovering", taskId:latestTask.id };
+        }
+        return { handled:true, mode:"recovering", task:latestTask };
       }
     }
+    stopOpenClawReconnectPolling();
     await loadConversationMessages(conversationId);
     return { handled:true, mode:"completed", task:latestTask };
   }
@@ -8720,6 +8730,20 @@ async function loadOpenClawTasksForConversation(conversationId){
     activeOpenClawTask = openClawTasks[0] || null;
     if(await checkOpenClawActiveTask(conversationId)){
       return openClawTasks;
+    }
+    // A completed record from an older Worker may still contain a polling
+    // snapshot. /status can recover its authenticated final event from D1.
+    if(activeOpenClawTask?.status === "completed" && isOpenClawBridgeTaskRecord(activeOpenClawTask)){
+      const oldHash = activeOpenClawTask.bridgeResultHash || activeOpenClawTask.bridge_result_hash || "";
+      const latestTask = await fetchOpenClawTaskStatus(activeOpenClawTask.id);
+      if(latestTask){
+        mergeOpenClawTask(latestTask);
+        if((latestTask.bridgeResultHash || latestTask.bridge_result_hash || "") !== oldHash){
+          await loadConversationMessages(conversationId);
+        }else if(shouldPollOpenClawTask(latestTask)){
+          startOpenClawReconnectPolling(latestTask.id);
+        }
+      }
     }
     renderOpenClawTaskBanner();
     return openClawTasks;
@@ -8805,7 +8829,7 @@ function applyOpenClawBridgeEventState(state, event){
   if(hasSequence && sequence < target.lastSequence){
     return { accepted:false, reason:"old_sequence", state:target };
   }
-  if(target.final && eventType !== "bridge.final" && eventType !== "bridge.error"){
+  if(target.final){
     return { accepted:false, reason:"after_final", state:target };
   }
   if(hasSequence){
@@ -9028,19 +9052,19 @@ async function pollOpenClawReconnectTask(taskId){
     }
     if(task.status === "completed"){
       openClawCompletedRemoteSyncAttempts.delete(task.id);
-      stopOpenClawReconnectPolling();
-      stopOpenClawBridgeEventStream(task.id);
       setContextStatus("OpenClaw task completed.");
       if(isOpenClawBridgeTaskRecord(task) || (!task.assistantMessageId && !task.assistant_message_id)){
         try{
           await finalizeOpenClawTaskResult(task.id);
         }catch(err){
           console.warn("finalize OpenClaw task result failed", err);
-          setContextStatus("OpenClaw task completed, but result fetch failed: " + (err.message || String(err)));
+          setContextStatus("OpenClaw task result is not final yet; waiting for the final answer.");
           renderOpenClawTaskBanner();
           return;
         }
       }
+      stopOpenClawReconnectPolling();
+      stopOpenClawBridgeEventStream(task.id);
       await loadConversationMessages(currentConversationId);
       return;
     }
@@ -12053,7 +12077,11 @@ async function handleStreamEvent(eventText, state, element){
       state.modelMetadata = doneEventModelMetadata(data);
       const chunk = readStreamChunk(event.data);
       if(chunk.text && !state.openClawFriendlyError && !state.providerFriendlyError){
-        state.reply += chunk.text;
+        if(state.isOpenClawRequest){
+          state.reply = chunk.text;
+        }else{
+          state.reply += chunk.text;
+        }
       }
       renderAssistantMessage(element, state.reply, state.sources, state.toolSources, state.toolError, state.toolDebug, state.diagnostics, state.modelMetadata);
     }catch(err){

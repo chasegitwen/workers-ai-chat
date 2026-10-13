@@ -1,5 +1,46 @@
 # OpenClaw Bridge Final Answer Recovery Milestone
 
+## 2026-10-13: terminal event recovery
+
+Release tag: `v0.13.5-beta`.
+Production Worker version: `aa614ed6-dbc2-4cb3-aa64-4bf9b5ffa729`.
+The user confirmed production regression testing passed before Git publication.
+
+The October production trace confirmed that text-based incomplete-answer detection
+was insufficient. Task `9668e784-d92e-48af-91a7-f254eeb664a5` / Bridge task
+`47a0ae63-44b7-421c-8edd-3f97c9dcf655` persisted a 73-character polling snapshot
+at `02:05:10 UTC`. Activity events 2–43 were then rejected as terminal, and the
+619-character `bridge.final` event 44 at `02:05:39.958 UTC` was rejected as
+`final_not_applied`. Its metadata identified `last_valid_assistant`, index 25 of
+26 messages. The full answer existed in the authenticated D1 event ledger.
+
+Current completion rules:
+
+- Once callbacks have been observed for a scoped task, a polling status of
+  `completed` and a plain-text result are insufficient to complete the message.
+  The local task stays `recovering` until a stored `bridge.final` or a polling
+  candidate with an explicit terminal event/final phase is available.
+- Polling-only tasks retain their compatibility path. If callbacks stop after
+  progress, polling can complete from a verifiable final candidate; if the Bridge
+  returns no terminal evidence, recovery stays pending rather than guessing from
+  the wording of the answer.
+- Terminal candidates outrank commentary; an explicit commentary/analysis phase
+  cannot be classified as final merely because its wording sounds complete.
+- Existing `bridge_events` provide terminal authority and replay, scoped by task,
+  project and runtime. Previously rejected authenticated finals can repair the
+  existing assistant message through `/status` or `/result`.
+- The existing message metadata records completion provenance. A conditional
+  update preserves an accepted callback final during concurrent polling or
+  callback retries. No new table or migration is required.
+- Frontend polling and refresh resume `recovering` tasks. Opening a completed
+  historical Bridge conversation checks for a recoverable terminal event and
+  reloads the messages only if the persisted result hash changed.
+
+Validation: `npm test -- --run --pool threads --silent` passed all 241 tests in
+18 files, including unknown progress wording, ledger recovery, interrupted
+callbacks with verified polling finals, concurrent completion, scope isolation,
+refresh recovery and legitimate repeated sentences.
+
 This top section is the canonical project milestone record. A historical draft may remain below for context.
 
 ## Milestone Status

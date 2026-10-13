@@ -369,6 +369,31 @@ describe("openclawBridgeClient", () => {
     });
   });
 
+  it("uses a terminal event instead of later commentary with higher sequence numbers", () => {
+    expect(extractOpenClawBridgeFinalAnswer({ status: "completed", events: [
+      { event_type: "bridge.final", sequence: 44, content: { final_answer: "CPU 99% idle，Swap 251MiB。" } },
+      { role: "assistant", phase: "commentary", sequence: 45, content: "当前状态正常，还在采集更多数据。" }
+    ] })).toMatchObject({ text: "CPU 99% idle，Swap 251MiB。", verifiedFinal: true });
+  });
+
+  it("treats an explicit commentary phase as intermediate regardless of its wording or length", () => {
+    expect(extractOpenClawBridgeFinalAnswer({ status: "completed", phase: "commentary", text: "检查完了。以下是".repeat(80) }))
+      .toMatchObject({ finality: "suspect_incomplete" });
+  });
+
+  it("accepts an explicit final phase without interpreting the answer's wording", () => {
+    expect(extractOpenClawBridgeFinalAnswer({ status: "completed", messages: [
+      { role: "assistant", phase: "final", content: "I'll check the logs now." }
+    ] })).toMatchObject({ text: "I'll check the logs now.", finality: "final", verifiedFinal: true });
+  });
+
+  it("reads sibling terminal events when the polling result has a task wrapper", () => {
+    expect(extractOpenClawBridgeFinalAnswer({
+      task: { status: "completed", final_answer: "过程快照" },
+      events: [{ event_type: "bridge.final", sequence: 44, content: { final_answer: "完整结果" } }]
+    })).toMatchObject({ text: "完整结果", verifiedFinal: true });
+  });
+
   it("prefers result over text when final_answer is absent", () => {
     const result = extractOpenClawBridgeFinalAnswer({
       status: "completed",
@@ -436,6 +461,7 @@ describe("openclawBridgeClient", () => {
 
   it("classifies short mid-sentence bridge lead-ins as suspect incomplete", () => {
     expect(classifyOpenClawBridgeResultFinality("当前有 4 个定时任务，全部状态正常。让我查一下各自最近的执行记录，找出最近一次运行的是哪个。")).toBe("suspect_incomplete");
+    expect(classifyOpenClawBridgeResultFinality("即时 `top` 那一秒显示 CPU 系统态偏高，但负载很低、`vmstat` 后两秒基本空闲，像是采样瞬间波动。我再补一组 5 秒平均和关键服务资源占用，避免误判。")).toBe("suspect_incomplete");
   });
 
   it("keeps completed short bridge reports final even when they mention checking", () => {

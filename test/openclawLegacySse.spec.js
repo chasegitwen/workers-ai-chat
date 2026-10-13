@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { handleChat, readStreamText } from "../src/api/chat.js";
+import { appendReplyFromSseBuffer, handleChat, readStreamText } from "../src/api/chat.js";
 import { htmlPage } from "../src/frontend/page.js";
 
 function frontendStreamFunctions() {
@@ -105,6 +105,98 @@ describe("Seattle OpenClaw Legacy SSE parsing", () => {
     expect(completed).toBe(true);
     expect(state.reply).toBe("Seattle final content");
     expect(element.rendered).toBe("Seattle final content");
+  });
+
+  it("treats an OpenClaw done payload as a final snapshot instead of appending it twice", async () => {
+    const { handleStreamEvent } = frontendStreamFunctions();
+    const state = {
+      reply: "Complete answer",
+      sources: [],
+      toolSources: [],
+      toolError: null,
+      toolDebug: null,
+      diagnostics: { fallbacks: [], done: null, providerError: null },
+      openClawFriendlyError: false,
+      providerFriendlyError: false,
+      isOpenClawRequest: true
+    };
+    const element = {};
+
+    await handleStreamEvent(
+      "event: done\ndata: " + JSON.stringify({ content: "Complete answer" }),
+      state,
+      element
+    );
+
+    expect(state.reply).toBe("Complete answer");
+    expect(element.rendered).toBe("Complete answer");
+  });
+
+  it("preserves legitimate repeated sentences in a final OpenClaw snapshot", async () => {
+    const { handleStreamEvent } = frontendStreamFunctions();
+    const state = {
+      reply: "Repeat. ",
+      sources: [],
+      toolSources: [],
+      toolError: null,
+      toolDebug: null,
+      diagnostics: { fallbacks: [], done: null, providerError: null },
+      openClawFriendlyError: false,
+      providerFriendlyError: false,
+      isOpenClawRequest: true
+    };
+
+    await handleStreamEvent(
+      "event: done\ndata: " + JSON.stringify({ content: "Repeat. Repeat." }),
+      state,
+      {}
+    );
+
+    expect(state.reply).toBe("Repeat. Repeat.");
+  });
+
+  it("keeps non-OpenClaw done payload behavior unchanged", async () => {
+    const { handleStreamEvent } = frontendStreamFunctions();
+    const state = {
+      reply: "Token ",
+      sources: [],
+      toolSources: [],
+      toolError: null,
+      toolDebug: null,
+      diagnostics: { fallbacks: [], done: null, providerError: null },
+      openClawFriendlyError: false,
+      providerFriendlyError: false,
+      isOpenClawRequest: false
+    };
+
+    await handleStreamEvent(
+      "event: done\ndata: " + JSON.stringify({ content: "tail" }),
+      state,
+      {}
+    );
+
+    expect(state.reply).toBe("Token tail");
+  });
+
+  it("stores an OpenClaw final snapshot once after incremental SSE chunks", () => {
+    const bufferState = {
+      value: [
+        "event: response.output_text.delta",
+        "data: " + JSON.stringify({ delta: "Complete " }),
+        "",
+        "event: response.output_text.delta",
+        "data: " + JSON.stringify({ delta: "answer" }),
+        "",
+        "event: done",
+        "data: " + JSON.stringify({ content: "Complete answer" }),
+        ""
+      ].join("\n") + "\n"
+    };
+    const replyState = { value: "" };
+
+    appendReplyFromSseBuffer(bufferState, replyState, { finalEventIsSnapshot: true });
+
+    expect(replyState.value).toBe("Complete answer");
   });
 
   it("proxies Seattle Legacy SSE tokens through handleChat without producing an empty reply", async () => {

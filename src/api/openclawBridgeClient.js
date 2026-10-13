@@ -163,6 +163,8 @@ export function classifyOpenClawBridgeResultFinality(value) {
       /\u8ba9\u6211\u68c0\u67e5/,
       /\u6211\u518d\u67e5/,
       /\u6211\u5148\u67e5/,
+      /\u6211\u518d(?:\u8865(?:\u5145)?|\u590d\u6838|\u91c7\u6837|\u68c0\u67e5|\u67e5\u770b|\u786e\u8ba4|\u83b7\u53d6|\u6536\u96c6|\u5206\u6790)/,
+      /\u518d\u8865\u4e00\u7ec4/,
       /\u73b0\u5728\u67e5\u4e00\u4e0b/,
       /\u7ee7\u7eed\u67e5\u4e00\u4e0b/,
       /\u67e5\u4e00\u4e0b\u5404\u81ea/,
@@ -178,7 +180,8 @@ export function classifyOpenClawBridgeResultFinality(value) {
       /\u6211\u5e2e\u4f60\u67e5\u4e00\u4e0b/,
       /Let me check/i,
       /I'll check/i,
-      /I will check/i
+      /I will check/i,
+      /I(?:'ll| will) (?:also |re-)?(?:check|inspect|sample|verify|fetch|collect|analy[sz]e)/i
     ];
     if (suspectMidLeadIn.some(pattern => pattern.test(text))) {
       return "suspect_incomplete";
@@ -252,14 +255,23 @@ function bridgeCandidateTime(...values) {
 
 function isBridgeAssistantCandidate(item) {
   const role = String(item?.role || item?.author?.role || item?.speaker || "").trim().toLowerCase();
-  const type = String(item?.type || item?.event || item?.kind || item?.name || "").trim().toLowerCase();
+  const type = String(item?.event_type || item?.type || item?.event || item?.kind || item?.name || "").trim().toLowerCase();
   return role === "assistant"
     || role === "ai"
     || type === "assistant"
     || type === "assistant_message"
     || type === "message"
     || type === "final_answer"
+    || type === "bridge.final"
     || type === "output";
+}
+
+function bridgeCandidateFinalSignal(item) {
+  const phase = String(item?.phase || item?.channel || item?.metadata?.phase || item?.metadata?.channel || "").toLowerCase();
+  const type = String(item?.event_type || item?.type || item?.event || "").toLowerCase();
+  if (["commentary", "analysis", "progress"].includes(phase)) return "intermediate";
+  if (phase === "final" || type === "bridge.final" || type === "final_answer") return "final";
+  return "";
 }
 
 function isBridgeSuccessfulCandidate(item) {
@@ -290,7 +302,8 @@ function collectBridgeFinalAnswerCandidates(source, candidates, state, options =
       candidates.push({
         text,
         placeholder: isOpenClawBridgeEmptyReplyPlaceholder(text),
-        finality: classifyOpenClawBridgeResultFinality(text),
+        finality: options.signal === "intermediate" ? "suspect_incomplete" : classifyOpenClawBridgeResultFinality(text),
+        verifiedFinal: options.signal === "final",
         successful: options.successful !== false,
         seq: options.seq ?? null,
         timestamp: options.timestamp ?? null,
@@ -304,6 +317,7 @@ function collectBridgeFinalAnswerCandidates(source, candidates, state, options =
   const seq = bridgeCandidateNumber(source.seq, source.sequence, source.index, source.offset, options.seq);
   const timestamp = bridgeCandidateTime(source.timestamp, source.created_at, source.createdAt, source.time, source.updated_at, source.updatedAt, options.timestamp);
   const successful = options.successful !== false && isBridgeSuccessfulCandidate(source);
+  const signal = bridgeCandidateFinalSignal(source) || options.signal || "";
   const assistant = !options.fromList || isBridgeAssistantCandidate(source);
   const fields = [
     ["final_answer", 80],
@@ -327,7 +341,10 @@ function collectBridgeFinalAnswerCandidates(source, candidates, state, options =
         candidates.push({
           text,
           placeholder: isOpenClawBridgeEmptyReplyPlaceholder(text),
-          finality: classifyOpenClawBridgeResultFinality(text),
+          finality: signal === "intermediate" ? "suspect_incomplete"
+            : signal === "final" && !isOpenClawBridgeEmptyReplyPlaceholder(text) ? "final"
+            : classifyOpenClawBridgeResultFinality(text),
+          verifiedFinal: signal === "final",
           successful,
           seq,
           timestamp,
@@ -350,6 +367,8 @@ function collectBridgeFinalAnswerCandidates(source, candidates, state, options =
     successful,
     seq,
     timestamp,
+    // Each history item must supply its own phase; the task's phase must not
+    // turn earlier commentary or tool output into a final candidate.
     fromList: true
   }));
 }
@@ -374,17 +393,24 @@ function compareBridgeFinalAnswerCandidates(a, b) {
 export function extractOpenClawBridgeFinalAnswer(payload) {
   const source = payload?.data && typeof payload.data === "object" ? payload.data : payload;
   const candidates = [];
-  collectBridgeFinalAnswerCandidates(source?.task && typeof source.task === "object" ? source.task : source, candidates, { order: 0 });
-  collectBridgeFinalAnswerCandidates(source?.result, candidates, { order: candidates.length }, { priority: 30 });
+  const state = { order: 0 };
+  if (source?.task && typeof source.task === "object") {
+    collectBridgeFinalAnswerCandidates(source.task, candidates, state);
+  }
+  collectBridgeFinalAnswerCandidates(source, candidates, state);
+  collectBridgeFinalAnswerCandidates(source?.result, candidates, state, { priority: 30 });
 
   const successful = candidates
     .filter(candidate => candidate.successful && candidate.finality === "final" && candidate.text)
     .sort(compareBridgeFinalAnswerCandidates);
   if (successful.length) {
+    const verified = successful.filter(candidate => candidate.verifiedFinal);
+    const selected = (verified.length ? verified : successful).at(-1);
     return {
-      text: successful[successful.length - 1].text,
+      text: selected.text,
       placeholderOnly: false,
       finality: "final",
+      verifiedFinal: Boolean(selected.verifiedFinal),
       candidates
     };
   }

@@ -22,7 +22,7 @@ export function applyOpenClawBridgeEventState(state, event) {
   if (hasSequence && sequence < target.lastSequence) {
     return { accepted: false, reason: "old_sequence", state: target };
   }
-  if (target.final && eventType !== "bridge.final" && eventType !== "bridge.error") {
+  if (target.final) {
     return { accepted: false, reason: "after_final", state: target };
   }
   if (hasSequence) {

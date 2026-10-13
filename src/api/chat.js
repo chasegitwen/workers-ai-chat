@@ -729,11 +729,11 @@ function bridgeCallbackTextContent(payload) {
   const content = payload?.content && typeof payload.content === "object" ? payload.content : {};
   const candidate = content.final_answer
     ?? content.finalAnswer
-    ?? content.text
+    ?? payload?.final_answer
     ?? content.result
     ?? content.output
-    ?? payload?.final_answer
     ?? payload?.result
+    ?? content.text
     ?? payload?.text
     ?? "";
   if (typeof candidate === "string") {
@@ -770,6 +770,31 @@ function bridgeCallbackSequence(payload) {
   }
   const number = Number(value);
   return Number.isFinite(number) ? Math.trunc(number) : null;
+}
+
+function openClawMessageCompletion(message) {
+  try {
+    const metadata = typeof message?.metadata === "string" ? JSON.parse(message.metadata) : message?.metadata;
+    return metadata?.openclaw_completion || {};
+  } catch {
+    return {};
+  }
+}
+
+async function readOpenClawBridgeCompletionEvents(env, task) {
+  const ids = [...new Set([task.id, openClawBridgeTaskId(task), openClawRemoteTaskId(task)].filter(Boolean))];
+  const placeholders = ids.map(() => "?").join(", ");
+  const bindings = [...ids, task.projectId || task.project_id || "", task.runtimeId || task.runtime_id || ""];
+  const scope = `task_id IN (${placeholders})
+    AND COALESCE(project_id, '') = ? AND COALESCE(runtime_id, '') = ?`;
+  const [final, activity] = await Promise.all([
+    env.DB.prepare(`SELECT * FROM bridge_events WHERE ${scope} AND event_type = 'bridge.final'
+      ORDER BY applied DESC, received_at ASC, sequence ASC LIMIT 1`).bind(...bindings).first(),
+    env.DB.prepare(`SELECT event_id FROM bridge_events WHERE ${scope}
+      AND event_type IN ('bridge.started', 'bridge.activity', 'bridge.tool_call', 'bridge.tool_result', 'bridge.heartbeat')
+      LIMIT 1`).bind(...bindings).first()
+  ]);
+  return { final, activity };
 }
 
 async function readOpenClawBridgeTaskForCallback(env, payload) {
@@ -895,21 +920,70 @@ async function applyOpenClawBridgeFinalCallback(env, task, payload) {
   if (!finalText) {
     return false;
   }
+  const latestTask = await readOpenClawTaskById(env, task.id) || task;
+  const existingMessageId = String(latestTask.assistantMessageId || latestTask.assistant_message_id || "").trim();
+  const existingMessage = existingMessageId
+    ? await readAssistantMessageById(env, existingMessageId)
+    : null;
+  const completion = openClawMessageCompletion(existingMessage);
+  const events = await readOpenClawBridgeCompletionEvents(env, latestTask);
+  // A polling snapshot is not a terminal callback. Only an applied final event
+  // (or a verified polling final) locks the message against further completion.
+  if (completion.source === "callback" || completion.verified_final
+    || (events.final?.applied && existingMessage?.id)
+    || (!events.activity && !completion.source && classifyOpenClawBridgeResultFinality(existingMessage?.content) === "final")) {
+    console.info("[openclaw-bridge-completion]", {
+      source: "callback",
+      outcome: "duplicate_final",
+      localTaskId: latestTask.id,
+      bridgeTaskId: openClawBridgeTaskId(latestTask),
+      assistantMessageId: existingMessageId,
+      eventId: String(payload?.event_id || ""),
+      sequence: bridgeCallbackSequence(payload),
+      textChars: finalText.length,
+      resultHash: latestTask.bridgeResultHash || latestTask.bridge_result_hash || ""
+    });
+    return false;
+  }
   const now = Date.now();
-  let assistantMessage = null;
-  const assistantMessageId = String(payload?.assistant_message_id || task.assistantMessageId || task.assistant_message_id || "").trim();
-  const metadata = openClawTaskMessageMetadata(task);
-  if (assistantMessageId) {
-    assistantMessage = await updateAssistantMessageContent(env, assistantMessageId, finalText, metadata);
+  const metadata = {
+    ...openClawTaskMessageMetadata(latestTask),
+    openclaw_completion: { source: "callback", event_id: payload.event_id, sequence: bridgeCallbackSequence(payload) }
+  };
+  let assistantMessage = existingMessage;
+  let created = false;
+  if (assistantMessage?.id) {
+    assistantMessage = await updateAssistantMessageContent(env, assistantMessage.id, finalText, metadata, { preserveCallbackFinal: true });
+  } else {
+    const saved = await saveOpenClawAssistantMessageOnce(env, {
+      ...latestTask,
+      conversationId: payload?.conversation_id || latestTask.conversationId || latestTask.conversation_id || "",
+      assistantMessageId: String(latestTask.assistantMessageId || latestTask.assistant_message_id || "").trim()
+    }, finalText, metadata);
+    assistantMessage = saved.message;
+    created = saved.created;
   }
   if (!assistantMessage?.id) {
-    const conversationId = String(payload?.conversation_id || task.conversationId || task.conversation_id || "").trim();
-    if (conversationId) {
-      assistantMessage = await saveMessage(env.DB, conversationId, "assistant", finalText, metadata);
-    }
+    console.warn("[openclaw-bridge-completion]", {
+      source: "callback",
+      outcome: "assistant_message_unavailable",
+      localTaskId: latestTask.id,
+      bridgeTaskId: openClawBridgeTaskId(latestTask),
+      assistantMessageId: "",
+      eventId: String(payload?.event_id || ""),
+      sequence: bridgeCallbackSequence(payload),
+      textChars: finalText.length
+    });
+    return false;
+  }
+  const applied = openClawMessageCompletion(assistantMessage).event_id === payload.event_id
+    && (created || Boolean(existingMessage?.id));
+  if (!applied) {
+    return false;
   }
   const sequence = bridgeCallbackSequence(payload);
-  const bridgeResultHash = await hashOpenClawBridgeResult(finalText);
+  const persistedText = String(assistantMessage?.content || finalText);
+  const bridgeResultHash = await hashOpenClawBridgeResult(persistedText);
   await env.DB.prepare(
     `UPDATE openclaw_tasks
       SET status = ?,
@@ -934,7 +1008,7 @@ async function applyOpenClawBridgeFinalCallback(env, task, payload) {
     now,
     "",
     now,
-    assistantMessage?.id || assistantMessageId || "",
+    assistantMessage?.id || existingMessageId || "",
     "completed",
     100,
     "OpenClaw Bridge final received",
@@ -942,12 +1016,23 @@ async function applyOpenClawBridgeFinalCallback(env, task, payload) {
     new Date(now).toISOString(),
     sequence,
     sequence,
-    task.id
+    latestTask.id
   ).run();
   if (env.DB) {
-    await maybeUpdateConversationSummary(env, task.conversationId || task.conversation_id);
+    await maybeUpdateConversationSummary(env, latestTask.conversationId || latestTask.conversation_id);
   }
-  return true;
+  console.info("[openclaw-bridge-completion]", {
+    source: "callback",
+    outcome: applied ? "completed" : "updated_existing",
+    localTaskId: latestTask.id,
+    bridgeTaskId: openClawBridgeTaskId(latestTask),
+    assistantMessageId: assistantMessage?.id || "",
+    eventId: String(payload?.event_id || ""),
+    sequence,
+    textChars: persistedText.length,
+    resultHash: bridgeResultHash
+  });
+  return applied;
 }
 
 async function applyOpenClawBridgeErrorCallback(env, task, payload) {
@@ -1006,9 +1091,10 @@ async function applyOpenClawBridgeCallbackEvent(env, payload, resolvedTask = nul
     };
   }
   if (eventType === "bridge.final") {
+    const applied = await applyOpenClawBridgeFinalCallback(env, task, payload);
     return {
-      applied: await applyOpenClawBridgeFinalCallback(env, task, payload),
-      error: ""
+      applied,
+      error: applied ? "" : "final_not_applied"
     };
   }
   if (eventType === "bridge.error") {
@@ -1752,6 +1838,12 @@ async function syncOpenClawRemoteTask(env, localTask, remoteResult, patch = {}) 
     ? remote.progress
     : existingRemoteProgress;
   const nextRemoteMessage = remote.message || localTask.remoteMessage || localTask.remote_message || "";
+  const preserveFinalSql = isOpenClawBridgeTask(localTask) && nextStatus !== "completed"
+    ? `AND NOT EXISTS (SELECT 1 FROM messages m
+        WHERE (m.id = openclaw_tasks.assistant_message_id OR m.id = 'openclaw-assistant-' || openclaw_tasks.id)
+          AND json_extract(CASE WHEN json_valid(m.metadata) THEN m.metadata ELSE '{}' END,
+            '$.openclaw_completion.source') = 'callback')`
+    : "";
   try {
     await env.DB.prepare(
       `UPDATE openclaw_tasks
@@ -1763,7 +1855,7 @@ async function syncOpenClawRemoteTask(env, localTask, remoteResult, patch = {}) 
           remote_progress = ?,
           remote_message = ?,
           cancelled_at = COALESCE(?, cancelled_at)
-        WHERE id = ?`
+        WHERE id = ? ${preserveFinalSql}`
     ).bind(
       nextStatus,
       now,
@@ -1809,7 +1901,7 @@ async function readAssistantMessageById(env, messageId) {
   ).bind(messageId).first();
 }
 
-async function updateAssistantMessageContent(env, messageId, content, metadata = null) {
+async function updateAssistantMessageContent(env, messageId, content, metadata = null, options = {}) {
   if (!env.DB || !messageId) {
     return null;
   }
@@ -1822,7 +1914,8 @@ async function updateAssistantMessageContent(env, messageId, content, metadata =
       `UPDATE messages
         SET content = ?,
           metadata = COALESCE(?, metadata)
-        WHERE id = ? AND role = 'assistant'`
+        WHERE id = ? AND role = 'assistant'
+          ${options.preserveCallbackFinal ? "AND COALESCE(json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.openclaw_completion.source'), '') != 'callback'" : ""}`
     ).bind(content || "", metadataJson, messageId),
     env.DB.prepare(
       `UPDATE conversations
@@ -1838,6 +1931,43 @@ async function updateAssistantMessageContent(env, messageId, content, metadata =
     ).bind(now, messageId)
   ]);
   return readAssistantMessageById(env, messageId);
+}
+
+async function saveOpenClawAssistantMessageOnce(env, task, content, metadata = null) {
+  if (!env.DB || !task?.id) {
+    return { message: null, created: false };
+  }
+  const existingMessageId = String(task.assistantMessageId || task.assistant_message_id || "").trim();
+  if (existingMessageId) {
+    const existingMessage = await readAssistantMessageById(env, existingMessageId);
+    if (existingMessage?.id) {
+      return { message: existingMessage, created: false };
+    }
+  }
+  await ensureConversationArchiveSchema(env.DB);
+  await ensureMessageMetadataSchema(env.DB);
+  const conversationId = String(task.conversationId || task.conversation_id || "").trim();
+  if (!conversationId) {
+    return { message: null, created: false };
+  }
+  const messageId = existingMessageId || `openclaw-assistant-${task.id}`;
+  const createdAt = Date.now();
+  const metadataJson = metadata && Object.keys(metadata).length ? JSON.stringify(metadata) : null;
+  const insertResult = await env.DB.prepare(
+    `INSERT OR IGNORE INTO messages (id, conversation_id, role, content, created_at, metadata)
+      VALUES (?, ?, 'assistant', ?, ?, ?)`
+  ).bind(messageId, conversationId, content || "", createdAt, metadataJson).run();
+  await env.DB.prepare(
+    `UPDATE conversations
+      SET updated_at = ?,
+        is_archived = 0,
+        archived_at = NULL
+      WHERE id = ?`
+  ).bind(createdAt, conversationId).run();
+  return {
+    message: await readAssistantMessageById(env, messageId),
+    created: Number(insertResult?.meta?.changes || 0) > 0
+  };
 }
 
 async function markOpenClawRemoteStatusUnavailable(env, task, message = "Remote status unavailable after local completion") {
@@ -1954,6 +2084,24 @@ async function finalizeOpenClawTaskResult(env, task) {
   }
   let latestTask = await readOpenClawTaskById(env, task.id) || task;
   const bridgeTask = isOpenClawBridgeTask(latestTask);
+  const completionEvents = bridgeTask ? await readOpenClawBridgeCompletionEvents(env, latestTask) : null;
+  // Replay authenticated terminal evidence, including finals rejected by older
+  // Workers. Never re-submit the remote task to recover its result.
+  if (completionEvents?.final) {
+    const finalPayload = JSON.parse(completionEvents.final.payload_json);
+    if (bridgeCallbackTextContent(finalPayload)) {
+      const applied = await applyOpenClawBridgeFinalCallback(env, latestTask, finalPayload);
+      if (applied) {
+        await updateOpenClawBridgeCallbackStoredEvent(env, finalPayload.event_id, true, "");
+        broadcastOpenClawBridgeEvent(finalPayload);
+      }
+      latestTask = await readOpenClawTaskById(env, latestTask.id) || latestTask;
+      const message = await readAssistantMessageById(env, latestTask.assistantMessageId);
+      if (message?.id && (applied || completionEvents.final.applied || openClawMessageCompletion(message).source === "callback")) {
+        return { ok: true, saved: applied, duplicate: !applied, task: latestTask, result: message.content, result_finality: "final" };
+      }
+    }
+  }
   let recoverableAssistantMessage = null;
   let existingResultFinality = "empty";
   if (latestTask.assistantMessageId && !bridgeTask) {
@@ -1963,7 +2111,9 @@ async function finalizeOpenClawTaskResult(env, task) {
   if (latestTask.assistantMessageId && bridgeTask) {
     const existingAssistantMessage = await readAssistantMessageById(env, latestTask.assistantMessageId);
     existingResultFinality = classifyOpenClawBridgeResultFinality(existingAssistantMessage?.content);
-    if (existingResultFinality === "final") {
+    const completion = openClawMessageCompletion(existingAssistantMessage);
+    if (completion.source === "callback" || completion.verified_final
+      || (!completionEvents?.activity && existingResultFinality === "final")) {
       return {
         ok: true,
         saved: false,
@@ -2003,15 +2153,23 @@ async function finalizeOpenClawTaskResult(env, task) {
     }) || latestTask;
     return { ok: false, error: "OpenClaw task is not completed", task: latestTask };
   }
-  latestTask = await syncOpenClawRemoteTask(env, latestTask, remoteResult, {
-    status: "completed"
-  }) || latestTask;
   const bridgeAnswer = bridgeTask ? bridgeFinalAnswer(remoteResult) : null;
   const reply = bridgeTask ? String(bridgeAnswer?.text || "").trim() : remoteResultText(remote);
   const resultFinality = bridgeTask
     ? bridgeAnswer?.finality || classifyOpenClawBridgeResultFinality(reply)
     : reply ? "final" : "empty";
+  if (completionEvents?.activity && !bridgeAnswer?.verifiedFinal) {
+    latestTask = await syncOpenClawRemoteTask(env, latestTask, remoteResult, { status: "recovering" }) || latestTask;
+    return {
+      ok: false, recoverable: true, incomplete: true, task: latestTask,
+      error: "OpenClaw Bridge is still awaiting a terminal final event.",
+      result_finality: "awaiting_final_event"
+    };
+  }
   if (!reply) {
+    latestTask = await syncOpenClawRemoteTask(env, latestTask, remoteResult, {
+      status: bridgeTask ? "recovering" : "completed"
+    }) || latestTask;
     return {
       ok: false,
       error: "OpenClaw remote task result is empty",
@@ -2020,6 +2178,9 @@ async function finalizeOpenClawTaskResult(env, task) {
     };
   }
   if (bridgeTask && resultFinality === "placeholder") {
+    latestTask = await syncOpenClawRemoteTask(env, latestTask, remoteResult, {
+      status: "recovering"
+    }) || latestTask;
     return {
       ok: false,
       recoverable: true,
@@ -2029,6 +2190,23 @@ async function finalizeOpenClawTaskResult(env, task) {
       result_finality: resultFinality
     };
   }
+  if (bridgeTask && resultFinality === "suspect_incomplete") {
+    latestTask = await syncOpenClawRemoteTask(env, latestTask, remoteResult, {
+      status: "recovering"
+    }) || latestTask;
+    return {
+      ok: false,
+      recoverable: true,
+      incomplete: true,
+      error: "OpenClaw Bridge completed, but the available result still looks like an intermediate assistant lead-in.",
+      task: latestTask,
+      result: reply,
+      result_finality: resultFinality
+    };
+  }
+  latestTask = await syncOpenClawRemoteTask(env, latestTask, remoteResult, {
+    status: "completed"
+  }) || latestTask;
   const bridgeResultHash = isOpenClawBridgeTask(latestTask)
     ? await hashOpenClawBridgeResult(reply)
     : "";
@@ -2042,17 +2220,6 @@ async function finalizeOpenClawTaskResult(env, task) {
       result_finality: resultFinality
     };
   }
-  if (bridgeTask && resultFinality === "suspect_incomplete") {
-    return {
-      ok: false,
-      recoverable: true,
-      incomplete: true,
-      error: "OpenClaw Bridge completed, but the available result still looks like an intermediate assistant lead-in.",
-      task: latestTask,
-      result: reply,
-      result_finality: resultFinality
-    };
-  }
   const refreshedTask = await readOpenClawTaskById(env, latestTask.id) || latestTask;
   if (refreshedTask.assistantMessageId && !recoverableAssistantMessage) {
     if (!bridgeTask) {
@@ -2060,7 +2227,9 @@ async function finalizeOpenClawTaskResult(env, task) {
     }
     const existingAssistantMessage = await readAssistantMessageById(env, refreshedTask.assistantMessageId);
     existingResultFinality = classifyOpenClawBridgeResultFinality(existingAssistantMessage?.content);
-    if (existingResultFinality === "final") {
+    const completion = openClawMessageCompletion(existingAssistantMessage);
+    if (completion.source === "callback" || completion.verified_final
+      || (!completionEvents?.activity && existingResultFinality === "final")) {
       return {
         ok: true,
         saved: false,
@@ -2081,11 +2250,41 @@ async function finalizeOpenClawTaskResult(env, task) {
       result_finality: resultFinality
     };
   }
-  const assistantMessage = recoverableAssistantMessage?.id
-    ? await updateAssistantMessageContent(env, recoverableAssistantMessage.id, reply, openClawTaskMessageMetadata(refreshedTask))
-    : env.DB
-      ? await saveMessage(env.DB, refreshedTask.conversationId || refreshedTask.conversation_id, "assistant", reply, openClawTaskMessageMetadata(refreshedTask))
-      : null;
+  let assistantMessage = null;
+  let assistantMessageCreated = false;
+  const messageMetadata = {
+    ...openClawTaskMessageMetadata(refreshedTask),
+    ...(bridgeTask ? { openclaw_completion: { source: "polling", verified_final: Boolean(bridgeAnswer?.verifiedFinal) } } : {})
+  };
+  if (recoverableAssistantMessage?.id) {
+    assistantMessage = await updateAssistantMessageContent(env, recoverableAssistantMessage.id, reply, messageMetadata, { preserveCallbackFinal: bridgeTask });
+  } else if (env.DB) {
+    const saved = bridgeTask
+      ? await saveOpenClawAssistantMessageOnce(env, refreshedTask, reply, messageMetadata)
+      : {
+        message: await saveMessage(env.DB, refreshedTask.conversationId || refreshedTask.conversation_id, "assistant", reply, openClawTaskMessageMetadata(refreshedTask)),
+        created: true
+      };
+    assistantMessage = saved.message;
+    assistantMessageCreated = saved.created;
+  }
+  if (env.DB && !assistantMessage?.id) {
+    return {
+      ok: false,
+      recoverable: true,
+      error: "OpenClaw final answer could not be persisted",
+      task: refreshedTask,
+      result: reply,
+      result_finality: resultFinality
+    };
+  }
+  if (bridgeTask && openClawMessageCompletion(assistantMessage).source === "callback") {
+    return {
+      ok: true, saved: false, duplicate: true,
+      task: await readOpenClawTaskById(env, refreshedTask.id) || refreshedTask,
+      result: assistantMessage.content, result_finality: "final"
+    };
+  }
   if (env.DB) {
     await maybeUpdateConversationSummary(env, refreshedTask.conversationId || refreshedTask.conversation_id);
   }
@@ -2100,23 +2299,39 @@ async function finalizeOpenClawTaskResult(env, task) {
     error: "",
     assistantMessageId: assistantMessage?.id || refreshedTask.assistantMessageId || ""
   };
-  if (bridgeResultHash && env.DB) {
+  const persistedBridgeResultHash = bridgeTask && assistantMessage?.content
+    ? await hashOpenClawBridgeResult(assistantMessage.content)
+    : bridgeResultHash;
+  if (persistedBridgeResultHash && env.DB) {
     await env.DB.prepare(
       `UPDATE openclaw_tasks
         SET bridge_result_hash = ?
         WHERE id = ?`
     ).bind(
-      bridgeResultHash,
+      persistedBridgeResultHash,
       refreshedTask.id
     ).run();
   }
-  const finalTask = bridgeResultHash
+  const finalTask = persistedBridgeResultHash
     ? await readOpenClawTaskById(env, refreshedTask.id) || savedTask
     : savedTask;
+  if (bridgeTask) {
+    console.info("[openclaw-bridge-completion]", {
+      source: "polling",
+      outcome: assistantMessageCreated ? "completed" : recoverableAssistantMessage?.id ? "recovered" : "duplicate_final",
+      localTaskId: refreshedTask.id,
+      bridgeTaskId: openClawBridgeTaskId(refreshedTask),
+      assistantMessageId: assistantMessage?.id || "",
+      eventId: "",
+      sequence: refreshedTask.bridgeLastSequence ?? refreshedTask.bridge_last_sequence ?? null,
+      textChars: String(assistantMessage?.content || reply).length,
+      resultHash: persistedBridgeResultHash || ""
+    });
+  }
   return {
     ok: true,
-    saved: Boolean(assistantMessage?.id),
-    duplicate: false,
+    saved: Boolean(assistantMessage?.id) && (assistantMessageCreated || Boolean(recoverableAssistantMessage?.id)),
+    duplicate: Boolean(assistantMessage?.id) && !assistantMessageCreated && !recoverableAssistantMessage?.id,
     task: finalTask,
     result: reply,
     result_finality: resultFinality
@@ -2234,6 +2449,18 @@ async function handleOpenClawTasksRequest(request, env, url, ctx) {
       if (!task) {
         return jsonResponse({ ok: false, error: "OpenClaw task not found" }, 404);
       }
+      if (isOpenClawBridgeTask(task)) {
+        const completionEvents = await readOpenClawBridgeCompletionEvents(env, task);
+        if (completionEvents.final) {
+          const finalized = await finalizeOpenClawTaskResult(env, task);
+          if (finalized.ok) {
+            return jsonResponse({
+              ok: true, remote: true, completionSource: "callback",
+              task: finalized.task, resultRecovery: { ok: true, saved: Boolean(finalized.saved), result_finality: "final" }
+            });
+          }
+        }
+      }
       const remoteTaskId = openClawRemoteTaskId(task);
       if (!remoteTaskId) {
         return jsonResponse({
@@ -2275,13 +2502,29 @@ async function handleOpenClawTasksRequest(request, env, url, ctx) {
           }
         });
       }
-      const syncedTask = await syncOpenClawRemoteTask(env, task, remoteResult);
+      const normalizedRemoteStatus = normalizeRemoteTaskPayload(remoteResult);
+      let resultRecovery = null;
+      let syncedTask = null;
+      if (isOpenClawBridgeTask(task)
+        && localStatusFromRemoteStatus(normalizedRemoteStatus.status, "") === "completed") {
+        resultRecovery = await finalizeOpenClawTaskResult(env, task);
+        syncedTask = resultRecovery.task || task;
+      } else {
+        syncedTask = await syncOpenClawRemoteTask(env, task, remoteResult);
+      }
       return jsonResponse({
         ok: true,
         remote: true,
         remoteAvailable: true,
         task: syncedTask,
-        remoteStatus: normalizeRemoteTaskPayload(remoteResult),
+        remoteStatus: normalizedRemoteStatus,
+        resultRecovery: resultRecovery ? {
+          ok: Boolean(resultRecovery.ok),
+          incomplete: Boolean(resultRecovery.incomplete),
+          recoverable: Boolean(resultRecovery.recoverable),
+          result_finality: resultRecovery.result_finality || "",
+          error: resultRecovery.error || ""
+        } : null,
         debug: {
           remoteTaskId,
           remoteStatusAttempted: true,
@@ -4284,7 +4527,7 @@ async function continueOpenClawAsyncStreamToCompletion({
   try {
     if (initialText) {
       bufferState.value += initialText;
-      appendReplyFromSseBuffer(bufferState, replyState);
+      appendReplyFromSseBuffer(bufferState, replyState, { finalEventIsSnapshot: true });
     }
 
     while (true) {
@@ -4295,11 +4538,11 @@ async function continueOpenClawAsyncStreamToCompletion({
       }
       const chunkText = decoder.decode(value, { stream: true });
       bufferState.value += chunkText;
-      appendReplyFromSseBuffer(bufferState, replyState);
+      appendReplyFromSseBuffer(bufferState, replyState, { finalEventIsSnapshot: true });
     }
 
     if (bufferState.value.trim()) {
-      appendReplyFromSseBuffer({ value: bufferState.value + "\n\n" }, replyState);
+      appendReplyFromSseBuffer({ value: bufferState.value + "\n\n" }, replyState, { finalEventIsSnapshot: true });
     }
 
     const reply = replyState.value.trim();
@@ -4418,11 +4661,11 @@ async function runOpenClawAsyncTaskInBackground({
       }
 
       bufferState.value += chunkText;
-      appendReplyFromSseBuffer(bufferState, replyState);
+      appendReplyFromSseBuffer(bufferState, replyState, { finalEventIsSnapshot: true });
     }
 
     if (bufferState.value.trim()) {
-      appendReplyFromSseBuffer({ value: bufferState.value + "\n\n" }, replyState);
+      appendReplyFromSseBuffer({ value: bufferState.value + "\n\n" }, replyState, { finalEventIsSnapshot: true });
     }
 
     const reply = replyState.value.trim();
@@ -4483,18 +4726,30 @@ async function runOpenClawAsyncTaskInBackground({
   }
 }
 
-function appendReplyFromSseBuffer(bufferState, replyState) {
+export function appendReplyFromSseBuffer(bufferState, replyState, options = {}) {
   const events = bufferState.value.split("\n\n");
   bufferState.value = events.pop() || "";
 
   for (const event of events) {
+    const eventType = event
+      .split("\n")
+      .find(line => line.startsWith("event:"))
+      ?.slice(6).trim() || "message";
     const lines = event
       .split("\n")
       .filter(line => line.startsWith("data:"))
       .map(line => line.slice(5).trimStart());
 
     for (const line of lines) {
-      replyState.value += readStreamText(line);
+      const text = readStreamText(line);
+      if (!text) {
+        continue;
+      }
+      if (options.finalEventIsSnapshot && eventType === "done") {
+        replyState.value = text;
+      } else {
+        replyState.value += text;
+      }
     }
   }
 }
@@ -4511,19 +4766,23 @@ function logOpenClawLegacySseRawEventOnce(state, chunkText, task) {
     return;
   }
   state.logged = true;
+  const eventType = rawEvent
+    .split("\n")
+    .find(line => line.startsWith("event:"))
+    ?.slice(6).trim() || "message";
+  const extractedTextChars = rawEvent
+    .split("\n")
+    .filter(line => line.startsWith("data:"))
+    .map(line => readStreamText(line.slice(5).trimStart()))
+    .join("").length;
   console.info("[openclaw-legacy-sse-raw-event]", {
     provider: task?.provider || "",
     model: task?.model || "",
     runtimeId: task?.runtimeId || task?.runtime_id || "",
     localTaskId: task?.id || "",
-    rawEvent: previewOpenClawSubmitText(rawEvent).slice(0, 4000),
-    extractedTextPreview: previewOpenClawSubmitText(
-      rawEvent
-        .split("\n")
-        .filter(line => line.startsWith("data:"))
-        .map(line => readStreamText(line.slice(5).trimStart()))
-        .join("")
-    ).slice(0, 600)
+    eventType,
+    rawEventChars: rawEvent.length,
+    extractedTextChars
   });
 }
 
@@ -4676,11 +4935,11 @@ async function submitOpenClawAsyncTask({
         };
       }
       bufferState.value += chunkText;
-      appendReplyFromSseBuffer(bufferState, replyState);
+      appendReplyFromSseBuffer(bufferState, replyState, { finalEventIsSnapshot: true });
     }
 
     if (streamDone && bufferState.value.trim()) {
-      appendReplyFromSseBuffer({ value: bufferState.value + "\n\n" }, replyState);
+      appendReplyFromSseBuffer({ value: bufferState.value + "\n\n" }, replyState, { finalEventIsSnapshot: true });
     }
 
     if (streamDone && replyState.value) {
@@ -5048,11 +5307,15 @@ function streamChatWithToolStatus({
             }
           }
           bufferState.value += chunkText;
-          appendReplyFromSseBuffer(bufferState, replyState);
+          appendReplyFromSseBuffer(bufferState, replyState, {
+            finalEventIsSnapshot: Boolean(activeOpenClawTask || /openclaw/i.test(String(provider || "") + " " + String(model || "")))
+          });
         }
 
         if (bufferState.value.trim()) {
-          appendReplyFromSseBuffer({ value: bufferState.value + "\n\n" }, replyState);
+          appendReplyFromSseBuffer({ value: bufferState.value + "\n\n" }, replyState, {
+            finalEventIsSnapshot: Boolean(activeOpenClawTask || /openclaw/i.test(String(provider || "") + " " + String(model || "")))
+          });
         }
 
         const latencyMs = activeCallStartedAt ? Date.now() - activeCallStartedAt : 0;

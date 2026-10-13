@@ -61,6 +61,38 @@ describe("OpenClaw bridge frontend SSE state", () => {
     });
   });
 
+  it("ignores a second terminal SSE event even when it has a different event_id", () => {
+    const state = createOpenClawBridgeEventState();
+
+    expect(applyOpenClawBridgeEventState(state, {
+      event_id: "evt_final_first",
+      event_type: "bridge.final",
+      sequence: 20
+    }).accepted).toBe(true);
+    expect(applyOpenClawBridgeEventState(state, {
+      event_id: "evt_final_retry",
+      event_type: "bridge.final",
+      sequence: 21
+    })).toMatchObject({
+      accepted: false,
+      reason: "after_final"
+    });
+  });
+
+  it("rebuilds history on refresh and starts reconnect streams with fresh dedupe state", () => {
+    const page = htmlPage();
+    const loadStart = page.indexOf("async function loadConversationMessages(conversationId)");
+    const clearHistory = page.indexOf("chat.innerHTML = \"<div id='searchResults'></div>\";", loadStart);
+    const renderHistory = page.indexOf("(data.messages || []).forEach(message =>", loadStart);
+    const streamStart = page.indexOf("function startOpenClawBridgeEventStream(taskId, element, task)");
+    const freshState = page.indexOf("const state = createOpenClawBridgeEventState();", streamStart);
+
+    expect(loadStart).toBeGreaterThanOrEqual(0);
+    expect(clearHistory).toBeGreaterThan(loadStart);
+    expect(renderHistory).toBeGreaterThan(clearHistory);
+    expect(freshState).toBeGreaterThan(streamStart);
+  });
+
   it("keeps polling fallback wired when EventSource cannot be used or fails", () => {
     const page = htmlPage();
 
@@ -79,6 +111,29 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("Keep waiting");
     expect(page).toContain("Rerun");
     expect(page).toContain("Ignore");
+  });
+
+  it("keeps callback and polling recovery alive until a completed task has a final result", () => {
+    const page = htmlPage();
+    const pollStart = page.indexOf("async function pollOpenClawReconnectTask(taskId)");
+    const completedBranch = page.indexOf('if(task.status === "completed")', pollStart);
+    const finalize = page.indexOf("await finalizeOpenClawTaskResult(task.id);", completedBranch);
+    const stopPolling = page.indexOf("stopOpenClawReconnectPolling();", completedBranch);
+    const waitMessage = page.indexOf("OpenClaw task result is not final yet; waiting for the final answer.", completedBranch);
+
+    expect(completedBranch).toBeGreaterThan(pollStart);
+    expect(finalize).toBeGreaterThan(completedBranch);
+    expect(stopPolling).toBeGreaterThan(finalize);
+    expect(waitMessage).toBeGreaterThan(finalize);
+  });
+
+  it("polls recovering tasks and resumes them on refresh even when remote status is completed", () => {
+    const page = htmlPage();
+    for (const name of ["isOpenClawTaskPending", "isOpenClawAutoResumeRunningTask", "shouldPollOpenClawTask"]) {
+      const declaration = page.match(new RegExp("function " + name + "\\(task\\)\\{[\\s\\S]*?\\n\\}"))[0];
+      const fn = new Function("openClawTaskRemoteStatus", declaration + "; return " + name)(task => task.remote_status);
+      expect(fn({ status: "recovering", remote_status: "completed", remote_progress: 100 })).toBe(true);
+    }
   });
 
   it("keeps Bridge empty replies and elapsed seconds in UTF-8 Chinese", () => {

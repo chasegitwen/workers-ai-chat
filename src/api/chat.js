@@ -39,6 +39,7 @@ import {
 } from "./openclawBridgeClient.js";
 import { broadcastOpenClawBridgeEvent } from "./openclawBridgeEvents.js";
 import { resolveOpenClawRuntimeForProject } from "./openclawRuntimes.js";
+import { validateOpenClawCatalogSelection } from "./openclawCatalog.js";
 
 const defaultSystemMessage = {
   role: "system",
@@ -56,6 +57,18 @@ const OPENCLAW_ASYNC_SUBMIT_TIMEOUT_MS = 15000;
 const OPENCLAW_ASYNC_SUBMIT_SCAN_BYTES = 65536;
 const OPENCLAW_CALLBACK_TIMESTAMP_WINDOW_MS = 5 * 60 * 1000;
 const MODEL_SETTINGS_KEY = "model_settings";
+const OPENCLAW_INSTANCE_ALLOWLIST = Object.freeze({
+  "openclaw-seattle": {
+    apiBase: "https://act.hnsnowground.cfd/v1",
+    apiKeyEnv: "OPENCLAW_SEATTLE_API_KEY",
+    runtimeId: "seattle-openclaw"
+  },
+  "openclaw-hillsboro": {
+    apiBase: "https://hill.hnsnowground.cfd/v1",
+    apiKeyEnv: "OPENCLAW_HILLSBORO_API_KEY",
+    runtimeId: "hillsboro-openclaw"
+  }
+});
 const AUTO_SEARCH_PATTERN = /搜索|查一下|查询|联网查|最新|最近|今天|现在|当前|目前|官网|价格|新闻|发布|更新|\bsearch\b|\blook up\b|\blatest\b|\brecent\b|\btoday\b|\bcurrent\b|\bnow\b|\bnews\b|\bprice\b|\brelease\b|\bupdate\b|\bofficial\b/i;
 
 function getUserMessage(messages) {
@@ -3598,6 +3611,36 @@ async function readSavedProviders(env) {
   }
 }
 
+async function readSavedOpenClawInstance(env, instanceId, providerId) {
+  if (!env.DB) return null;
+  try {
+    const row = await env.DB.prepare(
+      "SELECT value FROM settings WHERE key = ?"
+    ).bind(MODEL_SETTINGS_KEY).first();
+    const settings = JSON.parse(row?.value || "null");
+    if (!settings || typeof settings !== "object") return null;
+    const hasExplicitInstances = Object.prototype.hasOwnProperty.call(settings, "openClawInstances");
+    const rawInstances = Array.isArray(settings.openClawInstances) ? settings.openClawInstances : [];
+    const savedProviders = Array.isArray(settings.providers)
+      ? settings.providers
+      : providersFromCategories(settings.categories || settings.modelCategories || []);
+    const instances = rawInstances.slice();
+    if (!hasExplicitInstances && savedProviders.some(provider => String(provider?.id || provider?.providerId || "") === "openclaw-seattle")) {
+      instances.push({ id: "openclaw-seattle", targetId: "seattle", connectionId: "openclaw-seattle" });
+    }
+    const requestedId = String(instanceId || providerId || "").trim();
+    const instance = instances.find(item => String(item?.id || "").trim() === requestedId);
+    if (!instance) return null;
+    const connectionId = String(instance.connectionId || providerId || "").trim();
+    const allowed = OPENCLAW_INSTANCE_ALLOWLIST[connectionId];
+    if (!allowed || connectionId !== String(providerId || "").trim()) return null;
+    return { id: requestedId, connectionId, ...allowed };
+  } catch (err) {
+    console.warn("[model-settings] failed to read OpenClaw instances", err.message || String(err));
+    return null;
+  }
+}
+
 function customConfigToProvider(config) {
   if (!config || typeof config !== "object" || Array.isArray(config)) {
     return null;
@@ -3632,7 +3675,9 @@ function customConfigToProvider(config) {
   };
 }
 
-export async function buildModelProviderCatalog(env, requestProviders, customModelConfig, fallbackCustomModelConfig) {
+export async function buildModelProviderCatalog(env, requestProviders, customModelConfig, fallbackCustomModelConfig, {
+  strictOpenClawInstances = false
+} = {}) {
   const defaultProviders = providersFromModels(MODELS);
   const savedProviders = await readSavedProviders(env);
   const customProviders = [
@@ -3640,13 +3685,32 @@ export async function buildModelProviderCatalog(env, requestProviders, customMod
     customConfigToProvider(fallbackCustomModelConfig)
   ].filter(Boolean);
 
-  return mergeProviders(
-    mergeProviders(defaultProviders, savedProviders),
+  const trustedCatalog = mergeProviders(defaultProviders, savedProviders);
+  const mergedCatalog = mergeProviders(
+    trustedCatalog,
     mergeProviders(requestProviders || [], customProviders, {
       defaultBaseOpenClawExecutionMode: false,
       defaultIncomingOpenClawExecutionMode: false
     })
   );
+  if (!strictOpenClawInstances) return mergedCatalog;
+  const trustedById = new Map(trustedCatalog.map(provider => [provider.id, provider]));
+  return mergedCatalog.map(provider => {
+    if (!isOpenClawProviderModel(provider, null)) return provider;
+    const allowed = OPENCLAW_INSTANCE_ALLOWLIST[provider.id];
+    const trusted = trustedById.get(provider.id);
+    if (!allowed || !trusted || !isOpenClawProviderModel(trusted, null)) return null;
+    return {
+      ...trusted,
+      apiBase: allowed.apiBase,
+      apiKeyEnv: allowed.apiKeyEnv,
+      models: (trusted.models || []).map(model => ({
+        ...model,
+        apiBase: allowed.apiBase,
+        apiKeyEnv: allowed.apiKeyEnv
+      }))
+    };
+  }).filter(Boolean);
 }
 
 function findProviderModel(providerCatalog, providerId, modelId) {
@@ -3723,7 +3787,7 @@ function normalizeCustomModelConfig(config, { required = false } = {}) {
   };
 }
 
-export async function callSelectedModel({ env, provider, model, messages, stream, providerCatalog, max_tokens, temperature }) {
+export async function callSelectedModel({ env, provider, model, messages, stream, providerCatalog, max_tokens, temperature, codexControls }) {
   const requestedModel = String(model || "").trim();
   const requestedProvider = String(provider || "").trim();
   const providerMessages = filterEmptySystemMessages(messages);
@@ -3754,6 +3818,7 @@ export async function callSelectedModel({ env, provider, model, messages, stream
       apiKeyEnv: selectedModel.apiKeyEnv || selectedProvider.apiKeyEnv,
       modelName: selectedModel.modelName || selectedModel.id
     }, { required: true });
+    config.baseModelId = selectedModel.baseModelId || "";
 
     if (!env[config.apiKeyEnv]) {
       throw new ProviderError("API key env " + config.apiKeyEnv + " is not configured", {
@@ -3770,6 +3835,7 @@ export async function callSelectedModel({ env, provider, model, messages, stream
       stream,
       max_tokens,
       temperature,
+      codexControls,
       timeoutMs: isOpenClawProviderModel(selectedProvider, selectedModel)
         ? OPENCLAW_CHAT_TIMEOUT_MS
         : undefined
@@ -4608,7 +4674,8 @@ async function runOpenClawAsyncTaskInBackground({
   model,
   provider,
   providerCatalog,
-  finalMessages
+  finalMessages,
+  codexControls
 }) {
   const decoder = new TextDecoder();
   const bufferState = { value: "" };
@@ -4632,7 +4699,8 @@ async function runOpenClawAsyncTaskInBackground({
       provider,
       messages: finalMessages,
       stream: true,
-      providerCatalog
+      providerCatalog,
+      codexControls
     });
 
     const reader = result.response.getReader();
@@ -4837,7 +4905,8 @@ async function submitOpenClawAsyncTask({
   model,
   provider,
   providerCatalog,
-  finalMessages
+  finalMessages,
+  codexControls
 }) {
   if (!openClawTask) {
     return { ok: false, error: "OpenClaw local task was not created", task: null };
@@ -4855,7 +4924,8 @@ async function submitOpenClawAsyncTask({
       model,
       provider,
       providerCatalog,
-      finalMessages
+      finalMessages,
+      codexControls
     }).catch(err => {
       console.warn("[openclaw-async] background task failed", err?.message || String(err));
     }));
@@ -4889,7 +4959,8 @@ async function submitOpenClawAsyncTask({
       provider,
       messages: finalMessages,
       stream: true,
-      providerCatalog
+      providerCatalog,
+      codexControls
     });
     reader = result.response.getReader();
     while (scannedBytes < OPENCLAW_ASYNC_SUBMIT_SCAN_BYTES) {
@@ -5137,7 +5208,8 @@ function streamChatWithToolStatus({
   requestedToolCall,
   ragSources,
   debugTools,
-  openClawTask = null
+  openClawTask = null,
+  codexControls = null
 }) {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -5244,7 +5316,8 @@ function streamChatWithToolStatus({
             provider,
             messages: finalMessages,
             stream: true,
-            providerCatalog
+            providerCatalog,
+            codexControls
           });
           activeResult = result;
         } catch (err) {
@@ -5555,8 +5628,14 @@ export async function handleChat(request, env, ctx) {
     runtimeId: camelRuntimeId,
     agent_id: agentId,
     agentId: camelAgentId,
+    base_model_id: baseModelId,
+    baseModelId: camelBaseModelId,
+    instance_id: instanceId,
+    instanceId: camelInstanceId,
+    selection_mode: selectionMode,
     toolCall,
-    debugTools = false
+    debugTools = false,
+    codexControls = null
   } = await request.json();
   let imageAttachments = [];
   let allImageAttachments = [];
@@ -5587,7 +5666,8 @@ export async function handleChat(request, env, ctx) {
     env,
     Array.isArray(providers) ? providers : [],
     customModelConfig,
-    fallbackCustomModelConfig
+    fallbackCustomModelConfig,
+    { strictOpenClawInstances: selectionMode === "openclaw-agent" }
   );
 
   const requestedConversationAttachmentIds = [...new Set((Array.isArray(conversationAttachmentIds) ? conversationAttachmentIds : [])
@@ -5755,6 +5835,31 @@ export async function handleChat(request, env, ctx) {
         "Content-Type": "application/json; charset=utf-8"
       }
     });
+  }
+  const explicitOpenClawAgentId = String(agentId || camelAgentId || "").trim();
+  const selectedOpenClawBaseModelId = String(baseModelId || camelBaseModelId || "").trim();
+  const selectedOpenClawInstanceId = String(instanceId || camelInstanceId || "").trim();
+  const openClawAgentMode = selectionMode === "openclaw-agent";
+  const trustedOpenClawInstance = openClawAgentMode
+    ? await readSavedOpenClawInstance(env, selectedOpenClawInstanceId, openClawTarget?.provider?.id)
+    : null;
+  if (openClawAgentMode && (!isOpenClawRequest || !trustedOpenClawInstance)) {
+    return jsonResponse({ ok: false, error: "invalid_openclaw_instance" }, 400);
+  }
+  if (isOpenClawRequest && (explicitOpenClawAgentId || selectedOpenClawBaseModelId)) {
+    const effectiveAgentId = runtimeResolution?.agent_id || requestedOpenClawAgentId;
+    const validSelection = (!explicitOpenClawAgentId || effectiveAgentId === explicitOpenClawAgentId)
+      && (openClawTarget?.provider?.id === "openclaw-seattle"
+        ? await validateOpenClawCatalogSelection(env, effectiveAgentId, selectedOpenClawBaseModelId)
+        : !openClawAgentMode && /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(effectiveAgentId)
+          && (!selectedOpenClawBaseModelId || /^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,159}$/.test(selectedOpenClawBaseModelId)));
+    if (!validSelection) {
+      return jsonResponse({ ok: false, error: "invalid_openclaw_selection" }, 400);
+    }
+    if (openClawTarget?.model && runtimeResolution?.execution_mode !== "bridge") {
+      openClawTarget.model.modelName = "openclaw/" + effectiveAgentId;
+      openClawTarget.model.baseModelId = selectedOpenClawBaseModelId;
+    }
   }
   if ((hasConversationAttachments || hasPersistentConversationAttachments) && hasKnowledgeBaseFiles) {
     return new Response(JSON.stringify({
@@ -6146,7 +6251,8 @@ export async function handleChat(request, env, ctx) {
       model,
       provider,
       providerCatalog,
-      finalMessages
+      finalMessages,
+      codexControls
     });
     return new Response(JSON.stringify({
       ok: Boolean(asyncResult.ok),
@@ -6186,7 +6292,8 @@ export async function handleChat(request, env, ctx) {
     requestedToolCall,
     ragSources,
     debugTools: Boolean(debugTools),
-    openClawTask
+    openClawTask,
+    codexControls
   }), {
     headers: {
       ...corsHeaders(),

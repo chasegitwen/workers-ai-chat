@@ -6,6 +6,7 @@ import { handleFetchUrl } from "./api/fetchUrl.js";
 import { handleHistory } from "./api/history.js";
 import { handleModelHealth } from "./api/modelHealth.js";
 import { handleOpenClawRuntimes } from "./api/openclawRuntimes.js";
+import { handleOpenClawCatalog } from "./api/openclawCatalog.js";
 import { handleProjects } from "./api/projects.js";
 import { handleSearchAndFetch } from "./api/searchAndFetch.js";
 import { handleSearchWeb } from "./api/searchWeb.js";
@@ -129,6 +130,10 @@ export default {
       if (runtimesResponse) {
         return runtimesResponse;
       }
+    }
+
+    if (url.pathname === "/api/openclaw/catalog/seattle") {
+      return handleOpenClawCatalog(request, env, url);
     }
 
     if (url.pathname.startsWith("/api/projects")) {

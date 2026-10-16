@@ -16,6 +16,48 @@ function isOpenClawConfig(config) {
   return values.some(value => value.startsWith("openclaw-") || value.includes("openclaw"));
 }
 
+function withCodexRunControls(messages, config, controls) {
+  const agentTarget = String(config?.modelName || "").trim();
+  const identity = [config?.id, config?.label, agentTarget, config?.baseModelId].join(" ");
+  if (!controls || !isOpenClawConfig(config)
+    || !/^openclaw\/[a-z0-9._-]+$/i.test(agentTarget)
+    || !/(?:^|[\s/_-])(?:gpt|codex)(?:[\s/_-]|$)/i.test(identity)) {
+    return messages;
+  }
+
+  const effort = String(controls.effort || "").trim().toLowerCase();
+  const speed = String(controls.speed || "").trim().toLowerCase();
+  if (!["low", "medium", "high", "xhigh", "max", "ultra"].includes(effort)
+    || !["standard", "fast"].includes(speed)) {
+    return messages;
+  }
+
+  const lastUserIndex = messages.findLastIndex(message => message?.role === "user");
+  if (lastUserIndex < 0) {
+    return messages;
+  }
+  const directives = `/think:${effort} /fast ${speed === "fast" ? "on" : "off"}\n\n`;
+  const next = messages.slice();
+  const user = { ...messages[lastUserIndex] };
+  if (typeof user.content === "string") {
+    user.content = directives + user.content;
+  } else if (Array.isArray(user.content)) {
+    const textIndex = user.content.findIndex(part => part?.type === "text" && typeof part.text === "string");
+    if (textIndex < 0) {
+      return messages;
+    }
+    user.content = user.content.slice();
+    user.content[textIndex] = {
+      ...user.content[textIndex],
+      text: directives + user.content[textIndex].text
+    };
+  } else {
+    return messages;
+  }
+  next[lastUserIndex] = user;
+  return next;
+}
+
 export function maybeAttachCfAccessHeaders(env, url, headers) {
   const clientId = env?.ACT_CF_ACCESS_CLIENT_ID;
   const clientSecret = env?.ACT_CF_ACCESS_CLIENT_SECRET;
@@ -59,7 +101,8 @@ export async function callOpenAICompatible({
   stream = true,
   max_tokens,
   temperature,
-  timeoutMs
+  timeoutMs,
+  codexControls
 }) {
   const apiBase = normalizeApiBase(config?.apiBase);
   const apiKeyEnv = config?.apiKeyEnv || "";
@@ -81,7 +124,7 @@ export async function callOpenAICompatible({
 
   const body = {
     model: config.modelName || config.id,
-    messages: filterEmptySystemMessages(messages),
+    messages: withCodexRunControls(filterEmptySystemMessages(messages), config, codexControls),
     stream
   };
 
@@ -112,6 +155,9 @@ export async function callOpenAICompatible({
     };
     if (openClawConfig) {
       headers["X-OpenClaw-Task-Events"] = "1";
+      if (config.baseModelId) {
+        headers["x-openclaw-model"] = config.baseModelId;
+      }
     }
     const requestUrl = apiBase + "/chat/completions";
     maybeAttachCfAccessHeaders(env, requestUrl, headers);

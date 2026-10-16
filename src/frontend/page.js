@@ -2203,6 +2203,35 @@ body.dark .toolErrorNotice{
   justify-content:flex-end;
 }
 
+.codexRunControls{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  width:100%;
+  flex-wrap:wrap;
+  color:var(--muted);
+  font-size:13px;
+}
+
+.codexRunControls[hidden]{
+  display:none;
+}
+
+.codexRunControls label{
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+
+.codexRunControls select{
+  border:1px solid var(--border);
+  border-radius:999px;
+  padding:5px 8px;
+  background:var(--panel);
+  color:var(--text);
+  font:inherit;
+}
+
 .toolBtn{
   min-height:38px;
   border:none;
@@ -2353,6 +2382,26 @@ body.dark .toolErrorNotice{
   background:transparent;
   color:var(--text);
 }
+.openClawRouteControls{display:grid;gap:8px;margin-top:10px;font-size:12px}
+.openClawRouteControls[hidden]{display:none}
+.openClawRouteControls label{display:grid;gap:4px}
+.openClawRouteControls select{width:100%;min-width:0;padding:8px;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--text)}
+.openClawCatalogLine{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--muted)}
+.openClawCatalogLine button{border:1px solid var(--border);border-radius:8px;padding:5px 8px;background:transparent;color:var(--text);cursor:pointer}
+.modelModeSwitch{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
+.modelModeSwitch button{border:1px solid var(--border);border-radius:10px;padding:8px;background:transparent;color:var(--text);cursor:pointer}
+.modelModeSwitch button.active{background:var(--primary);border-color:var(--primary);color:white}
+.newModeTargetSwitch{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0}
+.newModeTargetSwitch[hidden]{display:none}
+.newModeTargetSwitch button{border:1px solid var(--border);border-radius:10px;padding:7px;background:transparent;color:var(--text);cursor:pointer}
+.newModeTargetSwitch button.active{background:var(--primary);border-color:var(--primary);color:white}
+.effectiveModelResult{font-size:12px;line-height:1.45;color:var(--muted);margin-top:7px;overflow-wrap:anywhere}
+.openClawInstancesSettings{display:grid;gap:10px;margin-top:14px}
+.openClawInstancesHeader{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.openClawInstanceRow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid var(--border);border-radius:12px}
+.openClawInstanceActions{display:flex;gap:6px;flex-wrap:wrap}
+.openClawInstanceMeta{font-size:12px;color:var(--muted);margin-top:3px}
+.settingsModal:not([data-mode="modern"]) .openClawInstancesSettings{display:none}
 
 .settingsModal{
   position:fixed;
@@ -2965,6 +3014,17 @@ body.dark .toolErrorNotice{
       <h3>模型设置中心</h3>
       <button id="closeSettingsBtn" class="settingsBtn" type="button">关闭</button>
     </div>
+    <div class="modelModeSwitch" aria-label="模型设置模式">
+      <button type="button" data-settings-mode="classic">经典模式</button>
+      <button type="button" data-settings-mode="modern">新模式</button>
+    </div>
+    <section id="openClawInstancesSettings" class="openClawInstancesSettings">
+      <div class="openClawInstancesHeader">
+        <div class="modelCategoryMeta">新模式按实例管理 OpenClaw。增删改只影响本站连接，不会修改 VPS 上的 Agent、模型或 Gateway。</div>
+        <button id="addOpenClawInstanceBtn" class="settingsBtn" type="button">添加实例</button>
+      </div>
+      <div id="openClawInstancesList"></div>
+    </section>
     <div class="settingsGrid">
       <label class="settingsField">
         默认模型
@@ -3154,6 +3214,14 @@ body.dark .toolErrorNotice{
 
       <div class="modelArea">
         <div class="modelLabel">当前模型</div>
+      <div id="modelModeSwitch" class="modelModeSwitch" aria-label="模型选择模式">
+        <button type="button" data-model-mode="classic">经典模式</button>
+        <button type="button" data-model-mode="modern">新模式</button>
+      </div>
+      <div id="newModeTargetSwitch" class="newModeTargetSwitch" aria-label="新模式模型类型" hidden>
+        <button type="button" data-new-mode-target="model">普通模型</button>
+        <button type="button" data-new-mode-target="openclaw">OpenClaw 实例</button>
+      </div>
     
       <select
         id="modelSelect"
@@ -3168,6 +3236,13 @@ body.dark .toolErrorNotice{
         "
       >
       </select>
+      <div id="openClawRouteControls" class="openClawRouteControls" hidden>
+        <label>实例 <select id="openClawProviderSelect" aria-label="OpenClaw 实例"></select></label>
+        <label>Agent <select id="openClawAgentSelect" aria-label="OpenClaw Agent"></select></label>
+        <label>基础模型 <select id="openClawBaseModelSelect" aria-label="OpenClaw 基础模型"></select></label>
+        <div class="openClawCatalogLine"><span id="openClawCatalogStatus"></span><button id="openClawCatalogRefresh" type="button">刷新目录</button></div>
+      </div>
+      <div id="effectiveModelResult" class="effectiveModelResult"></div>
       <button id="modelSettingsBtn" class="modelSettingsBtn" type="button">模型设置</button>
 
       </div>
@@ -3263,6 +3338,25 @@ body.dark .toolErrorNotice{
       placeholder="&#x8F93;&#x5165;&#x95EE;&#x9898;&#x3001;&#x641C;&#x7D22;&#x5173;&#x952E;&#x8BCD;&#x6216;&#x7F51;&#x9875; URL..."
       rows="1"
     ></textarea>
+
+    <div id="codexRunControls" class="codexRunControls" hidden>
+      <label>Effort
+        <select id="codexEffortSelect" aria-label="Codex effort">
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+          <option value="xhigh">XHigh</option>
+          <option value="max">Max</option>
+          <option value="ultra">Ultra</option>
+        </select>
+      </label>
+      <label>Speed
+        <select id="codexSpeedSelect" aria-label="Codex speed">
+          <option value="standard">Standard</option>
+          <option value="fast">Fast</option>
+        </select>
+      </label>
+    </div>
 
     <div id="browserToolPanel" class="browserToolPanel" aria-hidden="true">
       <input id="browserToolUrlInput" class="browserToolInput" type="url" placeholder="https://example.com" />
@@ -3736,6 +3830,50 @@ function readLegacyModelSettings(){
   };
 }
 
+function normalizeOpenClawInstanceList(instances, { providers = [], inferDefault = false } = {}){
+  const seen = new Set();
+  const normalized = [];
+  (Array.isArray(instances) ? instances : []).forEach(instance => {
+    const id = String(instance?.id || "").trim();
+    const targetId = String(instance?.targetId || instance?.target || "").trim().toLowerCase();
+    const target = OPENCLAW_INSTANCE_TARGETS[targetId];
+    if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(id) || !target || seen.has(id)) return;
+    seen.add(id);
+    normalized.push({
+      id,
+      label:String(instance?.label || instance?.displayName || id).trim().slice(0, 120) || id,
+      targetId,
+      connectionId:target.connectionId,
+      endpoint:target.endpoint,
+      runtimeId:target.runtimeId,
+      catalogId:target.catalogId
+    });
+  });
+  if(!normalized.length && inferDefault && providers.some(provider => provider.id === "openclaw-seattle")){
+    normalized.push({
+      id:"openclaw-seattle",
+      label:"Seattle OpenClaw",
+      targetId:"seattle",
+      ...OPENCLAW_INSTANCE_TARGETS.seattle
+    });
+  }
+  return normalized;
+}
+
+function upsertOpenClawInstanceList(instances, draft){
+  const id = String(draft?.id || "").trim();
+  return normalizeOpenClawInstanceList([
+    ...(Array.isArray(instances) ? instances : []).filter(instance => String(instance?.id || "").trim() !== id),
+    draft
+  ]);
+}
+
+function removeOpenClawInstanceFromList(instances, instanceId){
+  const id = String(instanceId || "").trim();
+  return normalizeOpenClawInstanceList((Array.isArray(instances) ? instances : [])
+    .filter(instance => String(instance?.id || "").trim() !== id));
+}
+
 function normalizeModelSettings(settings, fallbackProviders){
   const base = settings && typeof settings === "object" ? settings : readLegacyModelSettings();
   return {
@@ -3841,15 +3979,29 @@ function hasModel(modelId){
 }
 
 function selectInitialModel(){
+  activeModelMode = modelSettingsState?.selectionMode === "modern" ? "modern" : "classic";
+  activeNewModeTarget = modelSettingsState?.newModeTarget === "openclaw" ? "openclaw" : "model";
+  renderModelOptions();
   let nextModel = "";
-  if(modelSettingsState?.rememberLastModel && hasModel(modelSettingsState.lastModel)){
-    nextModel = modelSettingsState.lastModel;
-  }else if(hasModel(modelSettingsState?.defaultModel)){
+  if(activeModelMode === "classic"){
+    if(modelSettingsState?.classicSelectedModel && hasClassicModel(modelSettingsState.classicSelectedModel)){
+      nextModel = modelSettingsState.classicSelectedModel;
+    }else if(modelSettingsState?.rememberLastModel && hasClassicModel(modelSettingsState.lastModel)){
+      nextModel = modelSettingsState.lastModel;
+    }else if(hasClassicModel(modelSettingsState?.defaultModel)){
+      nextModel = modelSettingsState.defaultModel;
+    }else{
+      nextModel = classicModelOptions[0]?.id || "";
+    }
+  }else if(modelSettingsState?.modernSelectedModel && hasModernModel(modelSettingsState.modernSelectedModel)){
+    nextModel = modelSettingsState.modernSelectedModel;
+  }else if(hasModernModel(modelSettingsState?.defaultModel)){
     nextModel = modelSettingsState.defaultModel;
   }else{
-    nextModel = modelOptions[0]?.id || "";
+    nextModel = modernModelOptions[0]?.id || "";
   }
   modelSelect.value = nextModel;
+  syncModelModeUi();
   syncOpenClawTaskVisibility();
 }
 
@@ -3871,8 +4023,8 @@ function refreshSettingsControls(){
   };
   fillSelect(defaultModelSelect, false);
   fillSelect(fallbackModelSelect, true);
-  defaultModelSelect.value = hasModel(modelSettingsState?.defaultModel) ? modelSettingsState.defaultModel : (modelOptions[0]?.id || "");
-  fallbackModelSelect.value = hasModel(modelSettingsState?.fallbackModels?.[0]) ? modelSettingsState.fallbackModels[0] : "";
+  defaultModelSelect.value = hasClassicModel(modelSettingsState?.defaultModel) ? modelSettingsState.defaultModel : (classicModelOptions[0]?.id || "");
+  fallbackModelSelect.value = hasClassicModel(modelSettingsState?.fallbackModels?.[0]) ? modelSettingsState.fallbackModels[0] : "";
   rememberLastModelCheck.checked = Boolean(modelSettingsState?.rememberLastModel);
   fallbackEnabledCheck.checked = Boolean(modelSettingsState?.fallbackEnabled);
   showPerMessageModelInfoCheck.checked = Boolean(modelSettingsState?.showPerMessageModelInfo);
@@ -3886,6 +4038,11 @@ function refreshSettingsControls(){
     modelProviderSelect.appendChild(option);
   });
   renderProvidersList();
+  renderOpenClawInstancesList();
+  settingsModal.dataset.mode = activeModelMode;
+  settingsModal.querySelectorAll("[data-settings-mode]").forEach(button => {
+    button.classList.toggle("active", button.dataset.settingsMode === activeModelMode);
+  });
 }
 
 async function loadModels(){
@@ -3901,6 +4058,7 @@ async function loadModels(){
     refreshSettingsControls();
     writeSettingsCache(modelSettingsState);
     syncSettingsToServer(modelSettingsState);
+    loadOpenClawCatalog();
   }catch(err){
     console.log("load models failed", err);
   }
@@ -5388,6 +5546,33 @@ fileInput.addEventListener("change", async () => {
 
 
 const modelSelect = document.getElementById("modelSelect");
+const modelModeSwitch = document.getElementById("modelModeSwitch");
+const newModeTargetSwitch = document.getElementById("newModeTargetSwitch");
+const effectiveModelResult = document.getElementById("effectiveModelResult");
+const openClawRouteControls = document.getElementById("openClawRouteControls");
+const openClawProviderSelect = document.getElementById("openClawProviderSelect");
+const openClawAgentSelect = document.getElementById("openClawAgentSelect");
+const openClawBaseModelSelect = document.getElementById("openClawBaseModelSelect");
+const openClawCatalogStatus = document.getElementById("openClawCatalogStatus");
+const openClawCatalogRefresh = document.getElementById("openClawCatalogRefresh");
+const openClawInstancesSettings = document.getElementById("openClawInstancesSettings");
+const openClawInstancesList = document.getElementById("openClawInstancesList");
+const addOpenClawInstanceBtn = document.getElementById("addOpenClawInstanceBtn");
+const codexRunControls = document.getElementById("codexRunControls");
+const codexEffortSelect = document.getElementById("codexEffortSelect");
+const codexSpeedSelect = document.getElementById("codexSpeedSelect");
+const CODEX_RUN_PREFERENCES_KEY = "wa_codex_run_preferences_v1";
+const CODEX_EFFORT_OPTIONS = ["low", "medium", "high", "xhigh", "max", "ultra"];
+const CODEX_SPEED_OPTIONS = ["standard", "fast"];
+function readCodexRunPreferences(){
+  try{
+    const value = JSON.parse(localStorage.getItem(CODEX_RUN_PREFERENCES_KEY) || "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  }catch(err){
+    return {};
+  }
+}
+const codexRunPreferences = readCodexRunPreferences();
 const modelSettingsBtn = document.getElementById("modelSettingsBtn");
 const settingsModal = document.getElementById("settingsModal");
 const closeSettingsBtn = document.getElementById("closeSettingsBtn");
@@ -5427,6 +5612,25 @@ let modelSettingsState = null;
 let modelProviders = [];
 let modelCategories = [];
 let modelOptions = [];
+let classicModelOptions = [];
+let modernModelOptions = [];
+let activeModelMode = "classic";
+let activeNewModeTarget = "model";
+let seattleOpenClawCatalog = null;
+let seattleOpenClawCatalogState = "unconfigured";
+const OPENCLAW_INSTANCE_TARGETS = Object.freeze({
+  seattle:{
+    label:"Seattle Gateway",
+    connectionId:"openclaw-seattle",
+    endpoint:"https://act.hnsnowground.cfd/v1",
+    runtimeId:"seattle-openclaw",
+    catalogId:"seattle"
+  }
+});
+const OPENCLAW_ROUTE_PREFERENCES_KEY = "wa_openclaw_route_v1";
+let openClawRoutePreferences = {};
+try { openClawRoutePreferences = JSON.parse(localStorage.getItem(OPENCLAW_ROUTE_PREFERENCES_KEY) || "{}"); }
+catch(err) { openClawRoutePreferences = {}; }
 let settingsSnapshot = null;
 let editingProviderId = null;
 let editingModelRef = null;
@@ -5597,7 +5801,12 @@ function modelEditable(model){
 function currentSelectedSnapshot(){
   return {
     selectedModel:modelSelect.value || "",
-    selectedProvider:getSelectedProviderForRequest(modelSelect.value)
+    selectedProvider:getSelectedProviderForRequest(modelSelect.value),
+    selectionMode:activeModelMode,
+    newModeTarget:activeNewModeTarget,
+    classicSelectedModel:modelSettingsState?.classicSelectedModel || "",
+    modernSelectedModel:modelSettingsState?.modernSelectedModel || "",
+    openClawSelection:currentOpenClawSelection()
   };
 }
 
@@ -5694,9 +5903,17 @@ function saveSettingsFromUi(closeAfter){
   modelSettingsState.autoArchiveDays = normalizeAutoArchiveDays(autoArchiveDaysSelect.value);
   modelSettingsState.conversationAttachmentLimits = readConversationAttachmentLimitInputs();
 
-  if(nextDefault && hasModel(nextDefault)){
+  if(nextDefault && (activeModelMode === "classic" ? hasClassicModel(nextDefault) : hasModernModel(nextDefault))){
     modelSelect.value = nextDefault;
   }
+  modelSettingsState.selectionMode = activeModelMode;
+  modelSettingsState.newModeTarget = activeNewModeTarget;
+  if(activeModelMode === "classic"){
+    modelSettingsState.classicSelectedModel = modelSelect.value || "";
+  }else{
+    modelSettingsState.modernSelectedModel = modelSelect.value || "";
+  }
+  modelSettingsState.openClawSelection = currentOpenClawSelection();
 
   if(modelSettingsState.rememberLastModel && nextDefault){
     modelSettingsState.lastModel = nextDefault;
@@ -5891,9 +6108,12 @@ function saveSettingsFromUi(closeAfter){
   modelSettingsState.autoArchiveDays = normalizeAutoArchiveDays(autoArchiveDaysSelect.value);
   modelSettingsState.conversationAttachmentLimits = readConversationAttachmentLimitInputs();
 
-  if(nextDefault && hasModel(nextDefault)){
+  if(nextDefault && hasClassicModel(nextDefault)){
     modelSelect.value = nextDefault;
   }
+  modelSettingsState.selectionMode = activeModelMode;
+  modelSettingsState.classicSelectedModel = modelSelect.value || "";
+  modelSettingsState.openClawSelection = currentOpenClawSelection();
   modelSettingsState.lastModel = modelSettingsState.rememberLastModel && nextDefault ? nextDefault : "";
   persistSettings(closeAfter ? "Saved" : "Applied", Boolean(closeAfter));
 }
@@ -6150,9 +6370,14 @@ function saveSettingsFromUi(closeAfter){
   modelSettingsState.showPerMessageModelInfo = showPerMessageModelInfoCheck.checked;
   modelSettingsState.autoArchiveDays = normalizeAutoArchiveDays(autoArchiveDaysSelect.value);
   modelSettingsState.conversationAttachmentLimits = readConversationAttachmentLimitInputs();
-  if(nextDefault && hasModel(nextDefault)){
+  if(nextDefault && (activeModelMode === "classic" ? hasClassicModel(nextDefault) : hasModernModel(nextDefault))){
     modelSelect.value = nextDefault;
   }
+  modelSettingsState.selectionMode = activeModelMode;
+  modelSettingsState.newModeTarget = activeNewModeTarget;
+  if(activeModelMode === "classic") modelSettingsState.classicSelectedModel = modelSelect.value || "";
+  else modelSettingsState.modernSelectedModel = modelSelect.value || "";
+  modelSettingsState.openClawSelection = currentOpenClawSelection();
   modelSettingsState.lastModel = modelSettingsState.rememberLastModel && nextDefault ? nextDefault : "";
   persistSettings(closeAfter ? "Saved" : "Applied", Boolean(closeAfter));
 }
@@ -6946,6 +7171,11 @@ function normalizeModelSettings(settings, fallbackProviders){
     : (Array.isArray(base.modelCategories) && base.modelCategories.length ? base.modelCategories : null);
   const categories = normalizeModelCategories(categorySource, Array.isArray(base.providers) && base.providers.length ? base.providers : fallback);
   const providers = categoriesToProviders(categories);
+  const legacySelected = base.lastModel || base.selectedModel || base.defaultModel || "";
+  const previousAgentMode = base.selectionMode === "openclaw-agent";
+  const selectionMode = base.selectionMode === "modern" || previousAgentMode ? "modern" : "classic";
+  const newModeTarget = base.newModeTarget === "openclaw" || previousAgentMode ? "openclaw" : "model";
+  const hasExplicitInstances = Object.prototype.hasOwnProperty.call(base, "openClawInstances");
   return {
     defaultModel:base.defaultModel || "",
     rememberLastModel:Boolean(base.rememberLastModel),
@@ -6959,6 +7189,16 @@ function normalizeModelSettings(settings, fallbackProviders){
     categories,
     modelCategories:categories,
     providers,
+    selectionMode,
+    newModeTarget,
+    classicSelectedModel:base.classicSelectedModel || legacySelected,
+    modernSelectedModel:base.modernSelectedModel || (!String(legacySelected).startsWith("openclaw-") ? legacySelected : ""),
+    openClawSelection:base.openClawSelection && typeof base.openClawSelection === "object"
+      ? base.openClawSelection : {},
+    openClawInstances:normalizeOpenClawInstanceList(base.openClawInstances, {
+      providers,
+      inferDefault:!hasExplicitInstances
+    }),
     updatedAt:Number(base.updatedAt || base.version || 0) || 0,
     version:Number(base.version || base.updatedAt || 0) || 0
   };
@@ -6989,10 +7229,14 @@ function flattenProviders(providers){
 }
 
 function renderModelOptions(){
+  const previousSelection = modelSelect.value;
   modelSelect.innerHTML = "";
   modelOptions = flattenProviders(modelProviders);
+  classicModelOptions = modelOptions.slice();
+  modernModelOptions = modelOptions.filter(model => !isOpenClawModelTarget(model));
+  const visibleModels = activeModelMode === "modern" ? modernModelOptions : classicModelOptions;
   const groups = new Map();
-  modelOptions.forEach(model => {
+  visibleModels.forEach(model => {
     const groupLabel = categoryLabel(modelCategoryFromLegacy(model));
     if(!groups.has(groupLabel)){
       const group = document.createElement("optgroup");
@@ -7007,11 +7251,24 @@ function renderModelOptions(){
     option.dataset.providerType = model.providerType || "";
     groups.get(groupLabel).appendChild(option);
   });
+  if(visibleModels.some(model => model.id === previousSelection)){
+    modelSelect.value = previousSelection;
+  }
+}
+
+function hasClassicModel(modelId){
+  return Boolean(classicModelOptions.find(model => model.id === modelId));
+}
+
+function hasModernModel(modelId){
+  return Boolean(modernModelOptions.find(model => model.id === modelId));
 }
 
 function refreshSettingsControls(){
   const settingsPanel = settingsModal.querySelector(".settingsPanel");
   const settingsScrollTop = settingsPanel?.scrollTop || 0;
+  const settingsModels = activeModelMode === "classic" ? classicModelOptions : modernModelOptions;
+  const hasSettingsModel = modelId => settingsModels.some(model => model.id === modelId);
   const fillSelect = (select, includeEmpty) => {
     select.innerHTML = "";
     if(includeEmpty){
@@ -7020,7 +7277,7 @@ function refreshSettingsControls(){
       empty.textContent = "None";
       select.appendChild(empty);
     }
-    modelOptions.forEach(model => {
+    settingsModels.forEach(model => {
       const option = document.createElement("option");
       option.value = model.id;
       option.textContent = categoryLabel(modelCategoryFromLegacy(model)) + " / " + (model.label || model.id);
@@ -7029,8 +7286,8 @@ function refreshSettingsControls(){
   };
   fillSelect(defaultModelSelect, false);
   fillSelect(fallbackModelSelect, true);
-  defaultModelSelect.value = hasModel(modelSettingsState?.defaultModel) ? modelSettingsState.defaultModel : (modelOptions[0]?.id || "");
-  fallbackModelSelect.value = hasModel(modelSettingsState?.fallbackModels?.[0]) ? modelSettingsState.fallbackModels[0] : "";
+  defaultModelSelect.value = hasSettingsModel(modelSettingsState?.defaultModel) ? modelSettingsState.defaultModel : (settingsModels[0]?.id || "");
+  fallbackModelSelect.value = hasSettingsModel(modelSettingsState?.fallbackModels?.[0]) ? modelSettingsState.fallbackModels[0] : "";
   rememberLastModelCheck.checked = Boolean(modelSettingsState?.rememberLastModel);
   fallbackEnabledCheck.checked = Boolean(modelSettingsState?.fallbackEnabled);
   showPerMessageModelInfoCheck.checked = Boolean(modelSettingsState?.showPerMessageModelInfo);
@@ -7041,7 +7298,8 @@ function refreshSettingsControls(){
   workersOption.textContent = "Workers 托管";
   modelProviderSelect.appendChild(workersOption);
   modelProviders
-    .filter(provider => provider.providerType === "claude-compatible" || provider.providerType === "openai-compatible")
+    .filter(provider => (provider.providerType === "claude-compatible" || provider.providerType === "openai-compatible")
+      && (activeModelMode === "classic" || !isOpenClawModelTarget(provider)))
     .forEach(provider => {
       const option = document.createElement("option");
       option.value = provider.id;
@@ -7049,6 +7307,11 @@ function refreshSettingsControls(){
       modelProviderSelect.appendChild(option);
     });
   renderProvidersList();
+  renderOpenClawInstancesList();
+  settingsModal.dataset.mode = activeModelMode;
+  settingsModal.querySelectorAll("[data-settings-mode]").forEach(button => {
+    button.classList.toggle("active", button.dataset.settingsMode === activeModelMode);
+  });
   if(settingsPanel){
     settingsPanel.scrollTop = settingsScrollTop;
   }
@@ -7069,6 +7332,7 @@ async function loadModels(){
     refreshSettingsControls();
     writeSettingsCache(modelSettingsState);
     syncSettingsToServer(modelSettingsState);
+    loadOpenClawCatalog();
   }catch(err){
     console.log("load models failed", err);
   }
@@ -7097,11 +7361,17 @@ function cancelSettings(){
     modelSettingsState = deepClone(settingsSnapshot.settings);
     modelCategories = deepClone(settingsSnapshot.categories || []);
     modelProviders = deepClone(settingsSnapshot.providers || categoriesToProviders(modelCategories));
+    activeModelMode = settingsSnapshot.selected?.selectionMode === "modern" ? "modern" : "classic";
+    activeNewModeTarget = settingsSnapshot.selected?.newModeTarget === "openclaw" ? "openclaw" : "model";
     renderModelOptions();
-    modelSelect.value = hasModel(settingsSnapshot.selected?.selectedModel)
-      ? settingsSnapshot.selected.selectedModel
-      : (modelOptions[0]?.id || "");
+    const restoredModel = activeModelMode === "classic"
+      ? settingsSnapshot.selected?.classicSelectedModel || settingsSnapshot.selected?.selectedModel
+      : settingsSnapshot.selected?.modernSelectedModel || settingsSnapshot.selected?.selectedModel;
+    modelSelect.value = (activeModelMode === "classic" ? hasClassicModel(restoredModel) : hasModernModel(restoredModel))
+      ? restoredModel
+      : ((activeModelMode === "classic" ? classicModelOptions : modernModelOptions)[0]?.id || "");
     refreshSettingsControls();
+    syncModelModeUi();
   }
   clearProviderForm();
   clearModelForm();
@@ -7112,7 +7382,7 @@ function persistSettings(message, closeAfter){
   syncCatalogFromCategories();
   writeSettingsCache(modelSettingsState);
   renderModelOptions();
-  if(modelSelect.value && !hasModel(modelSelect.value)){
+  if(modelSelect.value && !hasClassicModel(modelSelect.value)){
     selectInitialModel();
   }
   refreshSettingsControls();
@@ -7832,7 +8102,9 @@ function renderProvidersList(){
         body.appendChild(empty);
       }
     }else{
-      (category.providers || []).forEach(provider => {
+      const visibleProviders = (category.providers || []).filter(provider =>
+        !isOpenClawModelTarget({ ...provider, provider:provider.providerId || provider.id }));
+      visibleProviders.forEach(provider => {
         const row = document.createElement("div");
         row.className = "providerRow";
         const rowHeader = document.createElement("div");
@@ -7875,7 +8147,7 @@ function renderProvidersList(){
         (provider.models || []).forEach(model => appendModelRow(row, provider.providerId, model));
         body.appendChild(row);
       });
-      if(!(category.providers || []).length){
+      if(!visibleProviders.length){
         const empty = document.createElement("div");
         empty.className = "providerMeta";
         empty.textContent = "暂无 provider";
@@ -8002,9 +8274,10 @@ function renderCategoryTop(section, categoryDef){
   const meta = document.createElement("span");
   meta.className = "modelCategoryMeta";
   const category = getCategory(categoryDef.type);
+  const visibleProviders = classicCategoryProviders(category);
   const count = categoryDef.type === "workers-hosted"
     ? (category.models || []).length
-    : (category.providers || []).reduce((sum, provider) => sum + (provider.models || []).length, 0);
+    : visibleProviders.reduce((sum, provider) => sum + (provider.models || []).length, 0);
   meta.textContent = categoryHint(categoryDef.type) + " / " + count + " models";
   titleWrap.appendChild(title);
   titleWrap.appendChild(meta);
@@ -8034,6 +8307,13 @@ function renderCategoryTop(section, categoryDef){
   section.appendChild(top);
 }
 
+function classicCategoryProviders(category){
+  const providers = category?.providers || [];
+  if(activeModelMode === "classic") return providers;
+  return providers.filter(provider =>
+    !isOpenClawModelTarget({ ...provider, provider:provider.providerId || provider.id }));
+}
+
 function renderProvidersList(){
   providersList.innerHTML = "";
   MODEL_CATEGORY_DEFS.forEach(categoryDef => {
@@ -8053,7 +8333,8 @@ function renderProvidersList(){
         body.appendChild(empty);
       }
     }else{
-      (category.providers || []).forEach(provider => {
+      const visibleProviders = classicCategoryProviders(category);
+      visibleProviders.forEach(provider => {
         const row = document.createElement("div");
         row.className = "providerRow";
         const rowHeader = document.createElement("div");
@@ -8079,7 +8360,7 @@ function renderProvidersList(){
         (provider.models || []).forEach(model => appendModelRow(row, provider.providerId, model));
         body.appendChild(row);
       });
-      if(!(category.providers || []).length){
+      if(!visibleProviders.length){
         const empty = document.createElement("div");
         empty.className = "providerMeta";
         empty.textContent = "暂无 provider";
@@ -8114,13 +8395,16 @@ function getSelectedProviderForRequest(modelId){
 }
 
 function modelProvidersForRequest(enableCloudflareDocumentAttachment){
+  const selectedModelId = arguments.length > 1 && arguments[1]
+    ? arguments[1]
+    : modelSelect.value;
   const providers = deepClone(modelProviders);
   if(!enableCloudflareDocumentAttachment){
     return providers;
   }
-  const selectedProviderId = getSelectedProviderForRequest(modelSelect.value);
+  const selectedProviderId = getSelectedProviderForRequest(selectedModelId);
   const provider = providers.find(item => item.id === selectedProviderId);
-  const model = provider?.models?.find(item => item.id === modelSelect.value || item.modelId === modelSelect.value);
+  const model = provider?.models?.find(item => item.id === selectedModelId || item.modelId === selectedModelId);
   if(model){
     model.capabilities = {
       text:true,
@@ -8133,6 +8417,12 @@ function modelProvidersForRequest(enableCloudflareDocumentAttachment){
 }
 
 function getOpenClawRuntimeIdForRequest(modelId){
+  if(typeof activeModelMode !== "undefined" && activeModelMode === "modern" && activeNewModeTarget === "openclaw"){
+    const selectedInstanceId = openClawProviderSelect?.value
+      || modelSettingsState?.openClawSelection?.instanceId
+      || "";
+    return openClawInstances().find(instance => instance.id === selectedInstanceId)?.runtimeId || "";
+  }
   const model = modelOptions.find(item => item.id === modelId);
   if(!isOpenClawModelTarget(model)){
     return "";
@@ -8185,6 +8475,332 @@ function isOpenClawModelTarget(model){
 
 function isSelectedOpenClawRequest(modelId){
   return isOpenClawModelTarget(modelOptions.find(item => item.id === modelId));
+}
+
+function openClawInstances(){
+  return normalizeOpenClawInstanceList(modelSettingsState?.openClawInstances);
+}
+
+function openClawInstance(instanceId){
+  return openClawInstances().find(instance => instance.id === instanceId) || null;
+}
+
+function openClawCarrierModel(instanceId, agentId){
+  const instance = openClawInstance(instanceId);
+  const provider = modelProviders.find(item => item.id === instance?.connectionId);
+  const exact = (provider?.models || []).find(model => {
+    const route = String(model.modelName || model.upstreamModelName || "");
+    return model.enabled !== false && route === "openclaw/" + agentId;
+  });
+  return exact || (provider?.models || []).find(model => model.enabled !== false) || null;
+}
+
+function isOpenClawAgentMode(){
+  if(typeof activeModelMode === "undefined"){
+    return isSelectedOpenClawRequest(modelSelect.value);
+  }
+  return activeModelMode === "modern" && activeNewModeTarget === "openclaw";
+}
+
+function currentOpenClawSelection(){
+  const instanceId = openClawProviderSelect.value || modelSettingsState?.openClawSelection?.instanceId || "";
+  return {
+    instanceId,
+    agentId:openClawAgentSelect.value || "",
+    baseModelId:openClawBaseModelSelect.value || ""
+  };
+}
+
+function currentRequestSelection(){
+  if(!isOpenClawAgentMode()){
+    return {
+      mode:"classic",
+      modelId:modelSelect.value,
+      providerId:getSelectedProviderForRequest(modelSelect.value),
+      instanceId:"",
+      agentId:"",
+      baseModelId:""
+    };
+  }
+  const selection = currentOpenClawSelection();
+  const instance = openClawInstance(selection.instanceId);
+  const carrier = openClawCarrierModel(selection.instanceId, selection.agentId);
+  return {
+    mode:"openclaw-agent",
+    modelId:carrier?.id || "",
+    providerId:instance?.connectionId || "",
+    instanceId:instance?.id || "",
+    agentId:selection.agentId,
+    baseModelId:selection.baseModelId
+  };
+}
+
+function effectiveOpenClawBaseModel(){
+  const selected = currentOpenClawSelection();
+  if(selected.baseModelId) return { id:selected.baseModelId, inherited:false };
+  const agent = seattleOpenClawCatalog?.agents?.find(item => item.id === selected.agentId);
+  return { id:agent?.defaultModel || "", inherited:true };
+}
+
+function updateEffectiveModelResult(){
+  if(!effectiveModelResult) return;
+  if(!isOpenClawAgentMode()){
+    const model = modelOptions.find(item => item.id === modelSelect.value);
+    effectiveModelResult.textContent = model
+      ? "实际生效：" + (activeModelMode === "classic" ? "经典模式" : "新模式 / 普通模型")
+        + " / " + (model.providerLabel || model.provider || "") + " / " + (model.label || model.id)
+      : "实际生效：" + (activeModelMode === "classic" ? "经典模式" : "新模式 / 普通模型") + " / 未选择模型";
+    return;
+  }
+  const selection = currentOpenClawSelection();
+  const instance = openClawInstance(selection.instanceId);
+  const base = effectiveOpenClawBaseModel();
+  effectiveModelResult.textContent = selection.agentId
+    ? "实际生效：新模式 / " + (instance?.label || selection.instanceId)
+      + " / openclaw/" + selection.agentId + " / "
+      + (base.id ? base.id + (base.inherited ? "（Agent 默认）" : "（显式覆盖）") : "默认模型未解析")
+    : "实际生效：新模式 / OpenClaw 实例 / 尚未选择 Agent";
+}
+
+function syncModelModeUi(){
+  modelModeSwitch?.querySelectorAll("[data-model-mode]").forEach(button => {
+    button.classList.toggle("active", button.dataset.modelMode === activeModelMode);
+  });
+  newModeTargetSwitch.hidden = activeModelMode !== "modern";
+  newModeTargetSwitch?.querySelectorAll("[data-new-mode-target]").forEach(button => {
+    button.classList.toggle("active", button.dataset.newModeTarget === activeNewModeTarget);
+  });
+  modelSelect.hidden = isOpenClawAgentMode();
+  openClawRouteControls.hidden = !isOpenClawAgentMode();
+  syncOpenClawRouteControls();
+  updateEffectiveModelResult();
+}
+
+function setModelSelectionMode(mode, { persist = true } = {}){
+  if(modelSettingsState){
+    if(activeModelMode === "classic") modelSettingsState.classicSelectedModel = modelSelect.value || "";
+    else modelSettingsState.modernSelectedModel = modelSelect.value || "";
+  }
+  activeModelMode = mode === "modern" ? "modern" : "classic";
+  if(modelSettingsState){
+    modelSettingsState.selectionMode = activeModelMode;
+    modelSettingsState.newModeTarget = activeNewModeTarget;
+  }
+  renderModelOptions();
+  const preferredModel = activeModelMode === "classic"
+    ? modelSettingsState?.classicSelectedModel
+    : modelSettingsState?.modernSelectedModel;
+  const visibleModels = activeModelMode === "classic" ? classicModelOptions : modernModelOptions;
+  modelSelect.value = visibleModels.some(model => model.id === preferredModel)
+    ? preferredModel
+    : (visibleModels[0]?.id || "");
+  syncModelModeUi();
+  syncOpenClawTaskVisibility();
+  if(persist && modelSettingsState){
+    writeSettingsCache(modelSettingsState);
+    syncSettingsToServer(modelSettingsState);
+  }
+}
+
+function setNewModeTarget(target, { persist = true } = {}){
+  if(activeModelMode !== "modern") return;
+  if(activeNewModeTarget === "model"){
+    modelSettingsState.modernSelectedModel = modelSelect.value || modelSettingsState.modernSelectedModel || "";
+  }
+  activeNewModeTarget = target === "openclaw" ? "openclaw" : "model";
+  modelSettingsState.newModeTarget = activeNewModeTarget;
+  if(activeNewModeTarget === "model"){
+    const preferred = modelSettingsState.modernSelectedModel;
+    modelSelect.value = hasModernModel(preferred) ? preferred : (modernModelOptions[0]?.id || "");
+  }
+  syncModelModeUi();
+  syncOpenClawTaskVisibility();
+  if(persist){
+    writeSettingsCache(modelSettingsState);
+    syncSettingsToServer(modelSettingsState);
+  }
+}
+
+function saveOpenClawRoutePreference(){
+  const providerId = openClawProviderSelect.value;
+  if(!providerId || !isOpenClawAgentMode()) return;
+  openClawRoutePreferences[providerId] = {
+    agentId:openClawAgentSelect.value,
+    baseModelId:openClawBaseModelSelect.value
+  };
+  modelSettingsState.openClawSelection = currentOpenClawSelection();
+  localStorage.setItem(OPENCLAW_ROUTE_PREFERENCES_KEY, JSON.stringify(openClawRoutePreferences));
+  writeSettingsCache(modelSettingsState);
+  syncSettingsToServer(modelSettingsState);
+  updateEffectiveModelResult();
+  refreshCodexRunControls();
+}
+
+function fillOpenClawSelect(select, entries, selected, emptyLabel){
+  select.innerHTML = "";
+  if(emptyLabel){
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = emptyLabel;
+    select.appendChild(option);
+  }
+  entries.forEach(entry => {
+    const option = document.createElement("option");
+    option.value = entry.id;
+    option.textContent = entry.name || entry.id;
+    select.appendChild(option);
+  });
+  if([...select.options].some(option => option.value === selected)) select.value = selected;
+}
+
+function syncOpenClawRouteControls(){
+  const visible = isOpenClawAgentMode();
+  openClawRouteControls.hidden = !visible;
+  if(!visible){ updateEffectiveModelResult(); return; }
+  const providers = openClawInstances();
+  const requestedProviderId = openClawProviderSelect.value
+    || modelSettingsState?.openClawSelection?.instanceId || providers[0]?.id || "";
+  fillOpenClawSelect(openClawProviderSelect, providers.map(provider => ({
+    id:provider.id, name:provider.label || provider.id
+  })), requestedProviderId);
+  const providerId = openClawProviderSelect.value;
+  const saved = openClawRoutePreferences[providerId] || {};
+  const instance = providers.find(item => item.id === providerId);
+  const provider = modelProviders.find(item => item.id === instance?.connectionId);
+  const fallbackAgents = (provider?.models || []).map(model => {
+    const route = String(model.modelName || model.upstreamModelName || "");
+    const id = route.startsWith("openclaw/") ? route.slice("openclaw/".length) : "";
+    return id ? { id, name:model.label || id } : null;
+  }).filter(Boolean);
+  const catalog = instance?.catalogId === "seattle" ? seattleOpenClawCatalog : null;
+  const agents = catalog?.agents?.length ? catalog.agents : fallbackAgents;
+  const stored = modelSettingsState?.openClawSelection || {};
+  fillOpenClawSelect(openClawAgentSelect, agents, saved.agentId || stored.agentId || agents[0]?.id || "");
+  const selectedAgent = agents.find(agent => agent.id === openClawAgentSelect.value);
+  const defaultModelLabel = selectedAgent?.defaultModel
+    ? "Agent 默认模型（" + selectedAgent.defaultModel + "）"
+    : "Agent 默认模型（未解析）";
+  fillOpenClawSelect(openClawBaseModelSelect,
+    (catalog?.models || []).filter(item => item.available !== false),
+    saved.baseModelId || stored.baseModelId || "", defaultModelLabel);
+  openClawBaseModelSelect.disabled = !catalog?.models?.length;
+  openClawCatalogRefresh.hidden = instance?.catalogId !== "seattle";
+  openClawCatalogStatus.textContent = instance?.catalogId === "seattle"
+    ? "Seattle 目录：" + seattleOpenClawCatalogState
+      + (catalog?.syncedAt ? " · " + new Date(catalog.syncedAt).toLocaleString() : "")
+    : "使用现有 Agent 配置";
+  updateEffectiveModelResult();
+}
+
+async function loadOpenClawCatalog(force = false){
+  openClawCatalogRefresh.disabled = true;
+  seattleOpenClawCatalogState = "同步中";
+  syncOpenClawRouteControls();
+  try{
+    const response = await fetch("/api/openclaw/catalog/seattle", { method:force ? "POST" : "GET" });
+    const data = await response.json();
+    seattleOpenClawCatalog = data.catalog || null;
+    seattleOpenClawCatalogState = data.status || "unavailable";
+  }catch(err){
+    seattleOpenClawCatalogState = "unavailable";
+  }finally{
+    openClawCatalogRefresh.disabled = false;
+    syncOpenClawRouteControls();
+  }
+}
+
+function renderOpenClawInstancesList(){
+  if(!openClawInstancesList) return;
+  openClawInstancesList.innerHTML = "";
+  const instances = openClawInstances();
+  instances.forEach(instance => {
+    const row = document.createElement("div");
+    row.className = "openClawInstanceRow";
+    const main = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = instance.label || instance.id;
+    const meta = document.createElement("div");
+    meta.className = "openClawInstanceMeta";
+    meta.textContent = instance.endpoint + " · Gateway 目录已配置 · 凭据仅在 Worker 服务端使用";
+    main.append(title, meta);
+    const actions = document.createElement("div");
+    actions.className = "openClawInstanceActions";
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "settingsBtn";
+    edit.textContent = "编辑";
+    edit.addEventListener("click", () => openOpenClawInstanceDialog(instance));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "settingsBtn";
+    remove.textContent = "删除连接";
+    remove.addEventListener("click", () => removeOpenClawInstanceConnection(instance.id));
+    actions.append(edit, remove);
+    row.append(main, actions);
+    openClawInstancesList.appendChild(row);
+  });
+  if(!instances.length){
+    openClawInstancesList.textContent = "尚未配置 OpenClaw 实例。";
+  }
+}
+
+function openOpenClawInstanceDialog(instance = null){
+  const dialog = createEditDialog();
+  dialog.title.textContent = instance ? "编辑 OpenClaw 实例" : "添加 OpenClaw 实例";
+  dialog.body.innerHTML = "";
+  const idInput = document.createElement("input");
+  idInput.value = instance?.id || "openclaw-seattle";
+  idInput.placeholder = "实例 ID";
+  idInput.disabled = Boolean(instance);
+  const labelInput = document.createElement("input");
+  labelInput.value = instance?.label || "Seattle OpenClaw";
+  labelInput.placeholder = "显示名称";
+  const targetSelect = document.createElement("select");
+  Object.entries(OPENCLAW_INSTANCE_TARGETS).forEach(([targetId, target]) => {
+    const option = document.createElement("option");
+    option.value = targetId;
+    option.textContent = targetId === "seattle" ? "Seattle（" + target.endpoint + "）" : targetId;
+    targetSelect.appendChild(option);
+  });
+  targetSelect.value = instance?.targetId || "seattle";
+  const note = document.createElement("div");
+  note.className = "openClawInstanceMeta";
+  note.textContent = "连接目标由服务端允许列表固定；浏览器不保存 Gateway 或 Cloudflare Access 凭据。";
+  dialog.body.append(idInput, labelInput, targetSelect, note);
+  dialog.deleteBtn.style.display = "none";
+  dialog.saveBtn.onclick = () => {
+    const id = idInput.value.trim();
+    const label = labelInput.value.trim();
+    const duplicate = openClawInstances().some(item => item.id === id && item.id !== instance?.id);
+    if(!id || !label || duplicate){
+      settingsSyncStatus.textContent = duplicate ? "实例 ID 已存在" : "请填写实例 ID 和显示名称";
+      return;
+    }
+    modelSettingsState.openClawInstances = upsertOpenClawInstanceList(modelSettingsState.openClawInstances, {
+      id,
+      label,
+      targetId:targetSelect.value
+    });
+    closeEditDialog();
+    persistSettings(instance ? "已更新 OpenClaw 实例" : "已添加 OpenClaw 实例", false);
+    syncOpenClawRouteControls();
+  };
+  dialog.overlay.classList.add("open");
+}
+
+function removeOpenClawInstanceConnection(instanceId){
+  modelSettingsState.openClawInstances = removeOpenClawInstanceFromList(
+    modelSettingsState.openClawInstances, instanceId);
+  delete openClawRoutePreferences[instanceId];
+  localStorage.setItem(OPENCLAW_ROUTE_PREFERENCES_KEY, JSON.stringify(openClawRoutePreferences));
+  if(modelSettingsState?.openClawSelection?.instanceId === instanceId){
+    modelSettingsState.openClawSelection = {};
+  }
+  if(!openClawInstances().length) activeNewModeTarget = "model";
+  modelSettingsState.newModeTarget = activeNewModeTarget;
+  persistSettings("已删除 OpenClaw 连接；远端 Gateway 未改动", false);
+  renderOpenClawInstancesList();
+  syncModelModeUi();
 }
 
 function selectedOpenClawRuntimeBinding(modelId = modelSelect.value){
@@ -8536,10 +9152,59 @@ function openClawTaskBannerDisclaimer(task){
     : "This is a Worker local record. It cannot confirm VPS-side progress or restore remote stream.";
 }
 
+function selectedCodexRunModel(){
+  const selection = typeof currentRequestSelection === "function"
+    ? currentRequestSelection() : { modelId:modelSelect.value };
+  const model = modelOptions.find(item => item.id === selection.modelId);
+  const provider = modelProviders.find(item => item.id === model?.provider);
+  const agentTarget = String(model?.modelName || "").trim();
+  const identity = [model?.id, model?.label, agentTarget,
+    openClawAgentSelect.value, openClawBaseModelSelect.value].join(" ");
+  return provider?.id?.startsWith("openclaw-")
+    && provider.openclawExecutionMode !== "bridge"
+    && model?.providerType === "openai-compatible"
+    && agentTarget.startsWith("openclaw/")
+    && /(?:^|[\\s/_-])(?:gpt|codex)(?:[\\s/_-]|$)/i.test(identity)
+    ? model : null;
+}
+
+function codexRunPreferenceKey(model){
+  return model.provider + ":" + model.id;
+}
+
+function refreshCodexRunControls(){
+  const model = selectedCodexRunModel();
+  codexRunControls.hidden = !model;
+  if(!model){
+    return;
+  }
+  const saved = codexRunPreferences[codexRunPreferenceKey(model)] || {};
+  codexEffortSelect.value = CODEX_EFFORT_OPTIONS.includes(saved.effort) ? saved.effort : "medium";
+  codexSpeedSelect.value = CODEX_SPEED_OPTIONS.includes(saved.speed) ? saved.speed : "standard";
+}
+
+function selectedCodexRunControls(){
+  return selectedCodexRunModel() ? {
+    effort:codexEffortSelect.value,
+    speed:codexSpeedSelect.value
+  } : undefined;
+}
+
+function saveCodexRunControls(){
+  const model = selectedCodexRunModel();
+  if(!model){
+    return;
+  }
+  codexRunPreferences[codexRunPreferenceKey(model)] = selectedCodexRunControls();
+  localStorage.setItem(CODEX_RUN_PREFERENCES_KEY, JSON.stringify(codexRunPreferences));
+}
+
 function syncOpenClawTaskVisibility(){
+  if(typeof openClawRouteControls !== "undefined") syncOpenClawRouteControls();
+  if(typeof refreshCodexRunControls !== "undefined") refreshCodexRunControls();
   const hasConversationTask = Boolean(currentConversationId) && [...openClawTasks, activeOpenClawTask]
     .some(task => task?.id && openClawTaskConversationId(task) === currentConversationId);
-  const visible = isSelectedOpenClawRequest(modelSelect.value) || hasConversationTask;
+  const visible = isOpenClawAgentMode() || isSelectedOpenClawRequest(modelSelect.value) || hasConversationTask;
   openClawTaskHistoryToggle.hidden = !visible;
   if(!visible){
     openClawTaskHistoryPanel.hidden = true;
@@ -10947,6 +11612,8 @@ chat.addEventListener("click", event => {
   handleCopyClick(event);
 });
 modelSelect.addEventListener("change", () => {
+  if(activeModelMode === "classic") modelSettingsState.classicSelectedModel = modelSelect.value;
+  else modelSettingsState.modernSelectedModel = modelSelect.value;
   syncOpenClawTaskVisibility();
   if(modelSettingsState?.rememberLastModel && modelSelect.value){
     modelSettingsState.lastModel = modelSelect.value;
@@ -10954,7 +11621,36 @@ modelSelect.addEventListener("change", () => {
     syncSettingsToServer(modelSettingsState);
   }
   syncFileModeSelector();
+  updateEffectiveModelResult();
 });
+modelModeSwitch.addEventListener("click", event => {
+  const mode = event.target?.dataset?.modelMode;
+  if(mode) setModelSelectionMode(mode);
+});
+newModeTargetSwitch.addEventListener("click", event => {
+  const target = event.target?.dataset?.newModeTarget;
+  if(target) setNewModeTarget(target);
+});
+settingsModal.addEventListener("click", event => {
+  const mode = event.target?.dataset?.settingsMode;
+  if(!mode) return;
+  setModelSelectionMode(mode, { persist:false });
+  settingsModal.dataset.mode = activeModelMode;
+  refreshSettingsControls();
+});
+openClawProviderSelect.addEventListener("change", () => {
+  syncOpenClawRouteControls();
+  saveOpenClawRoutePreference();
+});
+openClawAgentSelect.addEventListener("change", () => {
+  saveOpenClawRoutePreference();
+  syncOpenClawRouteControls();
+});
+openClawBaseModelSelect.addEventListener("change", saveOpenClawRoutePreference);
+openClawCatalogRefresh.addEventListener("click", () => loadOpenClawCatalog(true));
+addOpenClawInstanceBtn.addEventListener("click", () => openOpenClawInstanceDialog());
+codexEffortSelect.addEventListener("change", saveCodexRunControls);
+codexSpeedSelect.addEventListener("change", saveCodexRunControls);
 modelSettingsBtn.addEventListener("click", openSettings);
 closeSettingsBtn.addEventListener("click", closeSettings);
 cancelSettingsBtn.addEventListener("click", cancelSettings);
@@ -12290,7 +12986,9 @@ async function sendMessage(){
   input.value = "";
   resetInputHeight();
 
-  const isOpenClawRequest = isSelectedOpenClawRequest(modelSelect.value);
+  const requestSelection = currentRequestSelection();
+  const isOpenClawRequest = requestSelection.mode === "openclaw-agent"
+    || isSelectedOpenClawRequest(requestSelection.modelId);
   if(openClawRepeatAllowed){
     setContextStatus("Confirmed: started a new OpenClaw request.");
   }
@@ -12325,7 +13023,8 @@ async function sendMessage(){
 
   const retrievalFileIdsToSend = selectedFileIds;
   const conversationAttachmentIdsToSend = conversationAttachmentsToSend.map(item => item.id).filter(Boolean);
-  const providersForRequest = modelProvidersForRequest(Boolean(conversationAttachmentIdsToSend.length));
+  const providersForRequest = modelProvidersForRequest(
+    Boolean(conversationAttachmentIdsToSend.length), requestSelection.modelId);
 
   if(fileToSend && fileTextToSend){
     aiDiv.innerHTML =
@@ -12339,7 +13038,7 @@ async function sendMessage(){
 
   try{
     const fallbackModel = modelSettingsState?.fallbackModels?.[0] || "";
-    let selectedModelConfig = getModelConfigForRequest(modelSelect.value);
+    let selectedModelConfig = getModelConfigForRequest(requestSelection.modelId);
     if(conversationAttachmentIdsToSend.length && selectedModelConfig){
       selectedModelConfig = {
         ...selectedModelConfig,
@@ -12374,8 +13073,13 @@ async function sendMessage(){
             content:userMessageForRequest
           }
         ],
-        model:modelSelect.value,
-        provider:getSelectedProviderForRequest(modelSelect.value),
+        model:requestSelection.modelId,
+        provider:requestSelection.providerId,
+        selection_mode:requestSelection.mode,
+        instance_id:isOpenClawRequest ? requestSelection.instanceId || undefined : undefined,
+        agent_id:isOpenClawRequest ? requestSelection.agentId || undefined : undefined,
+        base_model_id:isOpenClawRequest ? requestSelection.baseModelId || undefined : undefined,
+        codexControls:selectedCodexRunControls(),
         runtime_id:selectedOpenClawRuntimeId || undefined,
         providers:providersForRequest,
         autoFallbackEnabled:Boolean(modelSettingsState?.fallbackEnabled),

@@ -1,6 +1,15 @@
 import { jsonResponse } from "../utils/response.js";
 
 const MODEL_SETTINGS_KEY = "model_settings";
+const OPENCLAW_INSTANCE_TARGETS = Object.freeze({
+  seattle: Object.freeze({
+    connectionId: "openclaw-seattle",
+    endpoint: "https://act.hnsnowground.cfd/v1",
+    runtimeId: "seattle-openclaw",
+    catalogId: "seattle"
+  })
+});
+const OPENCLAW_INSTANCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/;
 
 function ensureSettingsDb(env) {
   if (!env.DB) {
@@ -50,6 +59,51 @@ function isOpenClawProvider(provider) {
     provider?.apiBase
   ].map(value => String(value || "").trim().toLowerCase()).filter(Boolean);
   return values.some(value => value === "openclaw" || value.startsWith("openclaw-") || value.includes("openclaw"));
+}
+
+export function normalizeOpenClawInstances(instances, { providers = [], inferDefault = false } = {}) {
+  const rows = Array.isArray(instances) ? instances : [];
+  const normalized = [];
+  const seenIds = new Set();
+  rows.forEach(instance => {
+    const id = String(instance?.id || "").trim();
+    const targetId = String(instance?.targetId || instance?.target || "").trim().toLowerCase();
+    const target = OPENCLAW_INSTANCE_TARGETS[targetId];
+    if (!OPENCLAW_INSTANCE_ID_PATTERN.test(id) || !target || seenIds.has(id)) return;
+    seenIds.add(id);
+    normalized.push({
+      id,
+      label: String(instance?.label || instance?.displayName || id).trim().slice(0, 120) || id,
+      targetId,
+      connectionId: target.connectionId,
+      endpoint: target.endpoint,
+      runtimeId: target.runtimeId,
+      catalogId: target.catalogId
+    });
+  });
+  if (!normalized.length && inferDefault && providers.some(provider => normalizeProviderId(provider) === "openclaw-seattle")) {
+    normalized.push({
+      id: "openclaw-seattle",
+      label: "Seattle OpenClaw",
+      targetId: "seattle",
+      ...OPENCLAW_INSTANCE_TARGETS.seattle
+    });
+  }
+  return normalized;
+}
+
+export function upsertOpenClawInstanceSettings(instances, draft) {
+  const id = String(draft?.id || "").trim();
+  return normalizeOpenClawInstances([
+    ...(Array.isArray(instances) ? instances : []).filter(instance => String(instance?.id || "").trim() !== id),
+    draft
+  ]);
+}
+
+export function removeOpenClawInstanceSettings(instances, instanceId) {
+  const id = String(instanceId || "").trim();
+  return normalizeOpenClawInstances((Array.isArray(instances) ? instances : [])
+    .filter(instance => String(instance?.id || "").trim() !== id));
 }
 
 function normalizeOpenClawExecutionMode(provider) {
@@ -292,6 +346,24 @@ export function normalizeModelSettings(settings) {
   const providers = sourceProviders(normalized);
   normalized.showPerMessageModelInfo = Boolean(normalized.showPerMessageModelInfo);
   normalized.autoArchiveDays = normalizeAutoArchiveDays(normalized.autoArchiveDays);
+  const legacySelected = String(normalized.lastModel || normalized.selectedModel || normalized.defaultModel || "");
+  const previousAgentMode = normalized.selectionMode === "openclaw-agent";
+  normalized.selectionMode = normalized.selectionMode === "modern" || previousAgentMode ? "modern" : "classic";
+  normalized.newModeTarget = normalized.newModeTarget === "openclaw" || previousAgentMode ? "openclaw" : "model";
+  normalized.classicSelectedModel = String(normalized.classicSelectedModel || legacySelected).slice(0, 200);
+  normalized.modernSelectedModel = String(normalized.modernSelectedModel
+    || (!legacySelected.startsWith("openclaw-") ? legacySelected : "")).slice(0, 200);
+  const openClawSelection = isObject(normalized.openClawSelection) ? normalized.openClawSelection : {};
+  normalized.openClawSelection = {
+    instanceId: String(openClawSelection.instanceId || "").slice(0, 160),
+    agentId: String(openClawSelection.agentId || "").slice(0, 160),
+    baseModelId: String(openClawSelection.baseModelId || "").slice(0, 160)
+  };
+  const hasExplicitInstances = Object.prototype.hasOwnProperty.call(normalized, "openClawInstances");
+  normalized.openClawInstances = normalizeOpenClawInstances(normalized.openClawInstances, {
+    providers,
+    inferDefault: !hasExplicitInstances
+  });
 
   if (providers.length) {
     normalized.providers = providers;

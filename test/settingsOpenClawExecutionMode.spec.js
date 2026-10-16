@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { buildModelProviderCatalog } from "../src/api/chat.js";
-import { mergeModelSettings, normalizeModelSettings } from "../src/api/settings.js";
+import {
+  mergeModelSettings,
+  normalizeModelSettings,
+  normalizeOpenClawInstances,
+  removeOpenClawInstanceSettings,
+  upsertOpenClawInstanceSettings
+} from "../src/api/settings.js";
 
 const openClawModel = {
   id: "openclaw-seattle-glm51",
@@ -47,6 +53,73 @@ async function catalogProvider(savedProviders, requestProviders = [], customMode
 }
 
 describe("OpenClaw execution mode settings persistence", () => {
+  it("round-trips classic and Agent-mode selections without rewriting legacy model fields", () => {
+    const input = {
+      defaultModel: "glm-5.2",
+      lastModel: "openclaw-seattle-glm51",
+      selectionMode: "openclaw-agent",
+      classicSelectedModel: "glm-5.2",
+      openClawSelection: {
+        instanceId: "openclaw-seattle",
+        agentId: "glm51",
+        baseModelId: "zai/glm-5.1"
+      },
+      providers: [provider("openclaw-seattle", "legacy")]
+    };
+    const settings = normalizeModelSettings(input);
+    expect(settings.selectionMode).toBe("modern");
+    expect(settings.newModeTarget).toBe("openclaw");
+    expect(settings.classicSelectedModel).toBe("glm-5.2");
+    expect(settings.openClawSelection).toEqual(input.openClawSelection);
+    expect(settings.lastModel).toBe("openclaw-seattle-glm51");
+
+    const classic = normalizeModelSettings({ ...input, selectionMode: "classic" });
+    expect(classic.selectionMode).toBe("classic");
+    expect(classic.openClawSelection).toEqual(input.openClawSelection);
+  });
+
+  it("keeps classic OpenClaw model data while storing modern selections separately", () => {
+    const legacyProvider = provider("openclaw-seattle", "legacy");
+    const settings = normalizeModelSettings({
+      selectionMode: "modern",
+      newModeTarget: "model",
+      classicSelectedModel: openClawModel.id,
+      modernSelectedModel: "workers-model",
+      providers: [legacyProvider, provider("workers-ai", undefined, [{
+        id: "workers-model", label: "Workers model", modelName: "workers-model", enabled: true
+      }])]
+    });
+
+    expect(settings.classicSelectedModel).toBe(openClawModel.id);
+    expect(settings.modernSelectedModel).toBe("workers-model");
+    expect(settings.providers.find(item => item.id === "openclaw-seattle")?.models).toEqual([openClawModel]);
+  });
+
+  it("adds, edits, and removes instances without accepting browser supplied targets", () => {
+    const added = upsertOpenClawInstanceSettings([], {
+      id: "my-seattle",
+      label: "Seattle A",
+      targetId: "seattle",
+      endpoint: "http://127.0.0.1/private",
+      connectionId: "attacker"
+    });
+    expect(added).toEqual([expect.objectContaining({
+      id: "my-seattle",
+      label: "Seattle A",
+      targetId: "seattle",
+      endpoint: "https://act.hnsnowground.cfd/v1",
+      connectionId: "openclaw-seattle"
+    })]);
+
+    const edited = upsertOpenClawInstanceSettings(added, {
+      id: "my-seattle", label: "Seattle B", targetId: "seattle"
+    });
+    expect(edited).toHaveLength(1);
+    expect(edited[0].label).toBe("Seattle B");
+    expect(removeOpenClawInstanceSettings(edited, "my-seattle")).toEqual([]);
+    expect(normalizeOpenClawInstances([{ id: "bad", targetId: "private-lan" }])).toEqual([]);
+  });
+
   it("persists the per-message model info display preference", () => {
     const settings = normalizeModelSettings({
       showPerMessageModelInfo: true,

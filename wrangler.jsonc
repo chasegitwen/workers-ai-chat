@@ -29,7 +29,11 @@
 			"binding": "FILES_BUCKET",
 			"bucket_name": "workers-ai-files"
 		}
-	]
+	],
+	"vars": {
+		"OPENCLAW_SEATTLE_GATEWAY_WS_URL": "https://act.hnsnowground.cfd/gateway-ws/catalog",
+		"OPENCLAW_SEATTLE_DISABLED_MODEL_PROVIDERS": "openai"
+	}
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

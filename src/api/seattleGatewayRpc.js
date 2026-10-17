@@ -112,6 +112,9 @@ export async function readSeattleGatewayCatalog(env, { refreshModels = false } =
     let settled = false;
     let stage = "challenge";
     let agents = null;
+    let firstAgentId = "";
+    const pendingModelRequests = new Map();
+    const modelsByAgent = {};
     const timer = setTimeout(() => fail("gateway_timeout"), 30000);
     function finish(value) {
       if (settled) return;
@@ -152,14 +155,29 @@ export async function readSeattleGatewayCatalog(env, { refreshModels = false } =
       if (stage === "agents" && frame.type === "res" && frame.id === "agents") {
         if (!frame.ok) { fail("agents_list_failed"); return; }
         agents = frame.payload;
-        socket.send(JSON.stringify({ type: "req", id: "models", method: "models.list",
-          params: { view: "configured", ...(refreshModels ? { refresh: true } : {}) } }));
+        const agentRows = Array.isArray(agents) ? agents : (Array.isArray(agents?.agents) ? agents.agents : []);
+        const agentIds = [...new Set(agentRows
+          .map(row => String(row?.id || row?.agentId || "").trim())
+          .filter(Boolean))];
+        if (!agentIds.length) { fail("agents_list_empty"); return; }
+        firstAgentId = agentIds[0];
         stage = "models";
+        agentIds.forEach((agentId, index) => {
+          const requestId = "models-" + index;
+          pendingModelRequests.set(requestId, agentId);
+          socket.send(JSON.stringify({ type: "req", id: requestId, method: "models.list",
+            params: { agentId, view: "configured", ...(refreshModels ? { refresh: true } : {}) } }));
+        });
         return;
       }
-      if (stage === "models" && frame.type === "res" && frame.id === "models") {
+      if (stage === "models" && frame.type === "res" && pendingModelRequests.has(frame.id)) {
         if (!frame.ok) { fail("models_list_failed"); return; }
-        finish({ agents, models: frame.payload });
+        const agentId = pendingModelRequests.get(frame.id);
+        pendingModelRequests.delete(frame.id);
+        modelsByAgent[agentId] = frame.payload;
+        if (!pendingModelRequests.size) {
+          finish({ agents, models: modelsByAgent[firstAgentId], modelsByAgent });
+        }
       }
     });
     socket.addEventListener("close", () => fail("gateway_closed"));

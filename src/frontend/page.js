@@ -8829,6 +8829,13 @@ function fillOpenClawSelect(select, entries, selected, emptyLabel){
   if([...select.options].some(option => option.value === selected)) select.value = selected;
 }
 
+function openClawModelsForAgent(catalog, agentId){
+  const scoped = catalog?.modelsByAgent?.[agentId];
+  return Array.isArray(scoped)
+    ? scoped
+    : (catalog?.providerId === "openclaw-seattle" ? [] : (catalog?.models || []));
+}
+
 function syncOpenClawRouteControls(){
   const visible = isOpenClawAgentMode();
   openClawRouteControls.hidden = !visible;
@@ -8853,13 +8860,14 @@ function syncOpenClawRouteControls(){
   const stored = modelSettingsState?.openClawSelection || {};
   fillOpenClawSelect(openClawAgentSelect, agents, saved.agentId || stored.agentId || agents[0]?.id || "");
   const selectedAgent = agents.find(agent => agent.id === openClawAgentSelect.value);
+  const agentModels = openClawModelsForAgent(catalog, selectedAgent?.id || "");
   const defaultModelLabel = selectedAgent?.defaultModel
     ? "Agent 默认模型（" + selectedAgent.defaultModel + "）"
     : "Agent 默认模型（未解析）";
   fillOpenClawSelect(openClawBaseModelSelect,
-    (catalog?.models || []).filter(item => item.available !== false),
+    agentModels.filter(item => item.available !== false),
     saved.baseModelId || stored.baseModelId || "", defaultModelLabel);
-  openClawBaseModelSelect.disabled = !catalog?.models?.length;
+  openClawBaseModelSelect.disabled = !agentModels.length;
   openClawCatalogRefresh.hidden = !instance?.catalogId;
   const instanceName = instance?.catalogId === "hillsboro" ? "Hillsboro" : "Seattle";
   openClawCatalogStatus.textContent = instance?.catalogId
@@ -11872,6 +11880,7 @@ openClawProviderSelect.addEventListener("change", () => {
   if(instance?.catalogId === "seattle" && !seattleOpenClawCatalog) loadOpenClawCatalog(false, "seattle");
 });
 openClawAgentSelect.addEventListener("change", () => {
+  openClawBaseModelSelect.value = "";
   saveOpenClawRoutePreference();
   syncOpenClawRouteControls();
 });

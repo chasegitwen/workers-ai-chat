@@ -37,9 +37,13 @@ function gatewayResponse(payload) {
   return { type: "res", ok: true, payload };
 }
 
-function gatewaySocket(calls, scopes = ["operator.read"]) {
+function gatewaySocket(calls, scopes = ["operator.read"], catalog = {}) {
   const listeners = {};
   const emit = (type, frame) => queueMicrotask(() => listeners[type]?.({ data: JSON.stringify(frame) }));
+  const agents = catalog.agents || [{ id: "research", name: "Research" }];
+  const modelsByAgent = catalog.modelsByAgent || {
+    research: [{ id: "openai/gpt-6-astra", name: "Astra" }]
+  };
   return {
     accept() {
       emit("message", { type: "event", event: "connect.challenge", payload: { nonce: "nonce", ts: Date.now() } });
@@ -49,8 +53,10 @@ function gatewaySocket(calls, scopes = ["operator.read"]) {
       const frame = JSON.parse(text);
       calls.push(frame);
       if (frame.method === "connect") emit("message", { ...gatewayResponse({ type: "hello-ok", auth: { scopes } }), id: "connect" });
-      if (frame.method === "agents.list") emit("message", { ...gatewayResponse({ agents: [{ id: "research", name: "Research" }] }), id: "agents" });
-      if (frame.method === "models.list") emit("message", { ...gatewayResponse({ models: [{ id: "openai/gpt-6-astra", name: "Astra" }] }), id: "models" });
+      if (frame.method === "agents.list") emit("message", { ...gatewayResponse({ agents }), id: "agents" });
+      if (frame.method === "models.list") emit("message", {
+        ...gatewayResponse({ models: modelsByAgent[frame.params?.agentId] || [] }), id: frame.id
+      });
     },
     close() {}
   };
@@ -65,6 +71,7 @@ describe("Seattle OpenClaw catalog", () => {
     );
     expect(catalog.agents).toEqual([{ id: "research", name: "Research", defaultModel: "openai/gpt-6-astra" }]);
     expect(catalog.models).toEqual([{ id: "openai/gpt-6-astra", name: "Astra", available: true }]);
+    expect(catalog.modelsByAgent.research).toEqual(catalog.models);
     expect(JSON.stringify(catalog)).not.toContain("hidden");
   });
 
@@ -93,13 +100,50 @@ describe("Seattle OpenClaw catalog", () => {
       expect(JSON.stringify(body)).not.toContain("private-");
       expect(first.headers.get("Cache-Control")).toBe("no-store");
       expect(calls.map(call => call.method)).toEqual(["connect", "agents.list", "models.list"]);
-      expect(calls[2].params).toEqual({ view: "configured", refresh: true });
+      expect(calls[2].params).toEqual({ agentId: "research", view: "configured", refresh: true });
       expect(requests[0].headers["CF-Access-Client-Id"]).toBe("private-client");
       expect(requests[0].headers["CF-Access-Client-Secret"]).toBe("private-secret");
       expect(requests[0].url).toBe("https://act.hnsnowground.cfd/gateway-ws/catalog");
       expect(requests[0].headers.Authorization).toBeUndefined();
       await handleOpenClawCatalog(new Request(url), env, url);
       expect(requests).toHaveLength(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("fetches and maps the configured catalog separately for every Seattle Agent", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls = [];
+    globalThis.fetch = vi.fn(async () => ({ webSocket: gatewaySocket(calls, ["operator.read"], {
+      agents: [
+        { id: "main", name: "Main", model: "zai/glm-5.2" },
+        { id: "kimi", name: "Kimi", model: "kimi/kimi-for-coding" }
+      ],
+      modelsByAgent: {
+        main: [
+          { id: "glm-5.2", provider: "zai", name: "GLM-5.2" },
+          { id: "glm-5.3", provider: "zai", name: "GLM-5.3" }
+        ],
+        kimi: [{ id: "kimi-for-coding", provider: "kimi", name: "Kimi for Coding" }]
+      }
+    }) }));
+    const env = {
+      DB: fakeDb(), SESSION_SECRET: "session-secret", OPENCLAW_SEATTLE_API_KEY: "secret",
+      ACT_CF_ACCESS_CLIENT_ID: "client", ACT_CF_ACCESS_CLIENT_SECRET: "client-secret"
+    };
+    const url = new URL("https://app.example/api/openclaw/catalog/seattle");
+    try {
+      const response = await handleOpenClawCatalog(new Request(url, { method: "POST" }), env, url);
+      const body = await response.json();
+      expect(calls.filter(call => call.method === "models.list").map(call => call.params)).toEqual([
+        { agentId: "main", view: "configured", refresh: true },
+        { agentId: "kimi", view: "configured", refresh: true }
+      ]);
+      expect(body.catalog.modelsByAgent.main.map(model => model.id)).toEqual(["zai/glm-5.2", "zai/glm-5.3"]);
+      expect(body.catalog.modelsByAgent.kimi.map(model => model.id)).toEqual(["kimi/kimi-for-coding"]);
+      expect(await validateOpenClawCatalogSelection(env, "kimi", "kimi/kimi-for-coding")).toBe(true);
+      expect(await validateOpenClawCatalogSelection(env, "kimi", "zai/glm-5.2")).toBe(false);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -125,6 +169,31 @@ describe("Seattle OpenClaw catalog", () => {
     }
   });
 
+  it("refreshes a legacy unscoped Seattle cache instead of reusing its global model list", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls = [];
+    globalThis.fetch = vi.fn(async () => ({ webSocket: gatewaySocket(calls) }));
+    const env = {
+      DB: fakeDb({
+        openclaw_catalog_seattle_v1: JSON.stringify({
+          providerId: "openclaw-seattle", syncedAt: Date.now(),
+          agents: [{ id: "research", defaultModel: "openai/gpt-6-astra" }],
+          models: [{ id: "zai/glm-5.2", available: true }]
+        })
+      }),
+      SESSION_SECRET: "session-secret", OPENCLAW_SEATTLE_API_KEY: "secret",
+      ACT_CF_ACCESS_CLIENT_ID: "client", ACT_CF_ACCESS_CLIENT_SECRET: "client-secret"
+    };
+    const url = new URL("https://app.example/api/openclaw/catalog/seattle");
+    try {
+      const body = await (await handleOpenClawCatalog(new Request(url), env, url)).json();
+      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+      expect(body.catalog.modelsByAgent.research.map(model => model.id)).toEqual(["openai/gpt-6-astra"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("marks disabled Seattle providers unavailable even in a cached catalog", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async () => ({ webSocket: gatewaySocket([]) }));
@@ -136,6 +205,7 @@ describe("Seattle OpenClaw catalog", () => {
       await handleOpenClawCatalog(new Request(url, { method: "POST" }), env, url);
       const body = await (await handleOpenClawCatalog(new Request(url), env, url)).json();
       expect(body.catalog.models[0]).toMatchObject({ id: "openai/gpt-6-astra", available: false });
+      expect(body.catalog.modelsByAgent.research[0]).toMatchObject({ id: "openai/gpt-6-astra", available: false });
       expect(await validateOpenClawCatalogSelection(env, "research", "openai/gpt-6-astra")).toBe(false);
       expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     } finally {
@@ -201,6 +271,23 @@ describe("Seattle OpenClaw catalog", () => {
     expect(page).toContain('idInput.value = "openclaw-" + targetSelect.value');
     expect(page).toContain('targetSelect.value === "seattle" ? "Seattle OpenClaw" : "Hillsboro OpenClaw"');
     expect(page).toContain("instance_id:isOpenClawRequest ? requestSelection.instanceId");
+    const script = page.match(/<script>([\s\S]*)<\/script>/)?.[1] || "";
+    const declaration = script.match(/function openClawModelsForAgent\([\s\S]*?\n\}/)?.[0] || "";
+    const modelsForAgent = new Function(declaration + "; return openClawModelsForAgent;")();
+    const scopedCatalog = {
+      models: [{ id: "zai/glm-5.2" }, { id: "kimi/kimi-for-coding" }],
+      modelsByAgent: {
+        main: [{ id: "zai/glm-5.2" }],
+        kimi: [{ id: "kimi/kimi-for-coding" }]
+      }
+    };
+    expect(modelsForAgent(scopedCatalog, "main").map(model => model.id)).toEqual(["zai/glm-5.2"]);
+    expect(modelsForAgent(scopedCatalog, "kimi").map(model => model.id)).toEqual(["kimi/kimi-for-coding"]);
+    expect(modelsForAgent(scopedCatalog, "main").map(model => model.id)).toEqual(["zai/glm-5.2"]);
+    expect(modelsForAgent({ providerId:"openclaw-seattle", models:scopedCatalog.models }, "kimi")).toEqual([]);
+    expect(modelsForAgent({ providerId:"openclaw-hillsboro", models:scopedCatalog.models }, "kimi")
+      .map(model => model.id)).toEqual(["zai/glm-5.2", "kimi/kimi-for-coding"]);
+    expect(page).toContain('openClawBaseModelSelect.value = "";');
     expect(() => new Function(page.match(/<script>([\s\S]*)<\/script>/)?.[1] || "")).not.toThrow();
   });
 
@@ -314,7 +401,11 @@ describe("Legacy SSE per-turn OpenClaw routing", () => {
     const catalog = {
       providerId: "openclaw-seattle", syncedAt: Date.now(),
       agents: [{ id: "main", defaultModel: "zai/glm-5.2" }, { id: "glm51", defaultModel: "zai/glm-5.1" }],
-      models: [{ id: "zai/glm-5.2", available: true }, { id: "zai/glm-5.1", available: true }]
+      models: [{ id: "zai/glm-5.2", available: true }, { id: "zai/glm-5.1", available: true }],
+      modelsByAgent: {
+        main: [{ id: "zai/glm-5.2", available: true }],
+        glm51: [{ id: "zai/glm-5.1", available: true }]
+      }
     };
     const env = {
       DB: fakeDb({

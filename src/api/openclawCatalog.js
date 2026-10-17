@@ -22,12 +22,17 @@ function applyAvailabilityOverrides(catalog, env) {
   const disabled = new Set(String(env.OPENCLAW_SEATTLE_DISABLED_MODEL_PROVIDERS || "")
     .split(",").map(value => value.trim().toLowerCase()).filter(Boolean));
   if (!disabled.size) return catalog;
+  const applyToModels = models => (Array.isArray(models) ? models : []).map(model => ({
+    ...model,
+    available: model.available !== false && !disabled.has(model.id.split("/")[0].toLowerCase())
+  }));
   return {
     ...catalog,
-    models: catalog.models.map(model => ({
-      ...model,
-      available: model.available !== false && !disabled.has(model.id.split("/")[0].toLowerCase())
-    }))
+    models: applyToModels(catalog.models),
+    ...(catalog.modelsByAgent ? {
+      modelsByAgent: Object.fromEntries(Object.entries(catalog.modelsByAgent)
+        .map(([agentId, models]) => [agentId, applyToModels(models)]))
+    } : {})
   };
 }
 
@@ -36,17 +41,8 @@ function rows(payload, key) {
   return Array.isArray(payload?.[key]) ? payload[key] : [];
 }
 
-export function normalizeOpenClawCatalog(agentPayload, modelPayload, syncedAt = Date.now()) {
-  const agents = rows(agentPayload, "agents").map(row => {
-    const id = safeAgentId(row?.id || row?.agentId);
-    if (!id || row?.kind === "system") return null;
-    return {
-      id,
-      name: String(row?.name || row?.displayName || id).slice(0, 120),
-      defaultModel: safeId(row?.model?.primary || row?.model?.id || row?.model || row?.effectiveModel)
-    };
-  }).filter(Boolean);
-  const models = rows(modelPayload, "models").map(row => {
+function normalizeModels(modelPayload) {
+  return rows(modelPayload, "models").map(row => {
     const rawId = safeId(row?.id || row?.modelId);
     const provider = safeId(row?.provider || row?.providerId);
     const id = rawId.includes("/") ? rawId : (provider && rawId ? provider + "/" + rawId : "");
@@ -57,10 +53,34 @@ export function normalizeOpenClawCatalog(agentPayload, modelPayload, syncedAt = 
       available: row?.available !== false
     };
   }).filter(Boolean);
+}
+
+export function normalizeOpenClawCatalog(agentPayload, modelPayload, syncedAt = Date.now(), agentModelPayloads = {}) {
+  const agents = rows(agentPayload, "agents").map(row => {
+    const id = safeAgentId(row?.id || row?.agentId);
+    if (!id || row?.kind === "system") return null;
+    return {
+      id,
+      name: String(row?.name || row?.displayName || id).slice(0, 120),
+      defaultModel: safeId(row?.model?.primary || row?.model?.id || row?.model || row?.effectiveModel)
+    };
+  }).filter(Boolean);
+  const fallbackModels = normalizeModels(modelPayload);
+  const modelsByAgent = Object.fromEntries(agents.map(agent => {
+    const scopedPayload = Object.prototype.hasOwnProperty.call(agentModelPayloads || {}, agent.id)
+      ? agentModelPayloads[agent.id]
+      : modelPayload;
+    return [agent.id, [...new Map(normalizeModels(scopedPayload).map(model => [model.id, model])).values()]];
+  }));
+  const models = [...new Map([
+    ...fallbackModels,
+    ...Object.values(modelsByAgent).flat()
+  ].map(model => [model.id, model])).values()];
   return {
     providerId: "openclaw-seattle",
     agents: [...new Map(agents.map(row => [row.id, row])).values()],
     models: [...new Map(models.map(row => [row.id, row])).values()],
+    modelsByAgent,
     syncedAt
   };
 }
@@ -84,11 +104,16 @@ async function writeCache(env, catalog) {
   ).bind(CACHE_KEY, JSON.stringify(catalog), catalog.syncedAt).run();
 }
 
+function hasAgentScopedModels(catalog) {
+  return Boolean(catalog?.agents?.length)
+    && catalog.agents.every(agent => Array.isArray(catalog.modelsByAgent?.[agent.id]));
+}
+
 async function refresh(env, refreshModels = false) {
   if (!pendingRefresh) {
     pendingRefresh = (async () => {
-      const { agents, models } = await readSeattleGatewayCatalog(env, { refreshModels });
-      const catalog = normalizeOpenClawCatalog(agents, models);
+      const { agents, models, modelsByAgent } = await readSeattleGatewayCatalog(env, { refreshModels });
+      const catalog = normalizeOpenClawCatalog(agents, models, Date.now(), modelsByAgent);
       if (!catalog.agents.length || !catalog.models.length) throw new Error("catalog_empty");
       await writeCache(env, catalog);
       return catalog;
@@ -99,7 +124,7 @@ async function refresh(env, refreshModels = false) {
 
 export async function getOpenClawCatalog(env, { force = false } = {}) {
   const cached = await readCache(env);
-  if (!force && cached && Date.now() - cached.syncedAt < MAX_AGE_MS) {
+  if (!force && cached && hasAgentScopedModels(cached) && Date.now() - cached.syncedAt < MAX_AGE_MS) {
     return { ok: true, status: "fresh", catalog: applyAvailabilityOverrides(cached, env) };
   }
   try {
@@ -134,6 +159,10 @@ export async function validateOpenClawCatalogSelection(env, agentId, baseModelId
   const catalog = await readCache(env);
   if (!catalog) return true;
   const effectiveCatalog = applyAvailabilityOverrides(catalog, env);
-  return effectiveCatalog.agents.some(agent => agent.id === agentId)
-    && (!baseModelId || effectiveCatalog.models.some(model => model.id === baseModelId && model.available));
+  const agent = effectiveCatalog.agents.find(item => item.id === agentId);
+  const scopedModels = Array.isArray(effectiveCatalog.modelsByAgent?.[agentId])
+    ? effectiveCatalog.modelsByAgent[agentId]
+    : [];
+  return Boolean(agent)
+    && (!baseModelId || scopedModels.some(model => model.id === baseModelId && model.available));
 }

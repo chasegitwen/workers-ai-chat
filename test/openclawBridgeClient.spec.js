@@ -178,6 +178,37 @@ describe("openclawBridgeClient", () => {
     expect(fetchMock.mock.calls[0][0]).not.toContain("/v1/chat/completions");
   });
 
+  it("sends new-mode selection fields only for an Agent-mode Hillsboro turn", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      task_id: "bridge-task-model", status: "running", agent_id: "main",
+      requested_base_model_id: "openai/gpt-5.6-sol", resolved_base_model_id: "openai/gpt-5.6-sol",
+      actual_model_id: "openai/gpt-5.6-sol"
+    }), { status: 202, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await openclawBridgeClient(env).createTask({
+      conversationId: "same-conversation",
+      message: "second turn",
+      agentId: "main",
+      selectionMode: "openclaw-agent",
+      baseModelId: "openai/gpt-5.6-sol",
+      codexControls: { effort: "high", speed: "fast" },
+      idempotencyKey: "local-model-task"
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toMatchObject({
+      selection_mode: "openclaw-agent",
+      base_model_id: "openai/gpt-5.6-sol",
+      agent_id: "main",
+      codex_controls: { effort: "high", speed: "fast" }
+    });
+    expect(result.task).toMatchObject({
+      requestedBaseModelId: "openai/gpt-5.6-sol",
+      resolvedBaseModelId: "openai/gpt-5.6-sol",
+      actualModelId: "openai/gpt-5.6-sol"
+    });
+  });
+
   it("includes uploaded file metadata and readable content in bridge task payload", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       task_id: "bridge-task-1",

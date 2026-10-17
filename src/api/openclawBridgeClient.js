@@ -495,6 +495,9 @@ function normalizeBridgeTask(data) {
     sessionKey: String(source.sessionKey || source.session_key || data?.sessionKey || data?.session_key || ""),
     sessionId: String(source.sessionId || source.session_id || data?.sessionId || data?.session_id || ""),
     agentId: String(source.agentId || source.agent_id || data?.agentId || data?.agent_id || ""),
+    requestedBaseModelId: String(source.requested_base_model_id || source.requestedBaseModelId || data?.requested_base_model_id || ""),
+    resolvedBaseModelId: String(source.resolved_base_model_id || source.resolvedBaseModelId || data?.resolved_base_model_id || ""),
+    actualModelId: String(source.actual_model_id || source.actualModelId || data?.actual_model_id || ""),
     status,
     progress: isOpenClawBridgeSuccessStatus(status)
       ? 100
@@ -572,7 +575,10 @@ export function openclawBridgeClient(env) {
       attachments,
       fileAttachments,
       nativeAttachments,
-      idempotencyKey
+      idempotencyKey,
+      selectionMode,
+      baseModelId,
+      codexControls
     }) {
       const files = Array.isArray(fileAttachments) ? fileAttachments : [];
       const nativeFiles = Array.isArray(nativeAttachments) ? nativeAttachments : [];
@@ -590,6 +596,11 @@ export function openclawBridgeClient(env) {
           session_key: sessionKey,
           session_id: sessionId,
           agent_id: agentId,
+          selection_mode: selectionMode === "openclaw-agent" ? "openclaw-agent" : "classic",
+          base_model_id: selectionMode === "openclaw-agent" ? String(baseModelId || "").trim() : "",
+          codex_controls: selectionMode === "openclaw-agent" && codexControls
+            ? { effort: codexControls.effort, speed: codexControls.speed }
+            : undefined,
           attachments: nativeFiles.length ? nativeFiles : (Array.isArray(attachments) ? attachments : []),
           native_attachments: nativeFiles,
           files,
@@ -598,6 +609,10 @@ export function openclawBridgeClient(env) {
           idempotencyKey
         }
       });
+    },
+    getCatalog({ refresh = false } = {}) {
+      const suffix = refresh ? "?refresh=1" : "";
+      return bridgeRequest(env, "/v1/openclaw/catalog" + suffix, { timeoutMs: 30000 });
     },
     getTaskStatus(taskId) {
       return bridgeRequest(env, "/v1/openclaw/tasks/" + encodeURIComponent(String(taskId || "")) + "/status");

@@ -187,6 +187,10 @@ describe("Seattle OpenClaw catalog", () => {
     expect(page).toContain('id="effectiveModelResult"');
     expect(page).toContain('id="openClawInstancesList"');
     expect(page).toContain('id="addOpenClawInstanceBtn"');
+    expect(page).toContain('id="openClawInstancesSettings" class="openClawInstancesSettings modelCategory"');
+    expect(page).toContain('<strong>OpenClaw 实例</strong>');
+    expect(page.indexOf('id="openClawInstancesSettings"')).toBeGreaterThan(page.indexOf('id="providersList"'));
+    expect(page).toContain('{ label:"编辑实例", onClick:() => openOpenClawInstanceDialog(instance) }');
     expect(page).toContain('id="openClawProviderSelect"');
     expect(page).toContain('id="openClawAgentSelect"');
     expect(page).toContain('id="openClawBaseModelSelect"');
@@ -194,6 +198,8 @@ describe("Seattle OpenClaw catalog", () => {
     expect(page).toContain("function classicCategoryProviders(category)");
     expect(page).toContain("const visibleProviders = classicCategoryProviders(category);");
     expect(page).toContain("function openOpenClawInstanceDialog(instance = null)");
+    expect(page).toContain('idInput.value = "openclaw-" + targetSelect.value');
+    expect(page).toContain('targetSelect.value === "seattle" ? "Seattle OpenClaw" : "Hillsboro OpenClaw"');
     expect(page).toContain("instance_id:isOpenClawRequest ? requestSelection.instanceId");
     expect(() => new Function(page.match(/<script>([\s\S]*)<\/script>/)?.[1] || "")).not.toThrow();
   });

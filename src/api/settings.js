@@ -7,9 +7,16 @@ const OPENCLAW_INSTANCE_TARGETS = Object.freeze({
     endpoint: "https://act.hnsnowground.cfd/v1",
     runtimeId: "seattle-openclaw",
     catalogId: "seattle"
+  }),
+  hillsboro: Object.freeze({
+    connectionId: "openclaw-hillsboro",
+    endpoint: "https://hill.hnsnowground.cfd/v1",
+    runtimeId: "hillsboro-openclaw",
+    catalogId: "hillsboro"
   })
 });
 const OPENCLAW_INSTANCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/;
+const OPENCLAW_INSTANCE_CONFIG_VERSION = 2;
 
 function ensureSettingsDb(env) {
   if (!env.DB) {
@@ -81,15 +88,31 @@ export function normalizeOpenClawInstances(instances, { providers = [], inferDef
       catalogId: target.catalogId
     });
   });
-  if (!normalized.length && inferDefault && providers.some(provider => normalizeProviderId(provider) === "openclaw-seattle")) {
-    normalized.push({
-      id: "openclaw-seattle",
-      label: "Seattle OpenClaw",
-      targetId: "seattle",
-      ...OPENCLAW_INSTANCE_TARGETS.seattle
-    });
+  if (!normalized.length && inferDefault) {
+    for (const [targetId, target] of Object.entries(OPENCLAW_INSTANCE_TARGETS)) {
+      if (!providers.some(provider => normalizeProviderId(provider) === target.connectionId)) continue;
+      normalized.push({
+        id: target.connectionId,
+        label: targetId === "seattle" ? "Seattle OpenClaw" : "Hillsboro OpenClaw",
+        targetId,
+        ...target
+      });
+    }
   }
   return normalized;
+}
+
+function migrateOpenClawInstances(instances, configVersion) {
+  const normalized = normalizeOpenClawInstances(instances);
+  if (Number(configVersion || 0) >= OPENCLAW_INSTANCE_CONFIG_VERSION
+    || normalized.some(instance => instance.targetId === "hillsboro")) {
+    return normalized;
+  }
+  return normalizeOpenClawInstances([...normalized, {
+    id: "openclaw-hillsboro",
+    label: "Hillsboro OpenClaw",
+    targetId: "hillsboro"
+  }]);
 }
 
 export function upsertOpenClawInstanceSettings(instances, draft) {
@@ -364,6 +387,11 @@ export function normalizeModelSettings(settings) {
     providers,
     inferDefault: !hasExplicitInstances
   });
+  normalized.openClawInstances = migrateOpenClawInstances(
+    normalized.openClawInstances,
+    normalized.openClawInstanceConfigVersion
+  );
+  normalized.openClawInstanceConfigVersion = OPENCLAW_INSTANCE_CONFIG_VERSION;
 
   if (providers.length) {
     normalized.providers = providers;

@@ -2206,30 +2206,150 @@ body.dark .toolErrorNotice{
 .codexRunControls{
   display:flex;
   align-items:center;
-  gap:10px;
-  width:100%;
-  flex-wrap:wrap;
+  gap:8px;
+  width:auto;
+  min-height:32px;
+  padding:3px 4px;
   color:var(--muted);
-  font-size:13px;
+  font-size:12px;
 }
 
 .codexRunControls[hidden]{
   display:none;
 }
 
-.codexRunControls label{
+.codexEffortCompact{
   display:flex;
   align-items:center;
   gap:6px;
+  min-width:0;
 }
 
-.codexRunControls select{
+.codexEffortLabel{
+  color:var(--muted);
+  white-space:nowrap;
+}
+
+.codexEffortValue{
+  min-width:43px;
+  color:#d0553f;
+  font-weight:700;
+  text-align:left;
+}
+
+.codexEffortSlider{
+  width:clamp(104px, 28vw, 156px);
+  min-width:104px;
+}
+
+.codexEffortSlider input[type="range"]{
+  width:100%;
+  height:24px;
+  margin:0;
+  appearance:none;
+  -webkit-appearance:none;
+  background:transparent;
+  cursor:pointer;
+}
+
+.codexEffortSlider input[type="range"]::-webkit-slider-runnable-track{
+  height:22px;
+  border-radius:999px;
+  background-color:color-mix(in srgb, var(--border) 74%, var(--panel));
+  background-image:radial-gradient(circle, rgba(94,99,105,.4) 0 3px, transparent 3.5px);
+  background-size:20% 100%;
+  background-position:center;
+}
+
+.codexEffortSlider input[type="range"]::-webkit-slider-thumb{
+  width:24px;
+  height:18px;
+  margin-top:2px;
+  border:2px solid var(--panel);
+  border-radius:999px;
+  appearance:none;
+  -webkit-appearance:none;
+  background:#252422;
+  box-shadow:0 0 0 2px #d0553f;
+}
+
+.codexEffortSlider input[type="range"]::-moz-range-track{
+  height:22px;
+  border-radius:999px;
+  background:color-mix(in srgb, var(--border) 74%, var(--panel));
+}
+
+.codexEffortSlider input[type="range"]::-moz-range-thumb{
+  width:22px;
+  height:16px;
+  border:2px solid var(--panel);
+  border-radius:999px;
+  background:#252422;
+  box-shadow:0 0 0 2px #d0553f;
+}
+
+.codexRunDivider{
+  width:1px;
+  height:20px;
+  background:var(--border);
+}
+
+.codexFastMode{
+  display:flex;
+  align-items:center;
+  gap:5px;
+  cursor:pointer;
+  white-space:nowrap;
+}
+
+.codexFastIcon{
+  color:#d0553f;
+  font-size:15px;
+  line-height:1;
+}
+
+.codexFastLabel{
+  color:var(--text);
+  font-weight:700;
+}
+
+.codexFastMode input{
+  position:absolute;
+  opacity:0;
+  pointer-events:none;
+}
+
+.codexFastToggle{
+  width:34px;
+  height:20px;
+  padding:2px;
   border:1px solid var(--border);
   border-radius:999px;
-  padding:5px 8px;
-  background:var(--panel);
-  color:var(--text);
-  font:inherit;
+  background:color-mix(in srgb, var(--border) 72%, var(--panel));
+  transition:background .18s ease;
+}
+
+.codexFastToggle::after{
+  content:"";
+  display:block;
+  width:14px;
+  height:14px;
+  border-radius:50%;
+  background:#252422;
+  transition:transform .18s ease;
+}
+
+.codexFastMode input:checked + .codexFastToggle{
+  background:#d0553f;
+}
+
+.codexFastMode input:checked + .codexFastToggle::after{
+  transform:translateX(14px);
+}
+
+.codexFastMode input:focus-visible + .codexFastToggle{
+  outline:2px solid #d0553f;
+  outline-offset:2px;
 }
 
 .toolBtn{
@@ -2396,11 +2516,8 @@ body.dark .toolErrorNotice{
 .newModeTargetSwitch button{border:1px solid var(--border);border-radius:10px;padding:7px;background:transparent;color:var(--text);cursor:pointer}
 .newModeTargetSwitch button.active{background:var(--primary);border-color:var(--primary);color:white}
 .effectiveModelResult{font-size:12px;line-height:1.45;color:var(--muted);margin-top:7px;overflow-wrap:anywhere}
-.openClawInstancesSettings{display:grid;gap:10px;margin-top:14px}
-.openClawInstancesHeader{display:flex;align-items:center;justify-content:space-between;gap:10px}
-.openClawInstanceRow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid var(--border);border-radius:12px}
-.openClawInstanceActions{display:flex;gap:6px;flex-wrap:wrap}
-.openClawInstanceMeta{font-size:12px;color:var(--muted);margin-top:3px}
+.openClawInstancesSettings{margin-top:0}
+.openClawInstanceMeta{font-size:12px;color:var(--muted);margin-top:3px;overflow-wrap:anywhere}
 .settingsModal:not([data-mode="modern"]) .openClawInstancesSettings{display:none}
 
 .settingsModal{
@@ -3018,13 +3135,6 @@ body.dark .toolErrorNotice{
       <button type="button" data-settings-mode="classic">经典模式</button>
       <button type="button" data-settings-mode="modern">新模式</button>
     </div>
-    <section id="openClawInstancesSettings" class="openClawInstancesSettings">
-      <div class="openClawInstancesHeader">
-        <div class="modelCategoryMeta">新模式按实例管理 OpenClaw。增删改只影响本站连接，不会修改 VPS 上的 Agent、模型或 Gateway。</div>
-        <button id="addOpenClawInstanceBtn" class="settingsBtn" type="button">添加实例</button>
-      </div>
-      <div id="openClawInstancesList"></div>
-    </section>
     <div class="settingsGrid">
       <label class="settingsField">
         默认模型
@@ -3135,6 +3245,19 @@ body.dark .toolErrorNotice{
           <div id="modelHealthResults" class="modelHealthList"></div>
         </div>
         <div id="providersList" class="providerList"></div>
+        <section id="openClawInstancesSettings" class="openClawInstancesSettings modelCategory">
+          <div class="modelCategoryTop">
+            <button id="openClawInstancesHeaderBtn" class="modelCategoryHeader" type="button" aria-expanded="true">
+              <span class="modelCategoryTitle">
+                <strong>OpenClaw 实例</strong>
+                <span id="openClawInstancesMeta" class="modelCategoryMeta">按实例管理 Gateway / Bridge 连接</span>
+              </span>
+              <span id="openClawInstancesChevron">-</span>
+            </button>
+            <button id="addOpenClawInstanceBtn" class="categoryAddBtn" type="button" title="添加 OpenClaw 实例" aria-label="添加 OpenClaw 实例">+</button>
+          </div>
+          <div id="openClawInstancesList" class="modelCategoryBody"></div>
+        </section>
       </div>
     </div>
     <div class="settingsFooter">
@@ -3340,21 +3463,19 @@ body.dark .toolErrorNotice{
     ></textarea>
 
     <div id="codexRunControls" class="codexRunControls" hidden>
-      <label>Effort
-        <select id="codexEffortSelect" aria-label="Codex effort">
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-          <option value="xhigh">XHigh</option>
-          <option value="max">Max</option>
-          <option value="ultra">Ultra</option>
-        </select>
-      </label>
-      <label>Speed
-        <select id="codexSpeedSelect" aria-label="Codex speed">
-          <option value="standard">Standard</option>
-          <option value="fast">Fast</option>
-        </select>
+      <div class="codexEffortCompact">
+        <span class="codexEffortLabel">&#x6027;&#x80FD;</span>
+        <div class="codexEffortSlider">
+          <input id="codexEffortSelect" type="range" min="0" max="5" step="1" value="1" aria-label="Codex effort">
+        </div>
+        <output id="codexEffortValue" class="codexEffortValue">Medium</output>
+      </div>
+      <span class="codexRunDivider" aria-hidden="true"></span>
+      <label class="codexFastMode" title="Faster responses, higher usage of limits.">
+        <span class="codexFastIcon" aria-hidden="true">&#9889;</span>
+        <span class="codexFastLabel">Fast</span>
+        <input id="codexSpeedSelect" type="checkbox" aria-label="Codex fast mode">
+        <span class="codexFastToggle" aria-hidden="true"></span>
       </label>
     </div>
 
@@ -3849,15 +3970,31 @@ function normalizeOpenClawInstanceList(instances, { providers = [], inferDefault
       catalogId:target.catalogId
     });
   });
-  if(!normalized.length && inferDefault && providers.some(provider => provider.id === "openclaw-seattle")){
-    normalized.push({
-      id:"openclaw-seattle",
-      label:"Seattle OpenClaw",
-      targetId:"seattle",
-      ...OPENCLAW_INSTANCE_TARGETS.seattle
+  if(!normalized.length && inferDefault){
+    Object.entries(OPENCLAW_INSTANCE_TARGETS).forEach(([targetId, target]) => {
+      if(!providers.some(provider => provider.id === target.connectionId)) return;
+      normalized.push({
+        id:target.connectionId,
+        label:targetId === "seattle" ? "Seattle OpenClaw" : "Hillsboro OpenClaw",
+        targetId,
+        ...target
+      });
     });
   }
   return normalized;
+}
+
+function migrateOpenClawInstanceList(instances, configVersion){
+  const normalized = normalizeOpenClawInstanceList(instances);
+  if(Number(configVersion || 0) >= OPENCLAW_INSTANCE_CONFIG_VERSION
+    || normalized.some(instance => instance.targetId === "hillsboro")){
+    return normalized;
+  }
+  return normalizeOpenClawInstanceList([...normalized, {
+    id:"openclaw-hillsboro",
+    label:"Hillsboro OpenClaw",
+    targetId:"hillsboro"
+  }]);
 }
 
 function upsertOpenClawInstanceList(instances, draft){
@@ -4058,7 +4195,8 @@ async function loadModels(){
     refreshSettingsControls();
     writeSettingsCache(modelSettingsState);
     syncSettingsToServer(modelSettingsState);
-    loadOpenClawCatalog();
+    loadOpenClawCatalog(false, "seattle");
+    if(openClawInstances().some(instance => instance.catalogId === "hillsboro")) loadOpenClawCatalog(false, "hillsboro");
   }catch(err){
     console.log("load models failed", err);
   }
@@ -5556,13 +5694,18 @@ const openClawBaseModelSelect = document.getElementById("openClawBaseModelSelect
 const openClawCatalogStatus = document.getElementById("openClawCatalogStatus");
 const openClawCatalogRefresh = document.getElementById("openClawCatalogRefresh");
 const openClawInstancesSettings = document.getElementById("openClawInstancesSettings");
+const openClawInstancesHeaderBtn = document.getElementById("openClawInstancesHeaderBtn");
+const openClawInstancesMeta = document.getElementById("openClawInstancesMeta");
+const openClawInstancesChevron = document.getElementById("openClawInstancesChevron");
 const openClawInstancesList = document.getElementById("openClawInstancesList");
 const addOpenClawInstanceBtn = document.getElementById("addOpenClawInstanceBtn");
 const codexRunControls = document.getElementById("codexRunControls");
 const codexEffortSelect = document.getElementById("codexEffortSelect");
+const codexEffortValue = document.getElementById("codexEffortValue");
 const codexSpeedSelect = document.getElementById("codexSpeedSelect");
 const CODEX_RUN_PREFERENCES_KEY = "wa_codex_run_preferences_v1";
 const CODEX_EFFORT_OPTIONS = ["low", "medium", "high", "xhigh", "max", "ultra"];
+const CODEX_EFFORT_LABELS = ["Low", "Medium", "High", "XHigh", "Max", "Ultra"];
 const CODEX_SPEED_OPTIONS = ["standard", "fast"];
 function readCodexRunPreferences(){
   try{
@@ -5618,6 +5761,8 @@ let activeModelMode = "classic";
 let activeNewModeTarget = "model";
 let seattleOpenClawCatalog = null;
 let seattleOpenClawCatalogState = "unconfigured";
+let hillsboroOpenClawCatalog = null;
+let hillsboroOpenClawCatalogState = "unconfigured";
 const OPENCLAW_INSTANCE_TARGETS = Object.freeze({
   seattle:{
     label:"Seattle Gateway",
@@ -5625,8 +5770,16 @@ const OPENCLAW_INSTANCE_TARGETS = Object.freeze({
     endpoint:"https://act.hnsnowground.cfd/v1",
     runtimeId:"seattle-openclaw",
     catalogId:"seattle"
+  },
+  hillsboro:{
+    label:"Hillsboro Bridge",
+    connectionId:"openclaw-hillsboro",
+    endpoint:"https://hill.hnsnowground.cfd/v1",
+    runtimeId:"hillsboro-openclaw",
+    catalogId:"hillsboro"
   }
 });
+const OPENCLAW_INSTANCE_CONFIG_VERSION = 2;
 const OPENCLAW_ROUTE_PREFERENCES_KEY = "wa_openclaw_route_v1";
 let openClawRoutePreferences = {};
 try { openClawRoutePreferences = JSON.parse(localStorage.getItem(OPENCLAW_ROUTE_PREFERENCES_KEY) || "{}"); }
@@ -7176,6 +7329,10 @@ function normalizeModelSettings(settings, fallbackProviders){
   const selectionMode = base.selectionMode === "modern" || previousAgentMode ? "modern" : "classic";
   const newModeTarget = base.newModeTarget === "openclaw" || previousAgentMode ? "openclaw" : "model";
   const hasExplicitInstances = Object.prototype.hasOwnProperty.call(base, "openClawInstances");
+  const normalizedInstances = normalizeOpenClawInstanceList(base.openClawInstances, {
+    providers,
+    inferDefault:!hasExplicitInstances
+  });
   return {
     defaultModel:base.defaultModel || "",
     rememberLastModel:Boolean(base.rememberLastModel),
@@ -7195,10 +7352,11 @@ function normalizeModelSettings(settings, fallbackProviders){
     modernSelectedModel:base.modernSelectedModel || (!String(legacySelected).startsWith("openclaw-") ? legacySelected : ""),
     openClawSelection:base.openClawSelection && typeof base.openClawSelection === "object"
       ? base.openClawSelection : {},
-    openClawInstances:normalizeOpenClawInstanceList(base.openClawInstances, {
-      providers,
-      inferDefault:!hasExplicitInstances
-    }),
+    openClawInstances:migrateOpenClawInstanceList(
+      normalizedInstances,
+      base.openClawInstanceConfigVersion
+    ),
+    openClawInstanceConfigVersion:OPENCLAW_INSTANCE_CONFIG_VERSION,
     updatedAt:Number(base.updatedAt || base.version || 0) || 0,
     version:Number(base.version || base.updatedAt || 0) || 0
   };
@@ -7332,7 +7490,8 @@ async function loadModels(){
     refreshSettingsControls();
     writeSettingsCache(modelSettingsState);
     syncSettingsToServer(modelSettingsState);
-    loadOpenClawCatalog();
+    loadOpenClawCatalog(false, "seattle");
+    if(openClawInstances().some(instance => instance.catalogId === "hillsboro")) loadOpenClawCatalog(false, "hillsboro");
   }catch(err){
     console.log("load models failed", err);
   }
@@ -8535,11 +8694,28 @@ function currentRequestSelection(){
   };
 }
 
+function openClawCatalogForInstance(instance){
+  if(instance?.catalogId === "seattle") return seattleOpenClawCatalog;
+  if(instance?.catalogId === "hillsboro") return hillsboroOpenClawCatalog;
+  return null;
+}
+
+function openClawCatalogStateForInstance(instance){
+  if(instance?.catalogId === "seattle") return seattleOpenClawCatalogState;
+  if(instance?.catalogId === "hillsboro") return hillsboroOpenClawCatalogState;
+  return "unconfigured";
+}
+
 function effectiveOpenClawBaseModel(){
   const selected = currentOpenClawSelection();
   if(selected.baseModelId) return { id:selected.baseModelId, inherited:false };
-  const agent = seattleOpenClawCatalog?.agents?.find(item => item.id === selected.agentId);
-  return { id:agent?.defaultModel || "", inherited:true };
+  const instance = openClawInstance(selected.instanceId);
+  const catalog = openClawCatalogForInstance(instance);
+  const agent = catalog?.agents?.find(item => item.id === selected.agentId);
+  return {
+    id:agent?.defaultModel || "",
+    inherited:true
+  };
 }
 
 function updateEffectiveModelResult(){
@@ -8672,7 +8848,7 @@ function syncOpenClawRouteControls(){
     const id = route.startsWith("openclaw/") ? route.slice("openclaw/".length) : "";
     return id ? { id, name:model.label || id } : null;
   }).filter(Boolean);
-  const catalog = instance?.catalogId === "seattle" ? seattleOpenClawCatalog : null;
+  const catalog = openClawCatalogForInstance(instance);
   const agents = catalog?.agents?.length ? catalog.agents : fallbackAgents;
   const stored = modelSettingsState?.openClawSelection || {};
   fillOpenClawSelect(openClawAgentSelect, agents, saved.agentId || stored.agentId || agents[0]?.id || "");
@@ -8684,25 +8860,37 @@ function syncOpenClawRouteControls(){
     (catalog?.models || []).filter(item => item.available !== false),
     saved.baseModelId || stored.baseModelId || "", defaultModelLabel);
   openClawBaseModelSelect.disabled = !catalog?.models?.length;
-  openClawCatalogRefresh.hidden = instance?.catalogId !== "seattle";
-  openClawCatalogStatus.textContent = instance?.catalogId === "seattle"
-    ? "Seattle 目录：" + seattleOpenClawCatalogState
+  openClawCatalogRefresh.hidden = !instance?.catalogId;
+  const instanceName = instance?.catalogId === "hillsboro" ? "Hillsboro" : "Seattle";
+  openClawCatalogStatus.textContent = instance?.catalogId
+    ? instanceName + " 目录：" + openClawCatalogStateForInstance(instance)
       + (catalog?.syncedAt ? " · " + new Date(catalog.syncedAt).toLocaleString() : "")
-    : "使用现有 Agent 配置";
+    : "目录未配置";
   updateEffectiveModelResult();
 }
 
-async function loadOpenClawCatalog(force = false){
+async function loadOpenClawCatalog(force = false, requestedCatalogId = ""){
+  const selectedInstance = openClawInstance(openClawProviderSelect?.value
+    || modelSettingsState?.openClawSelection?.instanceId || "");
+  const catalogId = requestedCatalogId || selectedInstance?.catalogId || "seattle";
+  if(catalogId !== "seattle" && catalogId !== "hillsboro") return;
   openClawCatalogRefresh.disabled = true;
-  seattleOpenClawCatalogState = "同步中";
+  if(catalogId === "seattle") seattleOpenClawCatalogState = "同步中";
+  else hillsboroOpenClawCatalogState = "同步中";
   syncOpenClawRouteControls();
   try{
-    const response = await fetch("/api/openclaw/catalog/seattle", { method:force ? "POST" : "GET" });
+    const response = await fetch("/api/openclaw/catalog/" + catalogId, { method:force ? "POST" : "GET" });
     const data = await response.json();
-    seattleOpenClawCatalog = data.catalog || null;
-    seattleOpenClawCatalogState = data.status || "unavailable";
+    if(catalogId === "seattle"){
+      seattleOpenClawCatalog = data.catalog || null;
+      seattleOpenClawCatalogState = data.status || "unavailable";
+    }else{
+      hillsboroOpenClawCatalog = data.catalog || null;
+      hillsboroOpenClawCatalogState = data.status || "unavailable";
+    }
   }catch(err){
-    seattleOpenClawCatalogState = "unavailable";
+    if(catalogId === "seattle") seattleOpenClawCatalogState = "unavailable";
+    else hillsboroOpenClawCatalogState = "unavailable";
   }finally{
     openClawCatalogRefresh.disabled = false;
     syncOpenClawRouteControls();
@@ -8713,34 +8901,40 @@ function renderOpenClawInstancesList(){
   if(!openClawInstancesList) return;
   openClawInstancesList.innerHTML = "";
   const instances = openClawInstances();
+  if(openClawInstancesMeta){
+    openClawInstancesMeta.textContent = "按实例管理 Gateway / Bridge 连接 · " + instances.length + " 个实例";
+  }
   instances.forEach(instance => {
     const row = document.createElement("div");
-    row.className = "openClawInstanceRow";
+    row.className = "providerRow";
+    const rowHeader = document.createElement("div");
+    rowHeader.className = "providerRowHeader";
     const main = document.createElement("div");
+    main.className = "providerMain";
     const title = document.createElement("strong");
     title.textContent = instance.label || instance.id;
     const meta = document.createElement("div");
-    meta.className = "openClawInstanceMeta";
-    meta.textContent = instance.endpoint + " · Gateway 目录已配置 · 凭据仅在 Worker 服务端使用";
+    meta.className = "providerMeta openClawInstanceMeta";
+    meta.textContent = instance.endpoint + " · "
+      + (instance.catalogId === "hillsboro"
+        ? "Bridge 对话 / Gateway 目录 / 逐轮模型选择"
+        : "Gateway 目录已配置")
+      + " · 凭据仅在 Worker 服务端使用";
     main.append(title, meta);
-    const actions = document.createElement("div");
-    actions.className = "openClawInstanceActions";
-    const edit = document.createElement("button");
-    edit.type = "button";
-    edit.className = "settingsBtn";
-    edit.textContent = "编辑";
-    edit.addEventListener("click", () => openOpenClawInstanceDialog(instance));
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "settingsBtn";
-    remove.textContent = "删除连接";
-    remove.addEventListener("click", () => removeOpenClawInstanceConnection(instance.id));
-    actions.append(edit, remove);
-    row.append(main, actions);
+    const actions = createActionMenu([
+      { label:"编辑实例", onClick:() => openOpenClawInstanceDialog(instance) },
+      { label:"删除连接", onClick:() => removeOpenClawInstanceConnection(instance.id) }
+    ]);
+    actions.classList.add("providerActions");
+    rowHeader.append(main, actions);
+    row.appendChild(rowHeader);
     openClawInstancesList.appendChild(row);
   });
   if(!instances.length){
-    openClawInstancesList.textContent = "尚未配置 OpenClaw 实例。";
+    const empty = document.createElement("div");
+    empty.className = "providerMeta";
+    empty.textContent = "尚未配置 OpenClaw 实例。";
+    openClawInstancesList.appendChild(empty);
   }
 }
 
@@ -8759,10 +8953,23 @@ function openOpenClawInstanceDialog(instance = null){
   Object.entries(OPENCLAW_INSTANCE_TARGETS).forEach(([targetId, target]) => {
     const option = document.createElement("option");
     option.value = targetId;
-    option.textContent = targetId === "seattle" ? "Seattle（" + target.endpoint + "）" : targetId;
+    option.textContent = (targetId === "seattle" ? "Seattle" : "Hillsboro") + "（" + target.endpoint + "）";
     targetSelect.appendChild(option);
   });
   targetSelect.value = instance?.targetId || "seattle";
+  if(!instance){
+    let previousTargetId = targetSelect.value;
+    targetSelect.addEventListener("change", () => {
+      const previousLabel = previousTargetId === "seattle" ? "Seattle OpenClaw" : "Hillsboro OpenClaw";
+      if(idInput.value.trim() === "openclaw-" + previousTargetId){
+        idInput.value = "openclaw-" + targetSelect.value;
+      }
+      if(labelInput.value.trim() === previousLabel){
+        labelInput.value = targetSelect.value === "seattle" ? "Seattle OpenClaw" : "Hillsboro OpenClaw";
+      }
+      previousTargetId = targetSelect.value;
+    });
+  }
   const note = document.createElement("div");
   note.className = "openClawInstanceMeta";
   note.textContent = "连接目标由服务端允许列表固定；浏览器不保存 Gateway 或 Cloudflare Access 凭据。";
@@ -9155,6 +9362,18 @@ function openClawTaskBannerDisclaimer(task){
 function selectedCodexRunModel(){
   const selection = typeof currentRequestSelection === "function"
     ? currentRequestSelection() : { modelId:modelSelect.value };
+  if(selection.mode === "openclaw-agent"){
+    const effectiveBaseModelId = String(selection.baseModelId
+      || (typeof effectiveOpenClawBaseModel === "function" ? effectiveOpenClawBaseModel().id : "") || "").trim();
+    if(!/^openai\\/(?:gpt|codex)(?:[._/+@-]|$)/i.test(effectiveBaseModelId)) return null;
+    return {
+      id:"openclaw-agent:" + (selection.instanceId || "") + ":" + effectiveBaseModelId,
+      label:effectiveBaseModelId,
+      provider:selection.providerId || "",
+      providerType:"openai-compatible",
+      modelName:"openclaw/" + (selection.agentId || "")
+    };
+  }
   const model = modelOptions.find(item => item.id === selection.modelId);
   const provider = modelProviders.find(item => item.id === model?.provider);
   const agentTarget = String(model?.modelName || "").trim();
@@ -9179,15 +9398,22 @@ function refreshCodexRunControls(){
     return;
   }
   const saved = codexRunPreferences[codexRunPreferenceKey(model)] || {};
-  codexEffortSelect.value = CODEX_EFFORT_OPTIONS.includes(saved.effort) ? saved.effort : "medium";
-  codexSpeedSelect.value = CODEX_SPEED_OPTIONS.includes(saved.speed) ? saved.speed : "standard";
+  const effort = CODEX_EFFORT_OPTIONS.includes(saved.effort) ? saved.effort : "medium";
+  codexEffortSelect.value = String(Math.max(0, CODEX_EFFORT_OPTIONS.indexOf(effort)));
+  codexSpeedSelect.checked = (CODEX_SPEED_OPTIONS.includes(saved.speed) ? saved.speed : "standard") === "fast";
+  updateCodexRunControlPresentation();
 }
 
 function selectedCodexRunControls(){
   return selectedCodexRunModel() ? {
-    effort:codexEffortSelect.value,
-    speed:codexSpeedSelect.value
+    effort:CODEX_EFFORT_OPTIONS[Number(codexEffortSelect.value)] || "medium",
+    speed:codexSpeedSelect.checked ? "fast" : "standard"
   } : undefined;
+}
+
+function updateCodexRunControlPresentation(){
+  const index = Math.max(0, Math.min(CODEX_EFFORT_LABELS.length - 1, Number(codexEffortSelect.value) || 0));
+  codexEffortValue.textContent = CODEX_EFFORT_LABELS[index];
 }
 
 function saveCodexRunControls(){
@@ -11641,14 +11867,26 @@ settingsModal.addEventListener("click", event => {
 openClawProviderSelect.addEventListener("change", () => {
   syncOpenClawRouteControls();
   saveOpenClawRoutePreference();
+  const instance = openClawInstance(openClawProviderSelect.value);
+  if(instance?.catalogId === "hillsboro" && !hillsboroOpenClawCatalog) loadOpenClawCatalog(false, "hillsboro");
+  if(instance?.catalogId === "seattle" && !seattleOpenClawCatalog) loadOpenClawCatalog(false, "seattle");
 });
 openClawAgentSelect.addEventListener("change", () => {
   saveOpenClawRoutePreference();
   syncOpenClawRouteControls();
 });
 openClawBaseModelSelect.addEventListener("change", saveOpenClawRoutePreference);
-openClawCatalogRefresh.addEventListener("click", () => loadOpenClawCatalog(true));
+openClawCatalogRefresh.addEventListener("click", () => {
+  const instance = openClawInstance(openClawProviderSelect.value);
+  loadOpenClawCatalog(true, instance?.catalogId || "seattle");
+});
+openClawInstancesHeaderBtn.addEventListener("click", () => {
+  const collapsed = openClawInstancesSettings.classList.toggle("collapsed");
+  openClawInstancesHeaderBtn.setAttribute("aria-expanded", String(!collapsed));
+  openClawInstancesChevron.textContent = collapsed ? "+" : "-";
+});
 addOpenClawInstanceBtn.addEventListener("click", () => openOpenClawInstanceDialog());
+codexEffortSelect.addEventListener("input", updateCodexRunControlPresentation);
 codexEffortSelect.addEventListener("change", saveCodexRunControls);
 codexSpeedSelect.addEventListener("change", saveCodexRunControls);
 modelSettingsBtn.addEventListener("click", openSettings);

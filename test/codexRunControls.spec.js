@@ -21,31 +21,55 @@ function sseResponse() {
 describe("Seattle Codex run controls", () => {
   it("renders usable effort and speed controls in the chat composer", () => {
     const page = htmlPage();
-    expect(page).toContain('id="codexEffortSelect"');
-    expect(page).toContain('id="codexSpeedSelect"');
+    expect(page).toContain('id="codexEffortSelect" type="range"');
+    expect(page).toContain('id="codexSpeedSelect" type="checkbox"');
+    expect(page).toContain('id="codexEffortValue"');
+    expect(page).toContain('class="codexFastLabel">Fast</span>');
+    expect(page).toContain('class="codexEffortCompact"');
+    expect(page).toContain("Faster responses, higher usage of limits.");
     expect(page).toContain('codexControls:selectedCodexRunControls()');
     const script = page.match(/<script>([\s\S]*)<\/script>/)?.[1];
     expect(script).toBeTruthy();
     expect(() => new Function(script)).not.toThrow();
   });
 
-  it("shows controls for Seattle Codex agents but not GLM or Bridge agents", () => {
+  it("shows controls for GPT selections in both Seattle Legacy and Hillsboro Bridge modes", () => {
     const script = htmlPage().match(/<script>([\s\S]*)<\/script>/)?.[1] || "";
     const start = script.indexOf("function selectedCodexRunModel");
     const end = script.indexOf("function codexRunPreferenceKey", start);
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
-    const selectedModel = new Function("modelSelect", "modelOptions", "modelProviders", "openClawAgentSelect", "openClawBaseModelSelect",
-      script.slice(start, end) + "\nreturn selectedCodexRunModel();");
+    const buildSelectedModel = (currentSelection, effectiveBaseModelId, modelSelect, modelOptions, modelProviders, agent, base) => new Function(
+      "modelSelect", "modelOptions", "modelProviders", "openClawAgentSelect", "openClawBaseModelSelect",
+      "currentRequestSelection", "effectiveOpenClawBaseModel",
+      script.slice(start, end) + "\nreturn selectedCodexRunModel();"
+    )(modelSelect, modelOptions, modelProviders, agent, base,
+      currentSelection ? () => currentSelection : undefined,
+      () => ({ id: effectiveBaseModelId || "" }));
     const providers = [{ id: "openclaw-seattle", openclawExecutionMode: "legacy" }];
     const sol = { id: "sol", label: "GPT-Sol-5.6", provider: "openclaw-seattle", providerType: "openai-compatible", modelName: "openclaw/sol56" };
     const glm = { ...sol, label: "GLM 5.1", modelName: "openclaw/glm51" };
     const agent = { value: "sol56" };
     const base = { value: "" };
-    expect(selectedModel({ value: "sol" }, [sol], providers, agent, base)).toEqual(sol);
-    expect(selectedModel({ value: "sol" }, [glm], providers, { value: "glm51" }, base)).toBeNull();
-    expect(selectedModel({ value: "sol" }, [sol], [{ ...providers[0], openclawExecutionMode: "bridge" }], agent, base)).toBeNull();
-    expect(selectedModel({ value: "sol" }, [glm], providers, { value: "main" }, { value: "openai/gpt-6-astra" })).toEqual(glm);
+    expect(buildSelectedModel(null, "", { value: "sol" }, [sol], providers, agent, base)).toEqual(sol);
+    expect(buildSelectedModel(null, "", { value: "sol" }, [glm], providers, { value: "glm51" }, base)).toBeNull();
+    expect(buildSelectedModel({
+      mode: "openclaw-agent", modelId: "carrier", providerId: "openclaw-hillsboro",
+      instanceId: "openclaw-hillsboro", agentId: "main", baseModelId: "openai/gpt-5.6-sol"
+    }, "", { value: "carrier" }, [glm], [{ id: "openclaw-hillsboro", openclawExecutionMode: "bridge" }],
+    { value: "main" }, { value: "openai/gpt-5.6-sol" })).toMatchObject({
+      provider: "openclaw-hillsboro", label: "openai/gpt-5.6-sol"
+    });
+    expect(buildSelectedModel({
+      mode: "openclaw-agent", modelId: "carrier", providerId: "openclaw-hillsboro",
+      instanceId: "openclaw-hillsboro", agentId: "main", baseModelId: ""
+    }, "openai/gpt-5.6-terra", { value: "carrier" }, [glm], [{ id: "openclaw-hillsboro", openclawExecutionMode: "bridge" }],
+    { value: "main" }, { value: "" })).toMatchObject({ label: "openai/gpt-5.6-terra" });
+    expect(buildSelectedModel({
+      mode: "openclaw-agent", modelId: "carrier", providerId: "openclaw-hillsboro",
+      instanceId: "openclaw-hillsboro", agentId: "glm51", baseModelId: "zai/glm-5.1"
+    }, "", { value: "carrier" }, [glm], [{ id: "openclaw-hillsboro", openclawExecutionMode: "bridge" }],
+    { value: "glm51" }, { value: "zai/glm-5.1" })).toBeNull();
   });
 
   it("sends effort and speed as OpenClaw directives without changing the stored message", async () => {

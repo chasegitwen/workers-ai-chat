@@ -40,6 +40,7 @@ import {
 import { broadcastOpenClawBridgeEvent } from "./openclawBridgeEvents.js";
 import { resolveOpenClawRuntimeForProject } from "./openclawRuntimes.js";
 import { validateOpenClawCatalogSelection } from "./openclawCatalog.js";
+import { validateHillsboroOpenClawSelection } from "./hillsboroCatalog.js";
 
 const defaultSystemMessage = {
   role: "system",
@@ -3625,8 +3626,12 @@ async function readSavedOpenClawInstance(env, instanceId, providerId) {
       ? settings.providers
       : providersFromCategories(settings.categories || settings.modelCategories || []);
     const instances = rawInstances.slice();
-    if (!hasExplicitInstances && savedProviders.some(provider => String(provider?.id || provider?.providerId || "") === "openclaw-seattle")) {
-      instances.push({ id: "openclaw-seattle", targetId: "seattle", connectionId: "openclaw-seattle" });
+    if (!hasExplicitInstances) {
+      for (const connectionId of ["openclaw-seattle", "openclaw-hillsboro"]) {
+        if (savedProviders.some(provider => String(provider?.id || provider?.providerId || "") === connectionId)) {
+          instances.push({ id: connectionId, connectionId });
+        }
+      }
     }
     const requestedId = String(instanceId || providerId || "").trim();
     const instance = instances.find(item => String(item?.id || "").trim() === requestedId);
@@ -5101,7 +5106,10 @@ async function submitOpenClawBridgeTask({
   fileAttachments = [],
   nativeAttachments = [],
   projectId = "",
-  runtimeId = ""
+  runtimeId = "",
+  selectionMode = "classic",
+  baseModelId = "",
+  codexControls = null
 }) {
   if (!openClawTask?.id) {
     return {
@@ -5157,7 +5165,10 @@ async function submitOpenClawBridgeTask({
     attachments,
     fileAttachments,
     nativeAttachments: bridgeNativeAttachments,
-    idempotencyKey: openClawTask.id
+    idempotencyKey: openClawTask.id,
+    selectionMode,
+    baseModelId,
+    codexControls
   });
 
   if (!result.ok) {
@@ -5851,6 +5862,8 @@ export async function handleChat(request, env, ctx) {
     const validSelection = (!explicitOpenClawAgentId || effectiveAgentId === explicitOpenClawAgentId)
       && (openClawTarget?.provider?.id === "openclaw-seattle"
         ? await validateOpenClawCatalogSelection(env, effectiveAgentId, selectedOpenClawBaseModelId)
+        : openClawTarget?.provider?.id === "openclaw-hillsboro" && openClawAgentMode
+          ? await validateHillsboroOpenClawSelection(env, effectiveAgentId, selectedOpenClawBaseModelId)
         : !openClawAgentMode && /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(effectiveAgentId)
           && (!selectedOpenClawBaseModelId || /^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,159}$/.test(selectedOpenClawBaseModelId)));
     if (!validSelection) {
@@ -6201,7 +6214,10 @@ export async function handleChat(request, env, ctx) {
         fileAttachments: bridgeFileAttachments,
         nativeAttachments,
         projectId: runtimeResolution?.project_id || conversation.project_id || "",
-        runtimeId: runtimeResolution?.runtime_id || ""
+        runtimeId: runtimeResolution?.runtime_id || "",
+        selectionMode: openClawAgentMode ? "openclaw-agent" : "classic",
+        baseModelId: openClawAgentMode ? selectedOpenClawBaseModelId : "",
+        codexControls: openClawAgentMode ? codexControls : null
       });
       return new Response(JSON.stringify({
         ok: Boolean(bridgeResult.ok),

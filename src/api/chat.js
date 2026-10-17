@@ -37,6 +37,7 @@ import {
   classifyOpenClawBridgeResultFinality,
   shouldRecoverOpenClawBridgeCompletedStatus
 } from "./openclawBridgeClient.js";
+import { hillsboroAgentRoute, normalizeHillsboroAgentId } from "./hillsboroAgentRouting.js";
 import { broadcastOpenClawBridgeEvent } from "./openclawBridgeEvents.js";
 import { resolveOpenClawRuntimeForProject } from "./openclawRuntimes.js";
 import { validateOpenClawCatalogSelection } from "./openclawCatalog.js";
@@ -5788,8 +5789,12 @@ export async function handleChat(request, env, ctx) {
   const openClawBridgeEnabled = isOpenClawRequest
     ? shouldUseOpenClawBridge(openClawBridgeProvider, env)
     : false;
+  const hillsboroBridgeTarget = openClawBridgeEnabled
+    && openClawTarget?.provider?.id === "openclaw-hillsboro";
   const requestedOpenClawAgentId = isOpenClawRequest
-    ? normalizeOpenClawAgentId(openClawTarget?.model)
+    ? (hillsboroBridgeTarget
+      ? normalizeHillsboroAgentId(openClawTarget?.model)
+      : normalizeOpenClawAgentId(openClawTarget?.model))
     : "";
   const requestedProjectId = conversation?.project_id || projectId || camelProjectId || "default";
   const selectedOpenClawRuntimeId = isOpenClawRequest
@@ -5799,7 +5804,9 @@ export async function handleChat(request, env, ctx) {
     ? await resolveOpenClawRuntimeForProject(env, {
       projectId: requestedProjectId,
       runtimeId: selectedOpenClawRuntimeId,
-      agentId: agentId || camelAgentId || "",
+      agentId: hillsboroBridgeTarget
+        ? normalizeHillsboroAgentId(agentId || camelAgentId || "")
+        : (agentId || camelAgentId || ""),
       modelAgentId: requestedOpenClawAgentId,
       providerId: openClawTarget?.provider?.id || provider,
       executionMode: openClawBridgeEnabled ? "bridge" : "legacy",
@@ -5848,6 +5855,9 @@ export async function handleChat(request, env, ctx) {
     });
   }
   const explicitOpenClawAgentId = String(agentId || camelAgentId || "").trim();
+  const routedOpenClawAgentId = hillsboroBridgeTarget
+    ? normalizeHillsboroAgentId(explicitOpenClawAgentId || requestedOpenClawAgentId)
+    : explicitOpenClawAgentId;
   const selectedOpenClawBaseModelId = String(baseModelId || camelBaseModelId || "").trim();
   const selectedOpenClawInstanceId = String(instanceId || camelInstanceId || "").trim();
   const openClawAgentMode = selectionMode === "openclaw-agent";
@@ -5857,13 +5867,26 @@ export async function handleChat(request, env, ctx) {
   if (openClawAgentMode && (!isOpenClawRequest || !trustedOpenClawInstance)) {
     return jsonResponse({ ok: false, error: "invalid_openclaw_instance" }, 400);
   }
-  if (isOpenClawRequest && (explicitOpenClawAgentId || selectedOpenClawBaseModelId)) {
+  if (hillsboroBridgeTarget) {
+    const effectiveAgentId = normalizeHillsboroAgentId(
+      routedOpenClawAgentId || runtimeResolution?.agent_id || requestedOpenClawAgentId
+    );
+    const validSelection = Boolean(effectiveAgentId)
+      && (!explicitOpenClawAgentId || effectiveAgentId === normalizeHillsboroAgentId(explicitOpenClawAgentId))
+      && await validateHillsboroOpenClawSelection(env, effectiveAgentId, selectedOpenClawBaseModelId);
+    if (!validSelection) {
+      return jsonResponse({ ok: false, error: "invalid_openclaw_selection" }, 400);
+    }
+    if (runtimeResolution) runtimeResolution.agent_id = effectiveAgentId;
+    if (openClawTarget?.model) {
+      openClawTarget.model.modelName = hillsboroAgentRoute(effectiveAgentId);
+      openClawTarget.model.upstreamModelName = hillsboroAgentRoute(effectiveAgentId);
+    }
+  } else if (isOpenClawRequest && (explicitOpenClawAgentId || selectedOpenClawBaseModelId)) {
     const effectiveAgentId = runtimeResolution?.agent_id || requestedOpenClawAgentId;
     const validSelection = (!explicitOpenClawAgentId || effectiveAgentId === explicitOpenClawAgentId)
       && (openClawTarget?.provider?.id === "openclaw-seattle"
         ? await validateOpenClawCatalogSelection(env, effectiveAgentId, selectedOpenClawBaseModelId)
-        : openClawTarget?.provider?.id === "openclaw-hillsboro" && openClawAgentMode
-          ? await validateHillsboroOpenClawSelection(env, effectiveAgentId, selectedOpenClawBaseModelId)
         : !openClawAgentMode && /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(effectiveAgentId)
           && (!selectedOpenClawBaseModelId || /^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,159}$/.test(selectedOpenClawBaseModelId)));
     if (!validSelection) {

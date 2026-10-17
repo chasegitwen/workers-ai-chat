@@ -684,7 +684,7 @@ describe("Project workspace foundation", () => {
       runtime_id: "hillsboro-openclaw",
       runtime_slug: "hillsboro-openclaw",
       provider_id: "openclaw-hillsboro",
-      agent_id: "glm51",
+      agent_id: "glm",
       execution_mode: "bridge",
       resolution_source: "project_default"
     });

@@ -1,5 +1,6 @@
 import { jsonResponse } from "../utils/response.js";
 import { openclawBridgeClient } from "./openclawBridgeClient.js";
+import { normalizeHillsboroAgentId } from "./hillsboroAgentRouting.js";
 
 const CACHE_KEY = "openclaw_catalog_hillsboro_v1";
 const CACHE_MAX_AGE_MS = 5 * 60 * 1000;
@@ -140,7 +141,7 @@ export async function handleHillsboroOpenClawCatalog(request, env, url) {
 }
 
 export async function validateHillsboroOpenClawSelection(env, agentId, baseModelId) {
-  const normalizedAgentId = safeAgentId(agentId);
+  const normalizedAgentId = safeAgentId(normalizeHillsboroAgentId(agentId));
   const normalizedModelId = safeId(baseModelId);
   if (!normalizedAgentId || (baseModelId && (!normalizedModelId || !normalizedModelId.includes("/")))) return false;
   let catalog = await readCache(env);

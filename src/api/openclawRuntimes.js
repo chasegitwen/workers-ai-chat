@@ -1,4 +1,5 @@
 import { jsonResponse } from "../utils/response.js";
+import { normalizeHillsboroAgentId } from "./hillsboroAgentRouting.js";
 
 export const HILLSBORO_OPENCLAW_RUNTIME_ID = "hillsboro-openclaw";
 
@@ -334,17 +335,24 @@ function bridgeDefaultRejection(binding, isDefault, isEnabled) {
 }
 
 function agentFromBinding(binding, requestedAgentId, modelAgentId) {
-  const allowed = Array.isArray(binding?.allowed_agents) ? binding.allowed_agents.filter(Boolean) : [];
-  const requested = cleanText(requestedAgentId, 160);
+  const hillsboro = binding?.runtime?.provider_id === "openclaw-hillsboro"
+    || binding?.runtime_id === HILLSBORO_OPENCLAW_RUNTIME_ID;
+  const normalizeAgent = value => hillsboro
+    ? normalizeHillsboroAgentId(value)
+    : cleanText(value, 160);
+  const allowed = [...new Set((Array.isArray(binding?.allowed_agents) ? binding.allowed_agents : [])
+    .map(normalizeAgent).filter(Boolean))];
+  const requested = normalizeAgent(requestedAgentId);
   if (requested && (!allowed.length || allowed.includes(requested))) {
     return requested;
   }
-  const modelAgent = cleanText(modelAgentId, 160);
+  const modelAgent = normalizeAgent(modelAgentId);
   if (modelAgent && (!allowed.length || allowed.includes(modelAgent))) {
     return modelAgent;
   }
-  if (binding?.default_agent_id && (!allowed.length || allowed.includes(binding.default_agent_id))) {
-    return binding.default_agent_id;
+  const defaultAgent = normalizeAgent(binding?.default_agent_id);
+  if (defaultAgent && (!allowed.length || allowed.includes(defaultAgent))) {
+    return defaultAgent;
   }
   return allowed[0] || modelAgent || requested || "";
 }

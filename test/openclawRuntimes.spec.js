@@ -494,7 +494,7 @@ describe("OpenClaw runtime registry", () => {
       runtime_id: "hillsboro-openclaw",
       runtime_slug: "hillsboro-openclaw",
       provider_id: "openclaw-hillsboro",
-      agent_id: "glm51",
+      agent_id: "glm",
       execution_mode: "bridge",
       resolution_source: "project_default"
     });
@@ -647,10 +647,28 @@ describe("OpenClaw runtime registry", () => {
       runtime_id: "hillsboro-openclaw",
       runtime_slug: "hillsboro-openclaw",
       provider_id: "openclaw-hillsboro",
-      agent_id: "glm51",
+      agent_id: "glm",
       execution_mode: "bridge",
       resolution_source: "project_default"
     });
+  });
+
+  it.each([
+    ["main", "main"],
+    ["glm", "glm"],
+    ["kimi", "kimi"],
+    ["glm51", "glm"],
+    ["glm5-2", "glm"],
+    ["kimi-for-coding", "kimi"]
+  ])("normalizes Hillsboro runtime agent %s to %s with the legacy binding allowlist", async (agentId, expected) => {
+    const result = await resolveOpenClawRuntimeForProject(env(new FakeD1()), {
+      projectId: "default",
+      agentId,
+      providerId: "openclaw-hillsboro",
+      executionMode: "bridge"
+    });
+
+    expect(result).toMatchObject({ ok: true, agent_id: expected, execution_mode: "bridge" });
   });
 
   it("rejects setting disabled or unverified Seattle as the project default runtime", async () => {

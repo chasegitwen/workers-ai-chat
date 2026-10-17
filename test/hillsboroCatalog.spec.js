@@ -4,6 +4,7 @@ import {
   normalizeHillsboroGatewayCatalog,
   validateHillsboroOpenClawSelection
 } from "../src/api/hillsboroCatalog.js";
+import { hillsboroAgentRoute, normalizeHillsboroAgentId } from "../src/api/hillsboroAgentRouting.js";
 
 function fakeDb() {
   const rows = new Map();
@@ -31,7 +32,11 @@ function fakeDb() {
 const upstreamCatalog = {
   agents: [
     { id: "main", name: "main", defaultModel: "openai/gpt-5.6-terra", secret: "hidden" },
-    { id: "glm51", name: "glm51", defaultModel: "zai/glm-5.1" }
+    { id: "glm", name: "GLM", defaultModel: "zai/glm-5.2" },
+    { id: "kimi", name: "Kimi", defaultModel: "kimi/kimi-for-coding" },
+    { id: "glm51", name: "glm51", defaultModel: "zai/glm-5.1" },
+    { id: "glm5-2", name: "glm5-2", defaultModel: "zai/glm-5.2" },
+    { id: "kimi-for-coding", name: "kimi-for-coding", defaultModel: "kimi/kimi-for-coding" }
   ],
   models: [
     { id: "gpt-5.6-terra", provider: "openai", name: "GPT-5.6 Terra", available: true, manualSelectionAllowed: true },
@@ -65,7 +70,9 @@ describe("Hillsboro Gateway catalog", () => {
       syncedAt: 123
     });
     expect(catalog.agents[0]).toEqual({ id: "main", name: "main", defaultModel: "openai/gpt-5.6-terra" });
-    expect(catalog.agents[1]).toEqual({ id: "glm51", name: "glm51", defaultModel: "zai/glm-5.1" });
+    expect(catalog.agents.map(agent => agent.id)).toEqual([
+      "main", "glm", "kimi", "glm51", "glm5-2", "kimi-for-coding"
+    ]);
     expect(catalog.models.map(model => model.id)).toEqual([
       "openai/gpt-5.6-terra",
       "openai/gpt-5.6-sol",
@@ -120,15 +127,31 @@ describe("Hillsboro Gateway catalog", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(upstreamCatalog))));
     const env = { DB: db, OPENCLAW_BRIDGE_BASE_URL: "https://bridge.example.test", OPENCLAW_BRIDGE_TOKEN: "secret" };
     await getHillsboroOpenClawCatalog(env, { force: true });
+    expect(await validateHillsboroOpenClawSelection(env, "glm", "")).toBe(true);
+    expect(await validateHillsboroOpenClawSelection(env, "glm", "zai/glm-5.1")).toBe(true);
+    expect(await validateHillsboroOpenClawSelection(env, "kimi", "kimi/kimi-for-coding")).toBe(true);
+    expect(await validateHillsboroOpenClawSelection(env, "main", "")).toBe(true);
     expect(await validateHillsboroOpenClawSelection(env, "glm51", "")).toBe(true);
-    expect(await validateHillsboroOpenClawSelection(env, "glm51", "zai/glm-5.1")).toBe(true);
+    expect(await validateHillsboroOpenClawSelection(env, "glm5-2", "zai/glm-5.1")).toBe(true);
+    expect(await validateHillsboroOpenClawSelection(env, "kimi-for-coding", "kimi/kimi-for-coding")).toBe(true);
     expect(await validateHillsboroOpenClawSelection(env, "main", "openai/gpt-5.6-sol")).toBe(true);
     expect(await validateHillsboroOpenClawSelection(env, "main", "openai/gpt-6-astra")).toBe(true);
     expect(await validateHillsboroOpenClawSelection(env, "main", "openai/gpt-5.5")).toBe(false);
     expect(await validateHillsboroOpenClawSelection(env, "main", "openai/gpt-6-sol")).toBe(false);
     expect(await validateHillsboroOpenClawSelection(env, "main", "openai/gpt-6-luna")).toBe(false);
     expect(await validateHillsboroOpenClawSelection(env, "main", "openai/gpt-6.1-sol")).toBe(false);
-    expect(await validateHillsboroOpenClawSelection(env, "glm51", "zai/not-configured")).toBe(false);
+    expect(await validateHillsboroOpenClawSelection(env, "glm", "zai/not-configured")).toBe(false);
     expect(await validateHillsboroOpenClawSelection(env, "unknown", "zai/glm-5.1")).toBe(false);
+  });
+
+  it("maps only Hillsboro legacy agents to the current routes", () => {
+    expect(normalizeHillsboroAgentId("main")).toBe("main");
+    expect(normalizeHillsboroAgentId("glm")).toBe("glm");
+    expect(normalizeHillsboroAgentId("kimi")).toBe("kimi");
+    expect(normalizeHillsboroAgentId("glm51")).toBe("glm");
+    expect(normalizeHillsboroAgentId("glm5-2")).toBe("glm");
+    expect(normalizeHillsboroAgentId("kimi-for-coding")).toBe("kimi");
+    expect(hillsboroAgentRoute("glm51")).toBe("openclaw/glm");
+    expect(hillsboroAgentRoute("kimi-for-coding")).toBe("openclaw/kimi");
   });
 });

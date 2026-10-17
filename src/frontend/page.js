@@ -8836,6 +8836,11 @@ function openClawModelsForAgent(catalog, agentId){
     : (catalog?.providerId === "openclaw-seattle" ? [] : (catalog?.models || []));
 }
 
+function normalizeHillsboroAgentId(agentId){
+  const value = String(agentId || "").trim();
+  return ({ "glm51":"glm", "glm5-2":"glm", "kimi-for-coding":"kimi" })[value] || value;
+}
+
 function syncOpenClawRouteControls(){
   const visible = isOpenClawAgentMode();
   openClawRouteControls.hidden = !visible;
@@ -8858,7 +8863,11 @@ function syncOpenClawRouteControls(){
   const catalog = openClawCatalogForInstance(instance);
   const agents = catalog?.agents?.length ? catalog.agents : fallbackAgents;
   const stored = modelSettingsState?.openClawSelection || {};
-  fillOpenClawSelect(openClawAgentSelect, agents, saved.agentId || stored.agentId || agents[0]?.id || "");
+  const storedAgentId = saved.agentId || stored.agentId || agents[0]?.id || "";
+  const selectedAgentId = instance?.catalogId === "hillsboro"
+    ? normalizeHillsboroAgentId(storedAgentId)
+    : storedAgentId;
+  fillOpenClawSelect(openClawAgentSelect, agents, selectedAgentId);
   const selectedAgent = agents.find(agent => agent.id === openClawAgentSelect.value);
   const agentModels = openClawModelsForAgent(catalog, selectedAgent?.id || "");
   const defaultModelLabel = selectedAgent?.defaultModel

@@ -5,6 +5,11 @@ import {
   validateHillsboroOpenClawSelection
 } from "../src/api/hillsboroCatalog.js";
 import { hillsboroAgentRoute, normalizeHillsboroAgentId } from "../src/api/hillsboroAgentRouting.js";
+import {
+  HILLSBORO_CURRENT_MODELS_BY_AGENT,
+  HILLSBORO_CURRENT_MODEL_UNION,
+  hillsboroCurrentPolicyCatalog
+} from "./fixtures/hillsboroCurrentPolicy.js";
 
 function fakeDb() {
   const rows = new Map();
@@ -29,6 +34,9 @@ function fakeDb() {
   };
 }
 
+// Generalized sanitization and compatibility fixture. It intentionally includes
+// legacy Agent IDs, unavailable model IDs, and hidden rows; it is not a snapshot
+// of the current Hillsboro policy.
 const upstreamCatalog = {
   agents: [
     { id: "main", name: "main", defaultModel: "openai/gpt-5.6-terra", secret: "hidden" },
@@ -95,6 +103,15 @@ const upstreamCatalog = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Hillsboro Gateway catalog", () => {
+  it("preserves the current Hillsboro policy by Agent and as a top-level union", () => {
+    const catalog = normalizeHillsboroGatewayCatalog(hillsboroCurrentPolicyCatalog(), 123);
+
+    expect(Object.fromEntries(Object.entries(catalog.modelsByAgent)
+      .map(([agentId, models]) => [agentId, models.map(model => model.id)])))
+      .toEqual(HILLSBORO_CURRENT_MODELS_BY_AGENT);
+    expect(catalog.models.map(model => model.id)).toEqual(HILLSBORO_CURRENT_MODEL_UNION);
+  });
+
   it("normalizes only public configured Agent and model fields", () => {
     const catalog = normalizeHillsboroGatewayCatalog(upstreamCatalog, 123);
     expect(catalog).toMatchObject({
@@ -216,6 +233,21 @@ describe("Hillsboro Gateway catalog", () => {
     expect(await validateHillsboroOpenClawSelection(env, "main", "openai/gpt-6.1-sol")).toBe(false);
     expect(await validateHillsboroOpenClawSelection(env, "glm", "zai/not-configured")).toBe(false);
     expect(await validateHillsboroOpenClawSelection(env, "unknown", "zai/glm-5.1")).toBe(false);
+  });
+
+  it("validates current Hillsboro selections within their Agent scope", async () => {
+    const db = fakeDb();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(hillsboroCurrentPolicyCatalog()))));
+    const env = { DB: db, OPENCLAW_BRIDGE_BASE_URL: "https://bridge.example.test", OPENCLAW_BRIDGE_TOKEN: "secret" };
+    await getHillsboroOpenClawCatalog(env, { force: true });
+
+    expect(await validateHillsboroOpenClawSelection(env, "main", "openai/gpt-6-astra")).toBe(true);
+    expect(await validateHillsboroOpenClawSelection(env, "glm", "zai/glm-5.3-flash")).toBe(true);
+    expect(await validateHillsboroOpenClawSelection(env, "kimi", "kimi/kimi-for-coding")).toBe(true);
+    expect(await validateHillsboroOpenClawSelection(env, "main", "zai/glm-5.2")).toBe(false);
+    expect(await validateHillsboroOpenClawSelection(env, "glm", "openai/gpt-5.6-terra")).toBe(false);
+    expect(await validateHillsboroOpenClawSelection(env, "kimi", "zai/glm-5.3")).toBe(false);
+    expect(await validateHillsboroOpenClawSelection(env, "glm", "zai/glm-5.1")).toBe(false);
   });
 
   it("maps only Hillsboro legacy agents to the current routes", () => {

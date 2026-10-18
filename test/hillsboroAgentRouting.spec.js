@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { handleChat } from "../src/api/chat.js";
 import { htmlPage } from "../src/frontend/page.js";
+import { hillsboroCurrentPolicyCatalog } from "./fixtures/hillsboroCurrentPolicy.js";
 
 const runtime = {
   id: "hillsboro-openclaw",
@@ -53,30 +54,10 @@ const provider = {
 };
 
 const catalog = {
+  ...hillsboroCurrentPolicyCatalog(),
   providerId: "openclaw-hillsboro",
   runtimeId: "hillsboro-openclaw",
   source: "gateway_rpc",
-  agents: [
-    { id: "main", defaultModel: "openai/gpt-5.6-terra" },
-    { id: "glm", defaultModel: "zai/glm-5.2" },
-    { id: "kimi", defaultModel: "kimi/kimi-for-coding" }
-  ],
-  models: [
-    { id: "openai/gpt-5.6-terra", available: true },
-    { id: "zai/glm-5.1", available: true },
-    { id: "zai/glm-5.2", available: true },
-    { id: "kimi/kimi-for-coding", available: true }
-  ],
-  modelsByAgent: {
-    main: [{ id: "openai/gpt-5.6-terra", available: true }],
-    glm: [
-      { id: "zai/glm-5.1", available: true },
-      { id: "zai/glm-5.2", available: true }
-    ],
-    kimi: [{ id: "kimi/kimi-for-coding", available: true }]
-  },
-  defaultAgentId: "main",
-  modelView: "configured",
   syncedAt: Date.now()
 };
 
@@ -152,11 +133,12 @@ function requestBody(agentId, baseModelId) {
 describe("Hillsboro Agent routing", () => {
   it.each([
     ["main", "", "main", ""],
+    ["main", "openai/gpt-6-astra", "main", "openai/gpt-6-astra"],
     ["glm", "", "glm", ""],
-    ["glm", "zai/glm-5.1", "glm", "zai/glm-5.1"],
+    ["glm", "zai/glm-5.3", "glm", "zai/glm-5.3"],
     ["kimi", "kimi/kimi-for-coding", "kimi", "kimi/kimi-for-coding"],
     ["glm51", "", "glm", ""],
-    ["glm5-2", "zai/glm-5.1", "glm", "zai/glm-5.1"],
+    ["glm5-2", "zai/glm-5.3-flash", "glm", "zai/glm-5.3-flash"],
     ["kimi-for-coding", "kimi/kimi-for-coding", "kimi", "kimi/kimi-for-coding"]
   ])("routes agent %s with base model %s to Bridge agent %s", async (agentId, baseModelId, expectedAgent, expectedBaseModel) => {
     const bridgeBodies = [];
@@ -194,7 +176,8 @@ describe("Hillsboro Agent routing", () => {
   it.each([
     ["main", "zai/glm-5.2"],
     ["glm", "openai/gpt-5.6-terra"],
-    ["kimi", "zai/glm-5.1"]
+    ["kimi", "zai/glm-5.3"],
+    ["glm", "zai/glm-5.1"]
   ])("rejects Agent %s with model %s outside its policy", async (agentId, baseModelId) => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

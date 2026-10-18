@@ -38,6 +38,12 @@ if (catalog.modelView !== "configured" || !catalog.agents?.length || !catalog.mo
     || !catalog.agents.every(agent => Array.isArray(catalog.modelsByAgent?.[agent.id]))) {
   throw new Error("Gateway catalog verification failed");
 }
+const topLevelModelIds = [...new Set(catalog.models.map(model => model?.id).filter(Boolean))].sort();
+const scopedModelIds = [...new Set(Object.values(catalog.modelsByAgent)
+  .flatMap(models => models.map(model => model?.id).filter(Boolean)))].sort();
+if (JSON.stringify(topLevelModelIds) !== JSON.stringify(scopedModelIds)) {
+  throw new Error("Gateway catalog model union verification failed");
+}
 console.log(JSON.stringify({
   installed: true,
   version: health.version,

@@ -8,6 +8,10 @@ import {
   readAgentScopedGatewayCatalog,
   resolveCatalogSelection
 } from "../ops/hillsboro/model-routing.mjs";
+import {
+  HILLSBORO_CURRENT_MODELS_BY_AGENT,
+  HILLSBORO_CURRENT_MODEL_UNION
+} from "./fixtures/hillsboroCurrentPolicy.js";
 
 const catalog = normalizeGatewayCatalog(
   { defaultId: "main", agents: [
@@ -25,10 +29,10 @@ const catalog = normalizeGatewayCatalog(
       { provider: "kimi", id: "kimi-for-coding", available: true, tags: ["fallback#2", "configured"] }
     ] },
     glm: { models: [
-      { provider: "zai", id: "glm-5.0-turbo", available: true },
-      { provider: "zai", id: "glm-5", available: true },
-      { provider: "zai", id: "glm-5.1", available: true },
-      { provider: "zai", id: "glm-5.2", available: true }
+      { provider: "zai", id: "glm-5-turbo", available: true },
+      { provider: "zai", id: "glm-5.2", available: true },
+      { provider: "zai", id: "glm-5.3", available: true },
+      { provider: "zai", id: "glm-5.3-flash", available: true }
     ] },
     kimi: { models: [
       { provider: "kimi", id: "kimi-for-coding", available: true }
@@ -49,8 +53,8 @@ describe("Hillsboro per-turn Gateway model routing", () => {
     expect(resolveCatalogSelection(catalog, "glm", "")).toMatchObject({
       ok: true, agentId: "glm", resolvedBaseModelId: "zai/glm-5.2", inheritedDefault: true
     });
-    expect(resolveCatalogSelection(catalog, "glm", "zai/glm-5.1")).toMatchObject({
-      ok: true, resolvedBaseModelId: "zai/glm-5.1", inheritedDefault: false
+    expect(resolveCatalogSelection(catalog, "glm", "zai/glm-5.3")).toMatchObject({
+      ok: true, resolvedBaseModelId: "zai/glm-5.3", inheritedDefault: false
     });
     expect(resolveCatalogSelection(catalog, "kimi", "kimi/kimi-for-coding")).toMatchObject({ ok: true });
   });
@@ -61,9 +65,17 @@ describe("Hillsboro per-turn Gateway model routing", () => {
     expect(resolveCatalogSelection(catalog, "main", "zai/glm-5.2")).toMatchObject({ ok: false, error: "base_model_not_configured" });
     expect(resolveCatalogSelection(catalog, "glm", "openai/gpt-5.6-terra")).toMatchObject({ ok: false, error: "base_model_not_configured" });
     expect(resolveCatalogSelection(catalog, "kimi", "zai/glm-5.2")).toMatchObject({ ok: false, error: "base_model_not_configured" });
+    expect(resolveCatalogSelection(catalog, "glm", "zai/glm-5.1")).toMatchObject({ ok: false, error: "base_model_not_configured" });
     for (const modelId of ["openai/gpt-5.5", "openai/gpt-6-sol", "openai/gpt-6-luna", "openai/gpt-6.1-sol"]) {
       expect(resolveCatalogSelection(catalog, "main", modelId)).toMatchObject({ ok: false, error: "base_model_not_configured" });
     }
+  });
+
+  it("matches the current Hillsboro modelsByAgent policy and top-level union", () => {
+    expect(Object.fromEntries(Object.entries(catalog.modelsByAgent)
+      .map(([agentId, models]) => [agentId, models.map(model => model.id)])))
+      .toEqual(HILLSBORO_CURRENT_MODELS_BY_AGENT);
+    expect(catalog.models.map(model => model.id)).toEqual(HILLSBORO_CURRENT_MODEL_UNION);
   });
 
   it("reads configured models separately for every Gateway Agent", async () => {

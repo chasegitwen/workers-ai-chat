@@ -8833,7 +8833,9 @@ function openClawModelsForAgent(catalog, agentId){
   const scoped = catalog?.modelsByAgent?.[agentId];
   return Array.isArray(scoped)
     ? scoped
-    : (catalog?.providerId === "openclaw-seattle" ? [] : (catalog?.models || []));
+    : (["openclaw-seattle", "openclaw-hillsboro"].includes(catalog?.providerId)
+      ? []
+      : (catalog?.models || []));
 }
 
 function normalizeHillsboroAgentId(agentId){

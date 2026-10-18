@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * server.mjs — OpenClaw Bridge HTTP Service
- * Version: 14.3-run-controls (Gateway catalog, per-turn model selection, and GPT run controls)
+ * Version: 14.4-agent-model-policy (Agent-scoped Gateway catalog and per-turn model selection)
  *
  * Phase 2: Final Answer Recovery — returns the last valid assistant message.
  * Milestone 2.3: Progress Callback Client — pushes lifecycle events to web-ai-assistant.
@@ -39,7 +39,7 @@ import {
   buildTurnSessionCreateParams,
   executionModelFromMessages,
   normalizeCodexRunControls,
-  normalizeGatewayCatalog,
+  readAgentScopedGatewayCatalog,
   resolveCatalogSelection,
 } from "./model-routing.mjs";
 
@@ -49,7 +49,7 @@ const DB_PATH = path.join(BRIDGE_DIR, "openclaw_bridge.sqlite");
 const HOST = process.env.OPENCLAW_BRIDGE_HOST || "127.0.0.1";
 const PORT = Number(process.env.OPENCLAW_BRIDGE_PORT || 18793);
 const TOKEN = process.env.OPENCLAW_BRIDGE_TOKEN || "";
-const VERSION = "14.3-run-controls";
+const VERSION = "14.4-agent-model-policy";
 const MAX_BODY_BYTES = Number(process.env.OPENCLAW_BRIDGE_MAX_BODY_BYTES || 24 * 1024 * 1024);
 const RECOVERY_SWEEP_MS = Number(process.env.OPENCLAW_BRIDGE_RECOVERY_SWEEP_MS || 20000);
 const RECOVERY_HISTORY_LIMIT = Number(process.env.OPENCLAW_BRIDGE_RECOVERY_HISTORY_LIMIT || 80);
@@ -168,11 +168,10 @@ function pickAgentId(agentsResult, requestedAgentId) {
 }
 
 async function readGatewayCatalog(refreshModels = false) {
-  const [agents, models] = await Promise.all([
-    bridge.request("agents.list", {}),
-    bridge.request("models.list", { view: "configured", refresh: Boolean(refreshModels) }),
-  ]);
-  return normalizeGatewayCatalog(agents, models);
+  return readAgentScopedGatewayCatalog(
+    (method, params) => bridge.request(method, params),
+    { refreshModels }
+  );
 }
 
 /* ── database ── */

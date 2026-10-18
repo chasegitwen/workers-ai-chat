@@ -285,8 +285,34 @@ describe("Seattle OpenClaw catalog", () => {
     expect(modelsForAgent(scopedCatalog, "kimi").map(model => model.id)).toEqual(["kimi/kimi-for-coding"]);
     expect(modelsForAgent(scopedCatalog, "main").map(model => model.id)).toEqual(["zai/glm-5.2"]);
     expect(modelsForAgent({ providerId:"openclaw-seattle", models:scopedCatalog.models }, "kimi")).toEqual([]);
-    expect(modelsForAgent({ providerId:"openclaw-hillsboro", models:scopedCatalog.models }, "kimi")
-      .map(model => model.id)).toEqual(["zai/glm-5.2", "kimi/kimi-for-coding"]);
+    expect(modelsForAgent({ providerId:"openclaw-hillsboro", models:scopedCatalog.models }, "kimi")).toEqual([]);
+    expect(modelsForAgent({
+      providerId:"openclaw-hillsboro",
+      models:scopedCatalog.models,
+      modelsByAgent:scopedCatalog.modelsByAgent
+    }, "kimi").map(model => model.id)).toEqual(["kimi/kimi-for-coding"]);
+    const hillsboroCatalog = {
+      providerId:"openclaw-hillsboro",
+      models:[],
+      modelsByAgent:{
+        main:[
+          { id:"openai/gpt-5.6-terra" }, { id:"openai/gpt-5.6-sol" },
+          { id:"openai/gpt-5.6-luna" }, { id:"openai/gpt-6-astra" }
+        ],
+        glm:[
+          { id:"zai/glm-5.0-turbo" }, { id:"zai/glm-5" },
+          { id:"zai/glm-5.1" }, { id:"zai/glm-5.2" }
+        ],
+        kimi:[{ id:"kimi/kimi-for-coding" }]
+      }
+    };
+    expect(modelsForAgent(hillsboroCatalog, "main").map(model => model.id)).toEqual([
+      "openai/gpt-5.6-terra", "openai/gpt-5.6-sol", "openai/gpt-5.6-luna", "openai/gpt-6-astra"
+    ]);
+    expect(modelsForAgent(hillsboroCatalog, "glm").map(model => model.id)).toEqual([
+      "zai/glm-5.0-turbo", "zai/glm-5", "zai/glm-5.1", "zai/glm-5.2"
+    ]);
+    expect(modelsForAgent(hillsboroCatalog, "kimi").map(model => model.id)).toEqual(["kimi/kimi-for-coding"]);
     expect(page).toContain('openClawBaseModelSelect.value = "";');
     expect(() => new Function(page.match(/<script>([\s\S]*)<\/script>/)?.[1] || "")).not.toThrow();
   });

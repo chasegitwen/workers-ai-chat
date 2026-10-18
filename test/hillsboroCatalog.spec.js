@@ -48,11 +48,46 @@ const upstreamCatalog = {
     { id: "gpt-6-luna", provider: "openai", name: "GPT-6 Luna", available: true, manualSelectionAllowed: true },
     { id: "gpt-6.1-sol", provider: "openai", name: "GPT-6.1 Sol", available: true, manualSelectionAllowed: true },
     { id: "glm-5.0-turbo", provider: "zai", name: "GLM-5.0 Turbo", available: true, manualSelectionAllowed: true },
+    { id: "glm-5", provider: "zai", name: "GLM-5", available: true, manualSelectionAllowed: true },
     { id: "glm-5.1", provider: "zai", name: "GLM-5.1", available: true, manualSelectionAllowed: true },
     { id: "glm-5.2", provider: "zai", name: "GLM-5.2", available: true, manualSelectionAllowed: true },
     { id: "kimi-for-coding", provider: "kimi", name: "Kimi for Coding", available: true, manualSelectionAllowed: true },
     { id: "hidden", provider: "zai", manualSelectionAllowed: false }
   ],
+  modelsByAgent: {
+    main: [
+      { id: "gpt-5.6-terra", provider: "openai", name: "GPT-5.6 Terra", available: true, manualSelectionAllowed: true },
+      { id: "gpt-5.6-sol", provider: "openai", name: "GPT-5.6 Sol", available: true, manualSelectionAllowed: true },
+      { id: "gpt-5.6-luna", provider: "openai", name: "GPT-5.6 Luna", available: true, manualSelectionAllowed: true },
+      { id: "gpt-6-astra", provider: "openai", name: "GPT-6 Astra", available: true, manualSelectionAllowed: true },
+      { id: "gpt-5.5", provider: "openai", name: "GPT-5.5", available: true, manualSelectionAllowed: true }
+    ],
+    glm: [
+      { id: "glm-5.0-turbo", provider: "zai", name: "GLM-5.0 Turbo", available: true, manualSelectionAllowed: true },
+      { id: "glm-5", provider: "zai", name: "GLM-5", available: true, manualSelectionAllowed: true },
+      { id: "glm-5.1", provider: "zai", name: "GLM-5.1", available: true, manualSelectionAllowed: true },
+      { id: "glm-5.2", provider: "zai", name: "GLM-5.2", available: true, manualSelectionAllowed: true },
+      { id: "hidden", provider: "zai", available: true, manualSelectionAllowed: false }
+    ],
+    kimi: [
+      { id: "kimi-for-coding", provider: "kimi", name: "Kimi for Coding", available: true, manualSelectionAllowed: true }
+    ],
+    glm51: [
+      { id: "glm-5.0-turbo", provider: "zai", available: true, manualSelectionAllowed: true },
+      { id: "glm-5", provider: "zai", available: true, manualSelectionAllowed: true },
+      { id: "glm-5.1", provider: "zai", available: true, manualSelectionAllowed: true },
+      { id: "glm-5.2", provider: "zai", available: true, manualSelectionAllowed: true }
+    ],
+    "glm5-2": [
+      { id: "glm-5.0-turbo", provider: "zai", available: true, manualSelectionAllowed: true },
+      { id: "glm-5", provider: "zai", available: true, manualSelectionAllowed: true },
+      { id: "glm-5.1", provider: "zai", available: true, manualSelectionAllowed: true },
+      { id: "glm-5.2", provider: "zai", available: true, manualSelectionAllowed: true }
+    ],
+    "kimi-for-coding": [
+      { id: "kimi-for-coding", provider: "kimi", available: true, manualSelectionAllowed: true }
+    ]
+  },
   defaultAgentId: "main",
   modelView: "configured"
 };
@@ -79,10 +114,18 @@ describe("Hillsboro Gateway catalog", () => {
       "openai/gpt-5.6-luna",
       "openai/gpt-6-astra",
       "zai/glm-5.0-turbo",
+      "zai/glm-5",
       "zai/glm-5.1",
       "zai/glm-5.2",
       "kimi/kimi-for-coding"
     ]);
+    expect(catalog.modelsByAgent.main.map(model => model.id)).toEqual([
+      "openai/gpt-5.6-terra", "openai/gpt-5.6-sol", "openai/gpt-5.6-luna", "openai/gpt-6-astra"
+    ]);
+    expect(catalog.modelsByAgent.glm.map(model => model.id)).toEqual([
+      "zai/glm-5.0-turbo", "zai/glm-5", "zai/glm-5.1", "zai/glm-5.2"
+    ]);
+    expect(catalog.modelsByAgent.kimi.map(model => model.id)).toEqual(["kimi/kimi-for-coding"]);
     expect(JSON.stringify(catalog)).not.toContain("hidden");
   });
 
@@ -122,6 +165,34 @@ describe("Hillsboro Gateway catalog", () => {
     expect(result.catalog.agents.map(agent => agent.id)).toContain("glm51");
   });
 
+  it("refreshes a legacy unscoped Hillsboro cache instead of reusing its global model list", async () => {
+    const db = fakeDb();
+    db.rows.set("openclaw_catalog_hillsboro_v1", JSON.stringify({
+      providerId: "openclaw-hillsboro",
+      syncedAt: Date.now(),
+      agents: [{ id: "main", defaultModel: "openai/gpt-5.6-terra" }],
+      models: [
+        { id: "openai/gpt-5.6-terra", available: true },
+        { id: "zai/glm-5.2", available: true }
+      ]
+    }));
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(upstreamCatalog)));
+    vi.stubGlobal("fetch", fetchMock);
+    const env = {
+      DB: db,
+      OPENCLAW_BRIDGE_BASE_URL: "https://bridge.example.test",
+      OPENCLAW_BRIDGE_TOKEN: "secret"
+    };
+
+    const result = await getHillsboroOpenClawCatalog(env);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe("fresh");
+    expect(result.catalog.modelsByAgent.main.map(model => model.id)).toEqual([
+      "openai/gpt-5.6-terra", "openai/gpt-5.6-sol", "openai/gpt-5.6-luna", "openai/gpt-6-astra"
+    ]);
+  });
+
   it("accepts only agents and available base models present in the current Hillsboro cache", async () => {
     const db = fakeDb();
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(upstreamCatalog))));
@@ -136,6 +207,9 @@ describe("Hillsboro Gateway catalog", () => {
     expect(await validateHillsboroOpenClawSelection(env, "kimi-for-coding", "kimi/kimi-for-coding")).toBe(true);
     expect(await validateHillsboroOpenClawSelection(env, "main", "openai/gpt-5.6-sol")).toBe(true);
     expect(await validateHillsboroOpenClawSelection(env, "main", "openai/gpt-6-astra")).toBe(true);
+    expect(await validateHillsboroOpenClawSelection(env, "main", "zai/glm-5.2")).toBe(false);
+    expect(await validateHillsboroOpenClawSelection(env, "glm", "openai/gpt-5.6-terra")).toBe(false);
+    expect(await validateHillsboroOpenClawSelection(env, "kimi", "zai/glm-5.2")).toBe(false);
     expect(await validateHillsboroOpenClawSelection(env, "main", "openai/gpt-5.5")).toBe(false);
     expect(await validateHillsboroOpenClawSelection(env, "main", "openai/gpt-6-sol")).toBe(false);
     expect(await validateHillsboroOpenClawSelection(env, "main", "openai/gpt-6-luna")).toBe(false);

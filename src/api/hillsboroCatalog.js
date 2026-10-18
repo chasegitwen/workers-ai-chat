@@ -34,15 +34,46 @@ function isSelectableModelId(value) {
   return Boolean(id) && !INCOMPATIBLE_MODEL_IDS.has(id);
 }
 
+function normalizeModels(payload) {
+  return rows(payload, "models").map(row => {
+    const rawId = safeId(row?.id || row?.modelId);
+    const provider = safeId(row?.provider || row?.providerId);
+    const id = rawId.includes("/") ? rawId : (provider && rawId ? provider + "/" + rawId : "");
+    if (!isSelectableModelId(id) || row?.manualSelectionAllowed === false) return null;
+    return {
+      id,
+      name: String(row?.name || row?.displayName || id).slice(0, 120),
+      available: row?.available !== false
+    };
+  }).filter(Boolean);
+}
+
+function hasAgentScopedModels(catalog) {
+  return Boolean(catalog?.agents?.length)
+    && catalog.agents.every(agent => Array.isArray(catalog.modelsByAgent?.[agent.id]));
+}
+
 function applyHillsboroModelPolicy(catalog) {
   if (!catalog || typeof catalog !== "object") return null;
+  const agents = rows(catalog, "agents").map(agent => ({
+    ...agent,
+    defaultModel: isSelectableModelId(agent?.defaultModel) ? safeId(agent.defaultModel) : ""
+  }));
+  const hasScopedPayload = catalog.modelsByAgent && typeof catalog.modelsByAgent === "object";
+  const modelsByAgent = hasScopedPayload
+    ? Object.fromEntries(agents.map(agent => [
+      agent.id,
+      [...new Map(normalizeModels(catalog.modelsByAgent?.[agent.id]).map(model => [model.id, model])).values()]
+    ]))
+    : null;
+  const models = modelsByAgent
+    ? [...new Map(Object.values(modelsByAgent).flat().map(model => [model.id, model])).values()]
+    : normalizeModels(catalog);
   return {
     ...catalog,
-    agents: rows(catalog, "agents").map(agent => ({
-      ...agent,
-      defaultModel: isSelectableModelId(agent?.defaultModel) ? safeId(agent.defaultModel) : ""
-    })),
-    models: rows(catalog, "models").filter(model => isSelectableModelId(model?.id))
+    agents,
+    models,
+    ...(modelsByAgent ? { modelsByAgent } : {})
   };
 }
 
@@ -56,23 +87,18 @@ export function normalizeHillsboroGatewayCatalog(payload, syncedAt = Date.now())
       defaultModel: safeId(row?.defaultModel || row?.model?.primary || row?.model?.id || row?.model || row?.effectiveModel)
     };
   }).filter(Boolean);
-  const models = rows(payload, "models").map(row => {
-    const rawId = safeId(row?.id || row?.modelId);
-    const provider = safeId(row?.provider || row?.providerId);
-    const id = rawId.includes("/") ? rawId : (provider && rawId ? provider + "/" + rawId : "");
-    if (!isSelectableModelId(id) || row?.manualSelectionAllowed === false) return null;
-    return {
-      id,
-      name: String(row?.name || row?.displayName || id).slice(0, 120),
-      available: row?.available !== false
-    };
-  }).filter(Boolean);
+  const modelsByAgent = Object.fromEntries(agents.map(agent => [
+    agent.id,
+    [...new Map(normalizeModels(payload?.modelsByAgent?.[agent.id]).map(model => [model.id, model])).values()]
+  ]));
+  const models = [...new Map(Object.values(modelsByAgent).flat().map(model => [model.id, model])).values()];
   return applyHillsboroModelPolicy({
     providerId: "openclaw-hillsboro",
     runtimeId: "hillsboro-openclaw",
     source: "gateway_rpc",
     agents: [...new Map(agents.map(row => [row.id, row])).values()],
-    models: [...new Map(models.map(row => [row.id, row])).values()],
+    models,
+    modelsByAgent,
     defaultAgentId: safeAgentId(payload?.defaultAgentId || payload?.defaultId),
     modelView: "configured",
     syncedAt
@@ -104,7 +130,9 @@ async function refresh(env, refreshModels = false) {
       const result = await openclawBridgeClient(env).getCatalog({ refresh: refreshModels });
       if (!result.ok) throw new Error(result.error || "catalog_unavailable");
       const catalog = normalizeHillsboroGatewayCatalog(result.data);
-      if (!catalog.agents.length || !catalog.models.length) throw new Error("catalog_empty");
+      if (!catalog.agents.length || !catalog.models.length || !hasAgentScopedModels(catalog)) {
+        throw new Error("catalog_empty");
+      }
       await writeCache(env, catalog);
       return catalog;
     })().finally(() => { pendingRefresh = null; });
@@ -114,7 +142,8 @@ async function refresh(env, refreshModels = false) {
 
 export async function getHillsboroOpenClawCatalog(env, { force = false } = {}) {
   const cached = await readCache(env);
-  if (!force && cached && Date.now() - Number(cached.syncedAt || 0) < CACHE_MAX_AGE_MS) {
+  if (!force && cached && hasAgentScopedModels(cached)
+      && Date.now() - Number(cached.syncedAt || 0) < CACHE_MAX_AGE_MS) {
     return { ok: true, status: "fresh", catalog: cached };
   }
   try {
@@ -148,6 +177,10 @@ export async function validateHillsboroOpenClawSelection(env, agentId, baseModel
   if (!catalog) {
     try { catalog = await refresh(env); } catch { return false; }
   }
-  return catalog.agents.some(agent => agent.id === normalizedAgentId)
-    && (!normalizedModelId || catalog.models.some(model => model.id === normalizedModelId && model.available !== false));
+  const agent = catalog.agents.find(item => item.id === normalizedAgentId);
+  const scopedModels = catalog.modelsByAgent?.[normalizedAgentId];
+  if (!agent || !Array.isArray(scopedModels)) return false;
+  const effectiveModelId = normalizedModelId || safeId(agent.defaultModel);
+  return Boolean(effectiveModelId)
+    && scopedModels.some(model => model.id === effectiveModelId && model.available !== false);
 }

@@ -49,17 +49,8 @@ function rows(payload, key) {
   return Array.isArray(payload?.[key]) ? payload[key] : [];
 }
 
-export function normalizeGatewayCatalog(agentsPayload, modelsPayload, syncedAt = Date.now()) {
-  const agents = rows(agentsPayload, "agents").map(row => {
-    const id = safeAgentId(row?.id || row?.agentId);
-    if (!id || row?.kind === "system") return null;
-    return {
-      id,
-      name: String(row?.name || row?.displayName || id).slice(0, 120),
-      defaultModel: selectableModelId(row?.model?.primary || row?.model?.id || row?.model || row?.effectiveModel)
-    };
-  }).filter(Boolean);
-  const models = rows(modelsPayload, "models").map(row => {
+function normalizeModels(modelsPayload) {
+  return rows(modelsPayload, "models").map(row => {
     const rawId = safeId(row?.id || row?.modelId);
     const provider = safeId(row?.provider || row?.providerId);
     const id = rawId.includes("/") ? rawId : (provider && rawId ? `${provider}/${rawId}` : "");
@@ -72,13 +63,49 @@ export function normalizeGatewayCatalog(agentsPayload, modelsPayload, syncedAt =
       manualSelectionAllowed: true
     };
   }).filter(Boolean);
+}
+
+export function normalizeGatewayCatalog(agentsPayload, modelsByAgentPayload = {}, syncedAt = Date.now()) {
+  const agents = rows(agentsPayload, "agents").map(row => {
+    const id = safeAgentId(row?.id || row?.agentId);
+    if (!id || row?.kind === "system") return null;
+    return {
+      id,
+      name: String(row?.name || row?.displayName || id).slice(0, 120),
+      defaultModel: selectableModelId(row?.model?.primary || row?.model?.id || row?.model || row?.effectiveModel)
+    };
+  }).filter(Boolean);
+  const modelsByAgent = Object.fromEntries(agents.map(agent => [
+    agent.id,
+    [...new Map(normalizeModels(modelsByAgentPayload?.[agent.id]).map(model => [model.id, model])).values()]
+  ]));
+  const models = [...new Map(
+    Object.values(modelsByAgent).flat().map(model => [model.id, model])
+  ).values()];
   return {
     agents: [...new Map(agents.map(row => [row.id, row])).values()],
-    models: [...new Map(models.map(row => [row.id, row])).values()],
+    models,
+    modelsByAgent,
     defaultAgentId: safeAgentId(agentsPayload?.defaultId || agentsPayload?.defaultAgentId),
     modelView: "configured",
     syncedAt
   };
+}
+
+export async function readAgentScopedGatewayCatalog(request, { refreshModels = false, syncedAt = Date.now() } = {}) {
+  const agentsPayload = await request("agents.list", {});
+  const agentIds = [...new Set(rows(agentsPayload, "agents")
+    .map(row => row?.kind === "system" ? "" : safeAgentId(row?.id || row?.agentId))
+    .filter(Boolean))];
+  const entries = await Promise.all(agentIds.map(async agentId => [
+    agentId,
+    await request("models.list", {
+      agentId,
+      view: "configured",
+      refresh: Boolean(refreshModels)
+    })
+  ]));
+  return normalizeGatewayCatalog(agentsPayload, Object.fromEntries(entries), syncedAt);
 }
 
 export function resolveCatalogSelection(catalog, requestedAgentId, requestedModelId = "") {
@@ -91,7 +118,11 @@ export function resolveCatalogSelection(catalog, requestedAgentId, requestedMode
   }
   const resolvedModelId = requested || safeId(agent.defaultModel);
   if (!resolvedModelId) return { ok: false, statusCode: 409, error: "agent_default_model_unresolved" };
-  const model = catalog.models.find(item => item.id === resolvedModelId && item.available !== false && item.manualSelectionAllowed !== false);
+  const scopedModels = Array.isArray(catalog?.modelsByAgent?.[agentId])
+    ? catalog.modelsByAgent[agentId]
+    : [];
+  const model = scopedModels.find(item => item.id === resolvedModelId
+    && item.available !== false && item.manualSelectionAllowed !== false);
   if (!model) return { ok: false, statusCode: 400, error: "base_model_not_configured" };
   return {
     ok: true,

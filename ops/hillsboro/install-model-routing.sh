@@ -33,8 +33,9 @@ catalog=$(curl -fsS -H "Authorization: Bearer $OPENCLAW_BRIDGE_TOKEN" \
 
 node -e '
 const [health, catalog] = process.argv.slice(1).map(JSON.parse);
-if (!health.ok || health.version !== "14.3-run-controls") throw new Error("bridge health verification failed");
-if (catalog.modelView !== "configured" || !catalog.agents?.length || !catalog.models?.length) {
+if (!health.ok || health.version !== "14.4-agent-model-policy") throw new Error("bridge health verification failed");
+if (catalog.modelView !== "configured" || !catalog.agents?.length || !catalog.models?.length
+    || !catalog.agents.every(agent => Array.isArray(catalog.modelsByAgent?.[agent.id]))) {
   throw new Error("Gateway catalog verification failed");
 }
 console.log(JSON.stringify({
@@ -43,6 +44,8 @@ console.log(JSON.stringify({
   gatewayConnected: health.gateway_connected,
   agents: catalog.agents.map(({ id, defaultModel }) => ({ id, defaultModel })),
   models: catalog.models.map(({ id, provider, available }) => ({ id, provider, available })),
+  modelsByAgent: Object.fromEntries(Object.entries(catalog.modelsByAgent)
+    .map(([agentId, models]) => [agentId, models.map(({ id }) => id)])),
   backup: process.argv[3]
 }, null, 2));
 ' "$health" "$catalog" "$bridge_dir/server.mjs.before-model-routing-$timestamp"

@@ -67,6 +67,14 @@ const catalog = {
     { id: "zai/glm-5.2", available: true },
     { id: "kimi/kimi-for-coding", available: true }
   ],
+  modelsByAgent: {
+    main: [{ id: "openai/gpt-5.6-terra", available: true }],
+    glm: [
+      { id: "zai/glm-5.1", available: true },
+      { id: "zai/glm-5.2", available: true }
+    ],
+    kimi: [{ id: "kimi/kimi-for-coding", available: true }]
+  },
   defaultAgentId: "main",
   modelView: "configured",
   syncedAt: Date.now()
@@ -181,6 +189,30 @@ describe("Hillsboro Agent routing", () => {
     expect(bridgeBodies[0].agent_id).toBe(expectedAgent);
     expect(bridgeBodies[0].session_key).toContain("agent:" + expectedAgent + ":");
     expect(bridgeBodies[0].base_model_id).toBe(expectedBaseModel);
+  });
+
+  it.each([
+    ["main", "zai/glm-5.2"],
+    ["glm", "openai/gpt-5.6-terra"],
+    ["kimi", "zai/glm-5.1"]
+  ])("rejects Agent %s with model %s outside its policy", async (agentId, baseModelId) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const env = {
+      DB: new FakeDb(),
+      OPENCLAW_BRIDGE_BASE_URL: "https://bridge.example.test",
+      OPENCLAW_BRIDGE_TOKEN: "server-only",
+      OPENCLAW_HILLSBORO_API_KEY: "server-only"
+    };
+
+    const response = await handleChat(new Request("https://app.example/api/chat", {
+      method: "POST",
+      body: JSON.stringify(requestBody(agentId, baseModelId))
+    }), env, { waitUntil() {} });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: "invalid_openclaw_selection" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("migrates saved Hillsboro Agent preferences without changing Seattle IDs", () => {

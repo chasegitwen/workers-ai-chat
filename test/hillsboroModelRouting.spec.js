@@ -20,7 +20,9 @@ const catalog = normalizeGatewayCatalog(
       { provider: "openai", id: "gpt-5.6-terra", available: true },
       { provider: "openai", id: "gpt-5.6-sol", available: true },
       { provider: "openai", id: "gpt-5.6-luna", available: true },
-      { provider: "openai", id: "gpt-6-astra", available: true }
+      { provider: "openai", id: "gpt-6-astra", available: true },
+      { provider: "zai", id: "glm-5", available: true, tags: ["fallback#1"] },
+      { provider: "kimi", id: "kimi-for-coding", available: true, tags: ["fallback#2", "configured"] }
     ] },
     glm: { models: [
       { provider: "zai", id: "glm-5.0-turbo", available: true },
@@ -67,7 +69,11 @@ describe("Hillsboro per-turn Gateway model routing", () => {
   it("reads configured models separately for every Gateway Agent", async () => {
     const calls = [];
     const payloads = {
-      main: { models: [{ provider: "openai", id: "gpt-5.6-terra" }] },
+      main: { models: [
+        { provider: "openai", id: "gpt-5.6-terra", tags: ["default", "configured"] },
+        { provider: "zai", id: "glm-5", tags: ["fallback#1"] },
+        { provider: "kimi", id: "kimi-for-coding", tags: ["fallback#2", "configured"] }
+      ] },
       glm: { models: [{ provider: "zai", id: "glm-5.2" }] },
       kimi: { models: [{ provider: "kimi", id: "kimi-for-coding" }] }
     };

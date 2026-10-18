@@ -54,7 +54,11 @@ function normalizeModels(modelsPayload) {
     const rawId = safeId(row?.id || row?.modelId);
     const provider = safeId(row?.provider || row?.providerId);
     const id = rawId.includes("/") ? rawId : (provider && rawId ? `${provider}/${rawId}` : "");
-    if (!selectableModelId(id) || row?.manualSelectionAllowed === false) return null;
+    const tags = Array.isArray(row?.tags)
+      ? row.tags.map(tag => String(tag || "").trim().toLowerCase())
+      : [];
+    const automaticFallback = tags.some(tag => tag === "fallback" || tag.startsWith("fallback#"));
+    if (!selectableModelId(id) || row?.manualSelectionAllowed === false || automaticFallback) return null;
     return {
       id,
       name: String(row?.name || row?.displayName || id).slice(0, 120),

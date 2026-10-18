@@ -27,8 +27,8 @@ set -a
 . /etc/openclaw-bridge.env
 set +a
 
-health=$(curl -fsS http://127.0.0.1:18793/health)
-catalog=$(curl -fsS -H "Authorization: Bearer $OPENCLAW_BRIDGE_TOKEN" \
+health=$(curl --retry 15 --retry-delay 1 --retry-connrefused -fsS http://127.0.0.1:18793/health)
+catalog=$(curl --retry 3 --retry-delay 1 --retry-connrefused -fsS -H "Authorization: Bearer $OPENCLAW_BRIDGE_TOKEN" \
   "http://127.0.0.1:18793/v1/openclaw/catalog?refresh=1")
 
 node -e '

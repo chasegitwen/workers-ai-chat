@@ -49,16 +49,17 @@ function rows(payload, key) {
   return Array.isArray(payload?.[key]) ? payload[key] : [];
 }
 
+// Hillsboro VPS verification, 2026-10-18:
+// - Agent-scoped configured catalog: main 9 models, glm 4 models, kimi 1 model.
+// - A single main conversation retained prior context while switching GPT -> GLM -> Kimi.
+// Gateway fallback/fallback# tags describe routing order and do not, by themselves,
+// make an otherwise selectable configured model ineligible for manual selection.
 function normalizeModels(modelsPayload) {
   return rows(modelsPayload, "models").map(row => {
     const rawId = safeId(row?.id || row?.modelId);
     const provider = safeId(row?.provider || row?.providerId);
     const id = rawId.includes("/") ? rawId : (provider && rawId ? `${provider}/${rawId}` : "");
-    const tags = Array.isArray(row?.tags)
-      ? row.tags.map(tag => String(tag || "").trim().toLowerCase())
-      : [];
-    const automaticFallback = tags.some(tag => tag === "fallback" || tag.startsWith("fallback#"));
-    if (!selectableModelId(id) || row?.manualSelectionAllowed === false || automaticFallback) return null;
+    if (!selectableModelId(id) || row?.manualSelectionAllowed === false) return null;
     return {
       id,
       name: String(row?.name || row?.displayName || id).slice(0, 120),

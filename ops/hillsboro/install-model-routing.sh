@@ -32,7 +32,7 @@ catalog=$(curl --retry 3 --retry-delay 1 --retry-connrefused -fsS -H "Authorizat
   "http://127.0.0.1:18793/v1/openclaw/catalog?refresh=1")
 
 node -e '
-const [health, catalog] = process.argv.slice(1).map(JSON.parse);
+const [health, catalog] = process.argv.slice(1, 3).map(JSON.parse);
 if (!health.ok || health.version !== "14.4-agent-model-policy") throw new Error("bridge health verification failed");
 if (catalog.modelView !== "configured" || !catalog.agents?.length || !catalog.models?.length
     || !catalog.agents.every(agent => Array.isArray(catalog.modelsByAgent?.[agent.id]))) {

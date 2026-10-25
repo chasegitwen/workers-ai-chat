@@ -38,8 +38,6 @@ ON CONFLICT(id) DO UPDATE SET
   capabilities_json = excluded.capabilities_json,
   agents_json = excluded.agents_json,
   bridge_mode = excluded.bridge_mode,
-  status = excluded.status,
-  is_enabled = excluded.is_enabled,
   last_verified_at = COALESCE(openclaw_runtimes.last_verified_at, excluded.last_verified_at),
   updated_at = excluded.updated_at;
 
@@ -63,14 +61,11 @@ SELECT
   CURRENT_TIMESTAMP,
   CURRENT_TIMESTAMP
 FROM projects p
-WHERE p.is_archived = 0;
-
-UPDATE project_openclaw_runtime_bindings
-SET is_default = CASE WHEN runtime_id = 'hillsboro-openclaw' THEN 1 ELSE 0 END,
-  updated_at = CURRENT_TIMESTAMP
-WHERE project_id IN (
-  SELECT project_id
-  FROM project_openclaw_runtime_bindings
-  WHERE runtime_id = 'oracle-openclaw'
-)
-AND runtime_id IN ('hillsboro-openclaw', 'oracle-openclaw');
+WHERE p.is_archived = 0
+  AND EXISTS (
+    SELECT 1
+    FROM project_openclaw_runtime_bindings hillsboro
+    WHERE hillsboro.project_id = p.id
+      AND hillsboro.runtime_id = 'hillsboro-openclaw'
+      AND hillsboro.is_enabled = 1
+  );

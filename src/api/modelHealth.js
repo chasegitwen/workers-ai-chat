@@ -23,7 +23,7 @@ function modelSupportsText(model) {
 
 function flattenHealthTargets(providerCatalog) {
   return (providerCatalog || [])
-    .filter(provider => provider.enabled !== false)
+    .filter(provider => provider.enabled !== false && provider.id !== "openclaw-oracle")
     .flatMap(provider => (provider.models || [])
       .filter(model => model.enabled !== false && modelSupportsText(model))
       .map(model => ({

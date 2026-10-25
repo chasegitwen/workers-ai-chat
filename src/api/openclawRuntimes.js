@@ -2,6 +2,7 @@ import { jsonResponse } from "../utils/response.js";
 import { normalizeHillsboroAgentId } from "./hillsboroAgentRouting.js";
 
 export const HILLSBORO_OPENCLAW_RUNTIME_ID = "hillsboro-openclaw";
+export const ORACLE_OPENCLAW_RUNTIME_ID = "oracle-openclaw";
 
 function isoNow() {
   return new Date().toISOString();
@@ -314,6 +315,34 @@ export async function ensureHillsboroRuntimeBindingForProject(db, projectId) {
   return {
     ok: true,
     binding: await readProjectRuntimeBinding(db, cleanProjectId, HILLSBORO_OPENCLAW_RUNTIME_ID)
+  };
+}
+
+export async function ensureOracleRuntimeBindingForProject(db, projectId) {
+  const cleanProjectId = cleanId(projectId);
+  if (!db || !cleanProjectId) {
+    return { ok: false, reason: "missing_db_or_project" };
+  }
+  const runtime = await readOpenClawRuntime(db, ORACLE_OPENCLAW_RUNTIME_ID);
+  if (!runtime || !runtime.is_enabled || runtime.bridge_mode !== "bridge") {
+    return { ok: false, reason: "oracle_runtime_not_available", runtime_id: ORACLE_OPENCLAW_RUNTIME_ID };
+  }
+  const timestamp = isoNow();
+  await db.prepare(
+    `INSERT OR IGNORE INTO project_openclaw_runtime_bindings (
+      project_id,
+      runtime_id,
+      is_default,
+      is_enabled,
+      allowed_agents_json,
+      default_agent_id,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, 0, 1, '["main"]', 'main', ?, ?)`
+  ).bind(cleanProjectId, ORACLE_OPENCLAW_RUNTIME_ID, timestamp, timestamp).run();
+  return {
+    ok: true,
+    binding: await readProjectRuntimeBinding(db, cleanProjectId, ORACLE_OPENCLAW_RUNTIME_ID)
   };
 }
 

@@ -1,5 +1,8 @@
 import { jsonResponse } from "../utils/response.js";
-import { ensureHillsboroRuntimeBindingForProject } from "./openclawRuntimes.js";
+import {
+  ensureHillsboroRuntimeBindingForProject,
+  ensureOracleRuntimeBindingForProject
+} from "./openclawRuntimes.js";
 
 export const DEFAULT_PROJECT_ID = "default";
 export const DEFAULT_PROJECT_NAME = "Default Project";
@@ -161,6 +164,7 @@ export async function handleProjects(request, env, url) {
         ) VALUES (?, ?, ?, ?, 0, 0, ?, ?)`
       ).bind(id, name, slug, description, timestamp, timestamp).run();
       await ensureHillsboroRuntimeBindingForProject(env.DB, id);
+      await ensureOracleRuntimeBindingForProject(env.DB, id);
     } catch (err) {
       return jsonResponse({
         ok: false,

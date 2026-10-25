@@ -45,7 +45,7 @@ function normalizeModels(payload) {
 
 export function normalizeOracleOpenClawCatalog(payload, syncedAt = Date.now()) {
   const sourceAgents = rows(payload, "agents");
-  const agents = (sourceAgents.length ? sourceAgents : [{ id: "main", name: "Main", defaultModel: "openai/gpt-5.6-sol" }])
+  const agents = sourceAgents
     .map(row => {
       const id = safeAgentId(row?.id || row?.agentId);
       if (!id || row?.kind === "system") return null;
@@ -55,10 +55,9 @@ export function normalizeOracleOpenClawCatalog(payload, syncedAt = Date.now()) {
         defaultModel: safeId(row?.defaultModel || row?.model?.primary || row?.model?.id || row?.model || row?.effectiveModel)
       };
     }).filter(Boolean);
-  const globalModels = normalizeModels(payload);
   const modelsByAgent = Object.fromEntries(agents.map(agent => {
     const scoped = normalizeModels(payload?.modelsByAgent?.[agent.id]);
-    return [agent.id, scoped.length ? scoped : globalModels];
+    return [agent.id, scoped];
   }));
   const models = [...new Map(Object.values(modelsByAgent).flat().map(model => [model.id, model])).values()];
   return {

@@ -73,7 +73,7 @@ const OPENCLAW_INSTANCE_ALLOWLIST = Object.freeze({
   },
   "openclaw-oracle": {
     apiBase: "https://oracle-ai.hnsnowground.cfd/v1",
-    apiKeyEnv: "ORACLE_OPENCLAW_BRIDGE_TOKEN",
+    apiKeyEnv: "",
     runtimeId: "oracle-openclaw"
   }
 });
@@ -82,7 +82,7 @@ const ORACLE_OPENCLAW_PROVIDER = Object.freeze({
   label: "Oracle / Phoenix OpenClaw",
   providerType: "openai-compatible",
   apiBase: "https://oracle-ai.hnsnowground.cfd/v1",
-  apiKeyEnv: "ORACLE_OPENCLAW_BRIDGE_TOKEN",
+  apiKeyEnv: "",
   openclawExecutionMode: "bridge",
   builtin: true,
   enabled: true,
@@ -995,6 +995,44 @@ async function applyOpenClawBridgeFinalCallback(env, task, payload) {
     return false;
   }
   const now = Date.now();
+  const sequence = bridgeCallbackSequence(payload);
+  const claimedHash = await hashOpenClawBridgeResult(finalText);
+  const claimResult = await env.DB.prepare(
+    `UPDATE openclaw_tasks
+      SET status = 'finalizing',
+        updated_at = ?,
+        completed_at = COALESCE(completed_at, ?),
+        error = '',
+        latency_ms = COALESCE(latency_ms, ? - started_at),
+        remote_status = 'completed',
+        remote_progress = 100,
+        remote_message = 'OpenClaw Bridge final received',
+        bridge_result_hash = ?,
+        bridge_last_seen_at = ?,
+        bridge_last_sequence = CASE
+          WHEN ? IS NULL THEN bridge_last_sequence
+          ELSE MAX(COALESCE(bridge_last_sequence, -1), ?)
+        END
+      WHERE id = ?
+        AND LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'canceled', 'cancel_requested')
+        AND (
+          LOWER(COALESCE(status, '')) != 'finalizing'
+          OR bridge_result_hash = ?
+        )`
+  ).bind(
+    now,
+    now,
+    now,
+    claimedHash,
+    new Date(now).toISOString(),
+    sequence,
+    sequence,
+    latestTask.id,
+    claimedHash
+  ).run();
+  if (Number(claimResult?.meta?.changes ?? 0) !== 1) {
+    return false;
+  }
   const metadata = {
     ...openClawTaskMessageMetadata(latestTask),
     openclaw_completion: { source: "callback", event_id: payload.event_id, sequence: bridgeCallbackSequence(payload) }
@@ -1030,43 +1068,21 @@ async function applyOpenClawBridgeFinalCallback(env, task, payload) {
   if (!applied) {
     return false;
   }
-  const sequence = bridgeCallbackSequence(payload);
   const persistedText = String(assistantMessage?.content || finalText);
   const bridgeResultHash = await hashOpenClawBridgeResult(persistedText);
   await env.DB.prepare(
     `UPDATE openclaw_tasks
-      SET status = ?,
-        updated_at = ?,
-        completed_at = COALESCE(completed_at, ?),
-        error = ?,
-        latency_ms = COALESCE(latency_ms, ? - started_at),
+      SET status = 'completed',
         assistant_message_id = COALESCE(NULLIF(?, ''), assistant_message_id),
-        remote_status = ?,
-        remote_progress = ?,
-        remote_message = ?,
-        bridge_result_hash = ?,
-        bridge_last_seen_at = ?,
-        bridge_last_sequence = CASE
-          WHEN ? IS NULL THEN bridge_last_sequence
-          ELSE MAX(COALESCE(bridge_last_sequence, -1), ?)
-        END
+        bridge_result_hash = ?
       WHERE id = ?
-        AND LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'canceled', 'cancel_requested')`
+        AND LOWER(COALESCE(status, '')) = 'finalizing'
+        AND bridge_result_hash = ?`
   ).bind(
-    "completed",
-    now,
-    now,
-    "",
-    now,
     assistantMessage?.id || existingMessageId || "",
-    "completed",
-    100,
-    "OpenClaw Bridge final received",
     bridgeResultHash,
-    new Date(now).toISOString(),
-    sequence,
-    sequence,
-    latestTask.id
+    latestTask.id,
+    claimedHash
   ).run();
   if (env.DB) {
     await maybeUpdateConversationSummary(env, latestTask.conversationId || latestTask.conversation_id);
@@ -1559,7 +1575,7 @@ function isOpenClawTaskActive(task) {
 }
 
 function isOpenClawTaskTerminalStatus(status) {
-  return ["completed", "failed", "aborted", "cancelled", "canceled"].includes(String(status || ""));
+  return ["completed", "failed", "aborted", "cancelled", "canceled", "cancel_requested"].includes(String(status || ""));
 }
 
 async function readOpenClawTaskById(env, taskId) {
@@ -1895,6 +1911,12 @@ async function syncOpenClawRemoteTask(env, localTask, remoteResult, patch = {}) 
           AND json_extract(CASE WHEN json_valid(m.metadata) THEN m.metadata ELSE '{}' END,
             '$.openclaw_completion.source') = 'callback')`
     : "";
+  const normalizedNextStatus = String(nextStatus || "").toLowerCase();
+  const statusGuardSql = normalizedNextStatus === "completed"
+    ? "AND LOWER(COALESCE(status, '')) NOT IN ('finalizing', 'cancelled', 'canceled', 'cancel_requested')"
+    : ["cancelled", "canceled", "cancel_requested"].includes(normalizedNextStatus)
+      ? "AND LOWER(COALESCE(status, '')) NOT IN ('completed', 'finalizing', 'failed', 'aborted')"
+      : "AND LOWER(COALESCE(status, '')) NOT IN ('completed', 'finalizing', 'failed', 'aborted', 'cancelled', 'canceled', 'cancel_requested')";
   try {
     await env.DB.prepare(
       `UPDATE openclaw_tasks
@@ -1906,7 +1928,7 @@ async function syncOpenClawRemoteTask(env, localTask, remoteResult, patch = {}) 
           remote_progress = ?,
           remote_message = ?,
           cancelled_at = COALESCE(?, cancelled_at)
-        WHERE id = ? ${preserveFinalSql}`
+        WHERE id = ? ${statusGuardSql} ${preserveFinalSql}`
     ).bind(
       nextStatus,
       now,
@@ -2159,6 +2181,9 @@ async function finalizeOpenClawTaskResult(env, task) {
     return { ok: true, saved: false, duplicate: true, task: latestTask };
   }
   const localStatus = String(latestTask.storedStatus || latestTask.status || "").toLowerCase();
+  if (["cancelled", "canceled", "cancel_requested"].includes(localStatus)) {
+    return { ok: false, error: "OpenClaw task is canceled", task: latestTask };
+  }
   if (latestTask.assistantMessageId && bridgeTask) {
     const existingAssistantMessage = await readAssistantMessageById(env, latestTask.assistantMessageId);
     existingResultFinality = classifyOpenClawBridgeResultFinality(existingAssistantMessage?.content);
@@ -2258,6 +2283,11 @@ async function finalizeOpenClawTaskResult(env, task) {
   latestTask = await syncOpenClawRemoteTask(env, latestTask, remoteResult, {
     status: "completed"
   }) || latestTask;
+  if (["cancelled", "canceled", "cancel_requested"].includes(
+    String(latestTask.storedStatus || latestTask.status || "").toLowerCase()
+  )) {
+    return { ok: false, error: "OpenClaw task is canceled", task: latestTask };
+  }
   const bridgeResultHash = isOpenClawBridgeTask(latestTask)
     ? await hashOpenClawBridgeResult(reply)
     : "";
@@ -3638,14 +3668,14 @@ async function readSavedProviders(env) {
     const settings = JSON.parse(row.value);
     if (Array.isArray(settings?.providers) && settings.providers.length) {
       return mergeProviders(
-        settings.providers.map(provider => normalizeProvider(provider)).filter(Boolean),
-        [ORACLE_OPENCLAW_PROVIDER]
+        [ORACLE_OPENCLAW_PROVIDER],
+        settings.providers.map(provider => normalizeProvider(provider)).filter(Boolean)
       );
     }
     if (Array.isArray(settings?.categories) || Array.isArray(settings?.modelCategories)) {
       return mergeProviders(
-        providersFromCategories(settings.categories || settings.modelCategories),
-        [ORACLE_OPENCLAW_PROVIDER]
+        [ORACLE_OPENCLAW_PROVIDER],
+        providersFromCategories(settings.categories || settings.modelCategories)
       );
     }
     return [ORACLE_OPENCLAW_PROVIDER];
@@ -3682,9 +3712,6 @@ async function readSavedOpenClawInstance(env, instanceId, providerId) {
     }
     const requestedId = String(instanceId || providerId || "").trim();
     const instance = instances.find(item => String(item?.id || "").trim() === requestedId);
-    if (!instance && requestedId === "openclaw-oracle" && providerId === "openclaw-oracle") {
-      return { id: requestedId, connectionId: requestedId, ...OPENCLAW_INSTANCE_ALLOWLIST[requestedId] };
-    }
     if (!instance) return null;
     const connectionId = String(instance.connectionId || providerId || "").trim();
     const allowed = OPENCLAW_INSTANCE_ALLOWLIST[connectionId];
@@ -5904,6 +5931,22 @@ export async function handleChat(request, env, ctx) {
         "Content-Type": "application/json; charset=utf-8"
       }
     });
+  }
+  if (isOpenClawRequest && runtimeResolution?.ok) {
+    const selectedProviderId = String(openClawTarget?.provider?.id || provider || "").trim();
+    const expectedRuntimeId = String(OPENCLAW_INSTANCE_ALLOWLIST[selectedProviderId]?.runtimeId || "").trim();
+    const resolvedRuntimeId = String(runtimeResolution.runtime_id || "").trim();
+    const resolvedProviderId = String(runtimeResolution.provider_id || "").trim();
+    if ((expectedRuntimeId && (resolvedRuntimeId || openClawBridgeEnabled) && resolvedRuntimeId !== expectedRuntimeId)
+      || (resolvedProviderId && resolvedProviderId !== selectedProviderId)) {
+      return jsonResponse({
+        ok: false,
+        error: "runtime_provider_mismatch",
+        message: "Selected OpenClaw provider does not own the resolved runtime",
+        provider_id: selectedProviderId,
+        runtime_id: resolvedRuntimeId
+      }, 400);
+    }
   }
   const explicitOpenClawAgentId = String(agentId || camelAgentId || "").trim();
   const routedOpenClawAgentId = hillsboroBridgeTarget

@@ -282,6 +282,13 @@ class FakeD1 {
     if (normalized.startsWith("update openclaw_tasks") && normalized.includes("cancelled_at = coalesce")) {
       const task = this.openclawTasks.get(bindings[8]);
       if (task) {
+        const nextStatus = String(bindings[0] || "").toLowerCase();
+        const currentStatus = String(task.status || "").toLowerCase();
+        if (nextStatus === "completed" && ["finalizing", "cancelled", "canceled", "cancel_requested"].includes(currentStatus)) return 0;
+        if (["cancelled", "canceled", "cancel_requested"].includes(nextStatus)
+          && ["completed", "finalizing", "failed", "aborted"].includes(currentStatus)) return 0;
+        if (!["completed", "cancelled", "canceled", "cancel_requested"].includes(nextStatus)
+          && ["completed", "finalizing", "failed", "aborted", "cancelled", "canceled", "cancel_requested"].includes(currentStatus)) return 0;
         const message = this.messages.get(task.assistant_message_id) || this.messages.get("openclaw-assistant-" + task.id);
         if (normalized.includes("and not exists") && JSON.parse(message?.metadata || "{}").openclaw_completion?.source === "callback") return 0;
         task.status = bindings[0];
@@ -313,6 +320,39 @@ class FakeD1 {
         task.bridge_result_hash = bindings[0];
       }
       return;
+    }
+    if (normalized.startsWith("update openclaw_tasks") && normalized.includes("set status = 'finalizing'")) {
+      const task = this.openclawTasks.get(bindings[7]);
+      if (!task || ["cancelled", "canceled", "cancel_requested"].includes(String(task.status).toLowerCase())) {
+        return 0;
+      }
+      if (String(task.status).toLowerCase() === "finalizing" && task.bridge_result_hash !== bindings[8]) {
+        return 0;
+      }
+      task.status = "finalizing";
+      task.updated_at = bindings[0];
+      task.completed_at = task.completed_at || bindings[1];
+      task.error = "";
+      task.latency_ms = task.latency_ms || Math.max(0, bindings[2] - task.started_at);
+      task.remote_status = "completed";
+      task.remote_progress = 100;
+      task.remote_message = "OpenClaw Bridge final received";
+      task.bridge_result_hash = bindings[3];
+      task.bridge_last_seen_at = bindings[4];
+      if (bindings[5] !== null && bindings[5] !== undefined) {
+        task.bridge_last_sequence = Math.max(Number(task.bridge_last_sequence ?? -1), Number(bindings[6]));
+      }
+      return 1;
+    }
+    if (normalized.startsWith("update openclaw_tasks") && normalized.includes("set status = 'completed'") && normalized.includes("assistant_message_id = coalesce")) {
+      const task = this.openclawTasks.get(bindings[2]);
+      if (!task || String(task.status).toLowerCase() !== "finalizing" || task.bridge_result_hash !== bindings[3]) {
+        return 0;
+      }
+      task.status = "completed";
+      task.assistant_message_id = bindings[0] || task.assistant_message_id;
+      task.bridge_result_hash = bindings[1];
+      return 1;
     }
     if (normalized.startsWith("update openclaw_tasks") && normalized.includes("bridge_result_hash")) {
       const task = this.openclawTasks.get(bindings[13]);
@@ -1042,6 +1082,34 @@ describe("OpenClaw bridge callback endpoint", () => {
     expect(task.status).toBe("cancelled");
     expect(task.remote_status).toBe("cancelled");
     expect(task.assistant_message_id).toBe("");
+  });
+
+  it("does not let a polling completion in flight overwrite cancellation", async () => {
+    const task = await readTask();
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      task.status = "cancel_requested";
+      task.remote_status = "cancel_requested";
+      return Response.json({
+        task: {
+          task_id: task.bridge_task_id,
+          status: "completed",
+          final_answer: "late polling result"
+        }
+      });
+    }));
+
+    const response = await worker.fetch(new Request(
+      "http://example.com/api/openclaw/tasks/" + encodeURIComponent(task.id) + "/result",
+      { headers: { Cookie: await authCookie() } }
+    ), { ...callbackEnv(), OPENCLAW_BRIDGE_BASE_URL: "https://bridge.example.test" }, {});
+    const body = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(body.ok).toBe(false);
+    expect(task.status).toBe("cancel_requested");
+    expect(task.remote_status).toBe("cancel_requested");
+    expect(task.assistant_message_id).toBe("");
+    expect(db.messages.size).toBe(0);
   });
 
   it("rejects invalid signatures", async () => {

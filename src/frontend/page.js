@@ -3941,7 +3941,7 @@ function providersFromModels(models){
       label:"Oracle / Phoenix OpenClaw",
       providerType:"openai-compatible",
       apiBase:"https://oracle-ai.hnsnowground.cfd/v1",
-      apiKeyEnv:"ORACLE_OPENCLAW_BRIDGE_TOKEN",
+      apiKeyEnv:"",
       openclawExecutionMode:"bridge",
       builtin:true,
       enabled:true,

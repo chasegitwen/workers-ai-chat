@@ -42,6 +42,7 @@ import { broadcastOpenClawBridgeEvent } from "./openclawBridgeEvents.js";
 import { resolveOpenClawRuntimeForProject } from "./openclawRuntimes.js";
 import { validateOpenClawCatalogSelection } from "./openclawCatalog.js";
 import { validateHillsboroOpenClawSelection } from "./hillsboroCatalog.js";
+import { validateOracleOpenClawSelection } from "./oracleCatalog.js";
 
 const defaultSystemMessage = {
   role: "system",
@@ -69,7 +70,30 @@ const OPENCLAW_INSTANCE_ALLOWLIST = Object.freeze({
     apiBase: "https://hill.hnsnowground.cfd/v1",
     apiKeyEnv: "OPENCLAW_HILLSBORO_API_KEY",
     runtimeId: "hillsboro-openclaw"
+  },
+  "openclaw-oracle": {
+    apiBase: "https://oracle-ai.hnsnowground.cfd/v1",
+    apiKeyEnv: "ORACLE_OPENCLAW_BRIDGE_TOKEN",
+    runtimeId: "oracle-openclaw"
   }
+});
+const ORACLE_OPENCLAW_PROVIDER = Object.freeze({
+  id: "openclaw-oracle",
+  label: "Oracle / Phoenix OpenClaw",
+  providerType: "openai-compatible",
+  apiBase: "https://oracle-ai.hnsnowground.cfd/v1",
+  apiKeyEnv: "ORACLE_OPENCLAW_BRIDGE_TOKEN",
+  openclawExecutionMode: "bridge",
+  builtin: true,
+  enabled: true,
+  models: [{
+    id: "openclaw-oracle-main",
+    label: "Oracle main",
+    modelName: "openclaw/main",
+    providerType: "openai-compatible",
+    capabilities: { text: true, streaming: true },
+    enabled: true
+  }]
 });
 const AUTO_SEARCH_PATTERN = /搜索|查一下|查询|联网查|最新|最近|今天|现在|当前|目前|官网|价格|新闻|发布|更新|\bsearch\b|\blook up\b|\blatest\b|\brecent\b|\btoday\b|\bcurrent\b|\bnow\b|\bnews\b|\bprice\b|\brelease\b|\bupdate\b|\bofficial\b/i;
 
@@ -167,6 +191,9 @@ function inferOpenClawRuntimeIdFromSelection(provider, model) {
   }
   if (values.some(value => value.includes("hillsboro"))) {
     return "hillsboro-openclaw";
+  }
+  if (values.some(value => value.includes("oracle") || value.includes("phoenix"))) {
+    return "oracle-openclaw";
   }
   return "";
 }
@@ -695,6 +722,9 @@ function safeParseObjectJson(value) {
 function openClawCallbackSecretForTask(env, task) {
   const runtimeId = String(task?.runtimeId || task?.runtime_id || "").trim();
   const runtimeSlug = String(task?.runtimeSlug || task?.runtime_slug || "").trim();
+  if (runtimeId === "oracle-openclaw" || runtimeSlug === "oracle-openclaw") {
+    return String(env.ORACLE_OPENCLAW_CALLBACK_SECRET || "").trim();
+  }
   const secrets = safeParseObjectJson(env.OPENCLAW_CALLBACK_SECRETS_JSON);
   for (const key of [runtimeId, runtimeSlug].filter(Boolean)) {
     const value = String(secrets[key] || "").trim();
@@ -936,6 +966,10 @@ async function applyOpenClawBridgeFinalCallback(env, task, payload) {
     return false;
   }
   const latestTask = await readOpenClawTaskById(env, task.id) || task;
+  const latestStatus = String(latestTask.storedStatus || latestTask.status || "").toLowerCase();
+  if (["cancelled", "canceled", "cancel_requested"].includes(latestStatus)) {
+    return false;
+  }
   const existingMessageId = String(latestTask.assistantMessageId || latestTask.assistant_message_id || "").trim();
   const existingMessage = existingMessageId
     ? await readAssistantMessageById(env, existingMessageId)
@@ -1016,7 +1050,8 @@ async function applyOpenClawBridgeFinalCallback(env, task, payload) {
           WHEN ? IS NULL THEN bridge_last_sequence
           ELSE MAX(COALESCE(bridge_last_sequence, -1), ?)
         END
-      WHERE id = ?`
+      WHERE id = ?
+        AND LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'canceled', 'cancel_requested')`
   ).bind(
     "completed",
     now,
@@ -1715,7 +1750,7 @@ async function getOpenClawTaskStatus(env, remoteTaskId, task = null) {
     if (!bridgeTaskId) {
       return { ok: false, unavailable: true, error: "OpenClaw Bridge task id is missing" };
     }
-    return openclawBridgeClient(env).getTaskStatus(bridgeTaskId);
+    return openclawBridgeClient(env, task?.runtimeId || task?.runtime_id).getTaskStatus(bridgeTaskId);
   }
   return callOpenClawRemoteTask(env, remoteTaskId, "status", task);
 }
@@ -1726,7 +1761,7 @@ async function cancelOpenClawTask(env, remoteTaskId, task = null) {
     if (!bridgeTaskId) {
       return { ok: false, unavailable: true, error: "OpenClaw Bridge task id is missing" };
     }
-    return openclawBridgeClient(env).cancelTask(bridgeTaskId);
+    return openclawBridgeClient(env, task?.runtimeId || task?.runtime_id).cancelTask(bridgeTaskId);
   }
   return callOpenClawRemoteTask(env, remoteTaskId, "cancel", task);
 }
@@ -1737,7 +1772,7 @@ async function getOpenClawTaskResult(env, remoteTaskId, task = null) {
     if (!bridgeTaskId) {
       return { ok: false, unavailable: true, error: "OpenClaw Bridge task id is missing" };
     }
-    return openclawBridgeClient(env).getTaskResult(bridgeTaskId);
+    return openclawBridgeClient(env, task?.runtimeId || task?.runtime_id).getTaskResult(bridgeTaskId);
   }
   return callOpenClawRemoteTask(env, remoteTaskId, "result", task);
 }
@@ -1831,7 +1866,8 @@ async function syncOpenClawRemoteTask(env, localTask, remoteResult, patch = {}) 
   const currentLocalStatus = localTask.storedStatus || localTask.status || "running";
   const remoteLocalStatus = localStatusFromRemoteStatus(remote.status, "");
   const bridgeCompletionCanRecover = isOpenClawBridgeTask(localTask)
-    && (remoteLocalStatus === "completed"
+    && remoteLocalStatus === "completed"
+    && (!isOpenClawTaskTerminalStatus(currentLocalStatus)
       || shouldRecoverOpenClawBridgeCompletedStatus(currentLocalStatus, remote.status));
   const nextStatus = patch.status
     || (bridgeCompletionCanRecover
@@ -3587,7 +3623,7 @@ function providersFromCategories(categories) {
 
 async function readSavedProviders(env) {
   if (!env.DB) {
-    return [];
+    return [ORACLE_OPENCLAW_PROVIDER];
   }
 
   try {
@@ -3596,20 +3632,26 @@ async function readSavedProviders(env) {
     ).bind(MODEL_SETTINGS_KEY).first();
 
     if (!row?.value) {
-      return [];
+      return [ORACLE_OPENCLAW_PROVIDER];
     }
 
     const settings = JSON.parse(row.value);
     if (Array.isArray(settings?.providers) && settings.providers.length) {
-      return settings.providers.map(provider => normalizeProvider(provider)).filter(Boolean);
+      return mergeProviders(
+        settings.providers.map(provider => normalizeProvider(provider)).filter(Boolean),
+        [ORACLE_OPENCLAW_PROVIDER]
+      );
     }
     if (Array.isArray(settings?.categories) || Array.isArray(settings?.modelCategories)) {
-      return providersFromCategories(settings.categories || settings.modelCategories);
+      return mergeProviders(
+        providersFromCategories(settings.categories || settings.modelCategories),
+        [ORACLE_OPENCLAW_PROVIDER]
+      );
     }
-    return [];
+    return [ORACLE_OPENCLAW_PROVIDER];
   } catch (err) {
     console.warn("[model-settings] failed to read settings.providers", err.message || String(err));
-    return [];
+    return [ORACLE_OPENCLAW_PROVIDER];
   }
 }
 
@@ -3620,7 +3662,11 @@ async function readSavedOpenClawInstance(env, instanceId, providerId) {
       "SELECT value FROM settings WHERE key = ?"
     ).bind(MODEL_SETTINGS_KEY).first();
     const settings = JSON.parse(row?.value || "null");
-    if (!settings || typeof settings !== "object") return null;
+    if (!settings || typeof settings !== "object") {
+      return instanceId === "openclaw-oracle" && providerId === "openclaw-oracle"
+        ? { id: instanceId, connectionId: providerId, ...OPENCLAW_INSTANCE_ALLOWLIST[providerId] }
+        : null;
+    }
     const hasExplicitInstances = Object.prototype.hasOwnProperty.call(settings, "openClawInstances");
     const rawInstances = Array.isArray(settings.openClawInstances) ? settings.openClawInstances : [];
     const savedProviders = Array.isArray(settings.providers)
@@ -3628,7 +3674,7 @@ async function readSavedOpenClawInstance(env, instanceId, providerId) {
       : providersFromCategories(settings.categories || settings.modelCategories || []);
     const instances = rawInstances.slice();
     if (!hasExplicitInstances) {
-      for (const connectionId of ["openclaw-seattle", "openclaw-hillsboro"]) {
+      for (const connectionId of ["openclaw-seattle", "openclaw-hillsboro", "openclaw-oracle"]) {
         if (savedProviders.some(provider => String(provider?.id || provider?.providerId || "") === connectionId)) {
           instances.push({ id: connectionId, connectionId });
         }
@@ -3636,6 +3682,9 @@ async function readSavedOpenClawInstance(env, instanceId, providerId) {
     }
     const requestedId = String(instanceId || providerId || "").trim();
     const instance = instances.find(item => String(item?.id || "").trim() === requestedId);
+    if (!instance && requestedId === "openclaw-oracle" && providerId === "openclaw-oracle") {
+      return { id: requestedId, connectionId: requestedId, ...OPENCLAW_INSTANCE_ALLOWLIST[requestedId] };
+    }
     if (!instance) return null;
     const connectionId = String(instance.connectionId || providerId || "").trim();
     const allowed = OPENCLAW_INSTANCE_ALLOWLIST[connectionId];
@@ -3684,7 +3733,7 @@ function customConfigToProvider(config) {
 export async function buildModelProviderCatalog(env, requestProviders, customModelConfig, fallbackCustomModelConfig, {
   strictOpenClawInstances = false
 } = {}) {
-  const defaultProviders = providersFromModels(MODELS);
+  const defaultProviders = mergeProviders(providersFromModels(MODELS), [ORACLE_OPENCLAW_PROVIDER]);
   const savedProviders = await readSavedProviders(env);
   const customProviders = [
     customConfigToProvider(customModelConfig),
@@ -5120,7 +5169,7 @@ async function submitOpenClawBridgeTask({
     };
   }
 
-  const bridge = openclawBridgeClient(env);
+  const bridge = openclawBridgeClient(env, runtimeId);
   const bridgeMessage = nativeAttachments.length
     ? buildOpenClawBridgeMessageWithNativeAttachments(userContent, nativeAttachments)
     : buildOpenClawBridgeMessageWithFiles(userContent, fileAttachments);
@@ -5791,6 +5840,8 @@ export async function handleChat(request, env, ctx) {
     : false;
   const hillsboroBridgeTarget = openClawBridgeEnabled
     && openClawTarget?.provider?.id === "openclaw-hillsboro";
+  const oracleBridgeTarget = openClawBridgeEnabled
+    && openClawTarget?.provider?.id === "openclaw-oracle";
   const requestedOpenClawAgentId = isOpenClawRequest
     ? (hillsboroBridgeTarget
       ? normalizeHillsboroAgentId(openClawTarget?.model)
@@ -5882,10 +5933,12 @@ export async function handleChat(request, env, ctx) {
       openClawTarget.model.modelName = hillsboroAgentRoute(effectiveAgentId);
       openClawTarget.model.upstreamModelName = hillsboroAgentRoute(effectiveAgentId);
     }
-  } else if (isOpenClawRequest && (explicitOpenClawAgentId || selectedOpenClawBaseModelId)) {
+  } else if (isOpenClawRequest && (explicitOpenClawAgentId || selectedOpenClawBaseModelId || oracleBridgeTarget)) {
     const effectiveAgentId = runtimeResolution?.agent_id || requestedOpenClawAgentId;
     const validSelection = (!explicitOpenClawAgentId || effectiveAgentId === explicitOpenClawAgentId)
-      && (openClawTarget?.provider?.id === "openclaw-seattle"
+      && (oracleBridgeTarget
+        ? await validateOracleOpenClawSelection(env, effectiveAgentId || "main", selectedOpenClawBaseModelId)
+        : openClawTarget?.provider?.id === "openclaw-seattle"
         ? await validateOpenClawCatalogSelection(env, effectiveAgentId, selectedOpenClawBaseModelId)
         : !openClawAgentMode && /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(effectiveAgentId)
           && (!selectedOpenClawBaseModelId || /^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,159}$/.test(selectedOpenClawBaseModelId)));

@@ -269,7 +269,7 @@ describe("Seattle OpenClaw catalog", () => {
     expect(page).toContain("const visibleProviders = classicCategoryProviders(category);");
     expect(page).toContain("function openOpenClawInstanceDialog(instance = null)");
     expect(page).toContain('idInput.value = "openclaw-" + targetSelect.value');
-    expect(page).toContain('targetSelect.value === "seattle" ? "Seattle OpenClaw" : "Hillsboro OpenClaw"');
+    expect(page).toContain('targetSelect.value === "oracle" ? "Oracle / Phoenix OpenClaw" : "Hillsboro OpenClaw"');
     expect(page).toContain("instance_id:isOpenClawRequest ? requestSelection.instanceId");
     const script = page.match(/<script>([\s\S]*)<\/script>/)?.[1] || "";
     const declaration = script.match(/function openClawModelsForAgent\([\s\S]*?\n\}/)?.[0] || "";

@@ -12,7 +12,7 @@ const INCOMPATIBLE_MODEL_IDS = new Set([
   "openai/gpt-6-luna",
   "openai/gpt-6.1-sol"
 ]);
-let pendingRefresh = null;
+const pendingRefreshes = new WeakMap();
 
 function safeId(value) {
   const id = String(value || "").trim();
@@ -125,6 +125,7 @@ async function writeCache(env, catalog) {
 }
 
 async function refresh(env, refreshModels = false) {
+  let pendingRefresh = pendingRefreshes.get(env);
   if (!pendingRefresh) {
     pendingRefresh = (async () => {
       const result = await openclawBridgeClient(env).getCatalog({ refresh: refreshModels });
@@ -135,7 +136,8 @@ async function refresh(env, refreshModels = false) {
       }
       await writeCache(env, catalog);
       return catalog;
-    })().finally(() => { pendingRefresh = null; });
+    })().finally(() => { pendingRefreshes.delete(env); });
+    pendingRefreshes.set(env, pendingRefresh);
   }
   return pendingRefresh;
 }

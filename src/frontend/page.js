@@ -3935,6 +3935,26 @@ function providersFromModels(models){
       models:[]
     });
   }
+  if(!map.has("openclaw-oracle")){
+    map.set("openclaw-oracle", {
+      id:"openclaw-oracle",
+      label:"Oracle / Phoenix OpenClaw",
+      providerType:"openai-compatible",
+      apiBase:"https://oracle-ai.hnsnowground.cfd/v1",
+      apiKeyEnv:"ORACLE_OPENCLAW_BRIDGE_TOKEN",
+      openclawExecutionMode:"bridge",
+      builtin:true,
+      enabled:true,
+      models:[{
+        id:"openclaw-oracle-main",
+        label:"Oracle main",
+        modelName:"openclaw/main",
+        providerType:"openai-compatible",
+        capabilities:{ text:true, streaming:true },
+        enabled:true
+      }]
+    });
+  }
   return Array.from(map.values());
 }
 
@@ -3975,7 +3995,8 @@ function normalizeOpenClawInstanceList(instances, { providers = [], inferDefault
       if(!providers.some(provider => provider.id === target.connectionId)) return;
       normalized.push({
         id:target.connectionId,
-        label:targetId === "seattle" ? "Seattle OpenClaw" : "Hillsboro OpenClaw",
+        label:targetId === "seattle" ? "Seattle OpenClaw"
+          : targetId === "oracle" ? "Oracle / Phoenix OpenClaw" : "Hillsboro OpenClaw",
         targetId,
         ...target
       });
@@ -3985,16 +4006,22 @@ function normalizeOpenClawInstanceList(instances, { providers = [], inferDefault
 }
 
 function migrateOpenClawInstanceList(instances, configVersion){
-  const normalized = normalizeOpenClawInstanceList(instances);
-  if(Number(configVersion || 0) >= OPENCLAW_INSTANCE_CONFIG_VERSION
-    || normalized.some(instance => instance.targetId === "hillsboro")){
-    return normalized;
+  let normalized = normalizeOpenClawInstanceList(instances);
+  if(Number(configVersion || 0) < 2 && !normalized.some(instance => instance.targetId === "hillsboro")){
+    normalized = normalizeOpenClawInstanceList([...normalized, {
+      id:"openclaw-hillsboro",
+      label:"Hillsboro OpenClaw",
+      targetId:"hillsboro"
+    }]);
   }
-  return normalizeOpenClawInstanceList([...normalized, {
-    id:"openclaw-hillsboro",
-    label:"Hillsboro OpenClaw",
-    targetId:"hillsboro"
-  }]);
+  if(Number(configVersion || 0) < 3 && !normalized.some(instance => instance.targetId === "oracle")){
+    normalized = normalizeOpenClawInstanceList([...normalized, {
+      id:"openclaw-oracle",
+      label:"Oracle / Phoenix OpenClaw",
+      targetId:"oracle"
+    }]);
+  }
+  return normalized;
 }
 
 function upsertOpenClawInstanceList(instances, draft){
@@ -4197,6 +4224,7 @@ async function loadModels(){
     syncSettingsToServer(modelSettingsState);
     loadOpenClawCatalog(false, "seattle");
     if(openClawInstances().some(instance => instance.catalogId === "hillsboro")) loadOpenClawCatalog(false, "hillsboro");
+    if(openClawInstances().some(instance => instance.catalogId === "oracle")) loadOpenClawCatalog(false, "oracle");
   }catch(err){
     console.log("load models failed", err);
   }
@@ -5763,6 +5791,8 @@ let seattleOpenClawCatalog = null;
 let seattleOpenClawCatalogState = "unconfigured";
 let hillsboroOpenClawCatalog = null;
 let hillsboroOpenClawCatalogState = "unconfigured";
+let oracleOpenClawCatalog = null;
+let oracleOpenClawCatalogState = "unconfigured";
 const OPENCLAW_INSTANCE_TARGETS = Object.freeze({
   seattle:{
     label:"Seattle Gateway",
@@ -5777,9 +5807,16 @@ const OPENCLAW_INSTANCE_TARGETS = Object.freeze({
     endpoint:"https://hill.hnsnowground.cfd/v1",
     runtimeId:"hillsboro-openclaw",
     catalogId:"hillsboro"
+  },
+  oracle:{
+    label:"Oracle / Phoenix Bridge",
+    connectionId:"openclaw-oracle",
+    endpoint:"https://oracle-ai.hnsnowground.cfd/v1",
+    runtimeId:"oracle-openclaw",
+    catalogId:"oracle"
   }
 });
-const OPENCLAW_INSTANCE_CONFIG_VERSION = 2;
+const OPENCLAW_INSTANCE_CONFIG_VERSION = 3;
 const OPENCLAW_ROUTE_PREFERENCES_KEY = "wa_openclaw_route_v1";
 let openClawRoutePreferences = {};
 try { openClawRoutePreferences = JSON.parse(localStorage.getItem(OPENCLAW_ROUTE_PREFERENCES_KEY) || "{}"); }
@@ -7492,6 +7529,7 @@ async function loadModels(){
     syncSettingsToServer(modelSettingsState);
     loadOpenClawCatalog(false, "seattle");
     if(openClawInstances().some(instance => instance.catalogId === "hillsboro")) loadOpenClawCatalog(false, "hillsboro");
+    if(openClawInstances().some(instance => instance.catalogId === "oracle")) loadOpenClawCatalog(false, "oracle");
   }catch(err){
     console.log("load models failed", err);
   }
@@ -8605,6 +8643,9 @@ function getOpenClawRuntimeIdForRequest(modelId){
   if(values.some(value => value.includes("hillsboro"))){
     return "hillsboro-openclaw";
   }
+  if(values.some(value => value.includes("oracle") || value.includes("phoenix"))){
+    return "oracle-openclaw";
+  }
   return "";
 }
 
@@ -8697,12 +8738,14 @@ function currentRequestSelection(){
 function openClawCatalogForInstance(instance){
   if(instance?.catalogId === "seattle") return seattleOpenClawCatalog;
   if(instance?.catalogId === "hillsboro") return hillsboroOpenClawCatalog;
+  if(instance?.catalogId === "oracle") return oracleOpenClawCatalog;
   return null;
 }
 
 function openClawCatalogStateForInstance(instance){
   if(instance?.catalogId === "seattle") return seattleOpenClawCatalogState;
   if(instance?.catalogId === "hillsboro") return hillsboroOpenClawCatalogState;
+  if(instance?.catalogId === "oracle") return oracleOpenClawCatalogState;
   return "unconfigured";
 }
 
@@ -8833,7 +8876,7 @@ function openClawModelsForAgent(catalog, agentId){
   const scoped = catalog?.modelsByAgent?.[agentId];
   return Array.isArray(scoped)
     ? scoped
-    : (["openclaw-seattle", "openclaw-hillsboro"].includes(catalog?.providerId)
+    : (["openclaw-seattle", "openclaw-hillsboro", "openclaw-oracle"].includes(catalog?.providerId)
       ? []
       : (catalog?.models || []));
 }
@@ -8880,7 +8923,8 @@ function syncOpenClawRouteControls(){
     saved.baseModelId || stored.baseModelId || "", defaultModelLabel);
   openClawBaseModelSelect.disabled = !agentModels.length;
   openClawCatalogRefresh.hidden = !instance?.catalogId;
-  const instanceName = instance?.catalogId === "hillsboro" ? "Hillsboro" : "Seattle";
+  const instanceName = instance?.catalogId === "hillsboro" ? "Hillsboro"
+    : instance?.catalogId === "oracle" ? "Oracle / Phoenix" : "Seattle";
   openClawCatalogStatus.textContent = instance?.catalogId
     ? instanceName + " 目录：" + openClawCatalogStateForInstance(instance)
       + (catalog?.syncedAt ? " · " + new Date(catalog.syncedAt).toLocaleString() : "")
@@ -8892,10 +8936,11 @@ async function loadOpenClawCatalog(force = false, requestedCatalogId = ""){
   const selectedInstance = openClawInstance(openClawProviderSelect?.value
     || modelSettingsState?.openClawSelection?.instanceId || "");
   const catalogId = requestedCatalogId || selectedInstance?.catalogId || "seattle";
-  if(catalogId !== "seattle" && catalogId !== "hillsboro") return;
+  if(!["seattle", "hillsboro", "oracle"].includes(catalogId)) return;
   openClawCatalogRefresh.disabled = true;
   if(catalogId === "seattle") seattleOpenClawCatalogState = "同步中";
-  else hillsboroOpenClawCatalogState = "同步中";
+  else if(catalogId === "hillsboro") hillsboroOpenClawCatalogState = "同步中";
+  else oracleOpenClawCatalogState = "同步中";
   syncOpenClawRouteControls();
   try{
     const response = await fetch("/api/openclaw/catalog/" + catalogId, { method:force ? "POST" : "GET" });
@@ -8903,13 +8948,17 @@ async function loadOpenClawCatalog(force = false, requestedCatalogId = ""){
     if(catalogId === "seattle"){
       seattleOpenClawCatalog = data.catalog || null;
       seattleOpenClawCatalogState = data.status || "unavailable";
-    }else{
+    }else if(catalogId === "hillsboro"){
       hillsboroOpenClawCatalog = data.catalog || null;
       hillsboroOpenClawCatalogState = data.status || "unavailable";
+    }else{
+      oracleOpenClawCatalog = data.catalog || null;
+      oracleOpenClawCatalogState = data.status || "unavailable";
     }
   }catch(err){
     if(catalogId === "seattle") seattleOpenClawCatalogState = "unavailable";
-    else hillsboroOpenClawCatalogState = "unavailable";
+    else if(catalogId === "hillsboro") hillsboroOpenClawCatalogState = "unavailable";
+    else oracleOpenClawCatalogState = "unavailable";
   }finally{
     openClawCatalogRefresh.disabled = false;
     syncOpenClawRouteControls();
@@ -8972,19 +9021,22 @@ function openOpenClawInstanceDialog(instance = null){
   Object.entries(OPENCLAW_INSTANCE_TARGETS).forEach(([targetId, target]) => {
     const option = document.createElement("option");
     option.value = targetId;
-    option.textContent = (targetId === "seattle" ? "Seattle" : "Hillsboro") + "（" + target.endpoint + "）";
+    option.textContent = (targetId === "seattle" ? "Seattle"
+      : targetId === "oracle" ? "Oracle / Phoenix" : "Hillsboro") + "（" + target.endpoint + "）";
     targetSelect.appendChild(option);
   });
   targetSelect.value = instance?.targetId || "seattle";
   if(!instance){
     let previousTargetId = targetSelect.value;
     targetSelect.addEventListener("change", () => {
-      const previousLabel = previousTargetId === "seattle" ? "Seattle OpenClaw" : "Hillsboro OpenClaw";
+      const previousLabel = previousTargetId === "seattle" ? "Seattle OpenClaw"
+        : previousTargetId === "oracle" ? "Oracle / Phoenix OpenClaw" : "Hillsboro OpenClaw";
       if(idInput.value.trim() === "openclaw-" + previousTargetId){
         idInput.value = "openclaw-" + targetSelect.value;
       }
       if(labelInput.value.trim() === previousLabel){
-        labelInput.value = targetSelect.value === "seattle" ? "Seattle OpenClaw" : "Hillsboro OpenClaw";
+        labelInput.value = targetSelect.value === "seattle" ? "Seattle OpenClaw"
+          : targetSelect.value === "oracle" ? "Oracle / Phoenix OpenClaw" : "Hillsboro OpenClaw";
       }
       previousTargetId = targetSelect.value;
     });
@@ -11889,6 +11941,7 @@ openClawProviderSelect.addEventListener("change", () => {
   const instance = openClawInstance(openClawProviderSelect.value);
   if(instance?.catalogId === "hillsboro" && !hillsboroOpenClawCatalog) loadOpenClawCatalog(false, "hillsboro");
   if(instance?.catalogId === "seattle" && !seattleOpenClawCatalog) loadOpenClawCatalog(false, "seattle");
+  if(instance?.catalogId === "oracle" && !oracleOpenClawCatalog) loadOpenClawCatalog(false, "oracle");
 });
 openClawAgentSelect.addEventListener("change", () => {
   openClawBaseModelSelect.value = "";

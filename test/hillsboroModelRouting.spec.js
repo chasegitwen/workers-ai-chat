@@ -110,7 +110,11 @@ describe("Hillsboro per-turn Gateway model routing", () => {
       { method: "models.list", params: { agentId: "glm", view: "configured", refresh: true } },
       { method: "models.list", params: { agentId: "kimi", view: "configured", refresh: true } }
     ]);
-    expect(scoped.modelsByAgent.main.map(model => model.id)).toEqual(["openai/gpt-5.6-terra"]);
+    expect(scoped.modelsByAgent.main.map(model => model.id)).toEqual([
+      "openai/gpt-5.6-terra",
+      "zai/glm-5",
+      "kimi/kimi-for-coding"
+    ]);
     expect(scoped.modelsByAgent.glm.map(model => model.id)).toEqual(["zai/glm-5.2"]);
     expect(scoped.modelsByAgent.kimi.map(model => model.id)).toEqual(["kimi/kimi-for-coding"]);
     expect(scoped.syncedAt).toBe(123);

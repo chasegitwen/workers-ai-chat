@@ -8,6 +8,7 @@ import { handleModelHealth } from "./api/modelHealth.js";
 import { handleOpenClawRuntimes } from "./api/openclawRuntimes.js";
 import { handleOpenClawCatalog } from "./api/openclawCatalog.js";
 import { handleHillsboroOpenClawCatalog } from "./api/hillsboroCatalog.js";
+import { handleOracleOpenClawCatalog } from "./api/oracleCatalog.js";
 import { handleProjects } from "./api/projects.js";
 import { handleSearchAndFetch } from "./api/searchAndFetch.js";
 import { handleSearchWeb } from "./api/searchWeb.js";
@@ -139,6 +140,9 @@ export default {
 
     if (url.pathname === "/api/openclaw/catalog/hillsboro") {
       return handleHillsboroOpenClawCatalog(request, env, url);
+    }
+    if (url.pathname === "/api/openclaw/catalog/oracle") {
+      return handleOracleOpenClawCatalog(request, env, url);
     }
 
     if (url.pathname.startsWith("/api/projects")) {

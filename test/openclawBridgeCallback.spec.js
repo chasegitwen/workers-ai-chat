@@ -62,7 +62,7 @@ async function postCallback(payload, options = {}) {
       "X-OpenClaw-Event-Id": payload.event_id || ""
     },
     body: rawBody
-  }), callbackEnv(), {});
+  }), { ...callbackEnv(), ...(options.env || {}) }, {});
   return response;
 }
 
@@ -582,6 +582,34 @@ describe("OpenClaw bridge callback endpoint", () => {
     expect(db.bridgeEvents.size).toBe(0);
   });
 
+  it("selects the Oracle callback secret from the stored task runtime", async () => {
+    db = new FakeD1();
+    await createBridgeTask({
+      project_id: "default",
+      runtime_id: "oracle-openclaw"
+    });
+    const payload = basePayload({
+      event_id: "evt_oracle_secret",
+      project_id: "default",
+      runtime_id: "oracle-openclaw",
+      event_type: "bridge.started"
+    });
+    const oracleSecret = "oracle-callback-secret";
+    const accepted = await postCallback(payload, {
+      secret: oracleSecret,
+      env: { ORACLE_OPENCLAW_CALLBACK_SECRET: oracleSecret }
+    });
+    expect(accepted.status).toBe(200);
+
+    payload.event_id = "evt_oracle_wrong_secret";
+    const rejected = await postCallback(payload, {
+      secret: CALLBACK_SECRET,
+      env: { ORACLE_OPENCLAW_CALLBACK_SECRET: oracleSecret }
+    });
+    expect(rejected.status).toBe(401);
+    expect(await rejected.json()).toEqual({ ok: false, error: "invalid_signature" });
+  });
+
   it("updates message activity from bridge.activity", async () => {
     const response = await postCallback(basePayload({
       event_type: "bridge.activity",
@@ -989,6 +1017,31 @@ describe("OpenClaw bridge callback endpoint", () => {
     expect(task.status).toBe("completed");
     expect(message.content).toBe("Final remains");
     expect(task.remote_message).toBe("OpenClaw Bridge final received");
+  });
+
+  it("does not let a late final callback overwrite a canceled task", async () => {
+    db = new FakeD1();
+    await createBridgeTask({
+      status: "cancelled",
+      remote_status: "cancelled",
+      project_id: "default",
+      runtime_id: "hillsboro-openclaw"
+    });
+    const response = await postCallback(basePayload({
+      event_id: "evt_late_final_after_cancel",
+      project_id: "default",
+      runtime_id: "hillsboro-openclaw",
+      event_type: "bridge.final",
+      sequence: 99,
+      content: { final_answer: "must not replace cancellation" }
+    }));
+    const body = await response.json();
+    const task = await readTask();
+    expect(response.status).toBe(200);
+    expect(body.applied).toBe(false);
+    expect(task.status).toBe("cancelled");
+    expect(task.remote_status).toBe("cancelled");
+    expect(task.assistant_message_id).toBe("");
   });
 
   it("rejects invalid signatures", async () => {

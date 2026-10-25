@@ -468,11 +468,30 @@ export function normalizeOpenClawBridgeTaskProgress(status, remoteProgress, exis
   return isOpenClawBridgeFailedStatus(status) ? 0 : null;
 }
 
-function bridgeConfig(env) {
+export const ORACLE_OPENCLAW_RUNTIME_ID = "oracle-openclaw";
+
+export function openClawBridgeConfig(env, runtimeId = "") {
+  const normalizedRuntimeId = String(runtimeId || "").trim();
+  if (normalizedRuntimeId === ORACLE_OPENCLAW_RUNTIME_ID) {
+    return {
+      runtimeId: normalizedRuntimeId,
+      displayName: "Oracle OpenClaw",
+      baseUrl: normalizeOpenClawBridgeBaseUrl(env?.ORACLE_OPENCLAW_BRIDGE_URL),
+      token: String(env?.ORACLE_OPENCLAW_BRIDGE_TOKEN || "").trim()
+    };
+  }
   return {
+    runtimeId: normalizedRuntimeId || "hillsboro-openclaw",
+    displayName: "Hillsboro OpenClaw",
     baseUrl: normalizeOpenClawBridgeBaseUrl(env?.OPENCLAW_BRIDGE_BASE_URL),
     token: String(env?.OPENCLAW_BRIDGE_TOKEN || "").trim()
   };
+}
+
+export function scopeOpenClawBridgeIdempotencyKey(runtimeId, key) {
+  const normalizedRuntimeId = String(runtimeId || "hillsboro-openclaw").trim() || "hillsboro-openclaw";
+  const normalizedKey = String(key || "").trim();
+  return normalizedKey ? normalizedRuntimeId + ":" + normalizedKey : normalizedRuntimeId;
 }
 
 function bridgeHeaders(token) {
@@ -508,13 +527,17 @@ function normalizeBridgeTask(data) {
   };
 }
 
-async function bridgeRequest(env, path, options = {}) {
-  const config = bridgeConfig(env);
+async function bridgeRequest(env, runtimeId, path, options = {}) {
+  const config = openClawBridgeConfig(env, runtimeId);
   if (!config.baseUrl) {
     return {
       ok: false,
       unavailable: true,
-      error: "OpenClaw Bridge unavailable: OPENCLAW_BRIDGE_BASE_URL is not configured"
+      runtimeId: config.runtimeId,
+      error: config.displayName + " Bridge unavailable: "
+        + (config.runtimeId === ORACLE_OPENCLAW_RUNTIME_ID
+          ? "ORACLE_OPENCLAW_BRIDGE_URL is not configured"
+          : "OPENCLAW_BRIDGE_BASE_URL is not configured")
     };
   }
 
@@ -553,16 +576,18 @@ async function bridgeRequest(env, path, options = {}) {
     return {
       ok: false,
       unavailable: true,
+      runtimeId: config.runtimeId,
       error: err?.name === "AbortError"
-        ? "OpenClaw Bridge unavailable: request timed out"
-        : "OpenClaw Bridge unavailable: " + (err?.message || String(err))
+        ? config.displayName + " Bridge unavailable: request timed out"
+        : config.displayName + " Bridge unavailable: " + (err?.message || String(err))
     };
   } finally {
     clearTimeout(timer);
   }
 }
 
-export function openclawBridgeClient(env) {
+export function openclawBridgeClient(env, runtimeId = "hillsboro-openclaw") {
+  const clientRuntimeId = String(runtimeId || "hillsboro-openclaw").trim() || "hillsboro-openclaw";
   return {
     createTask({
       conversationId,
@@ -582,12 +607,14 @@ export function openclawBridgeClient(env) {
     }) {
       const files = Array.isArray(fileAttachments) ? fileAttachments : [];
       const nativeFiles = Array.isArray(nativeAttachments) ? nativeAttachments : [];
-      return bridgeRequest(env, "/v1/openclaw/tasks", {
+      const effectiveRuntimeId = String(runtimeId || clientRuntimeId).trim() || clientRuntimeId;
+      const scopedIdempotencyKey = scopeOpenClawBridgeIdempotencyKey(effectiveRuntimeId, idempotencyKey);
+      return bridgeRequest(env, effectiveRuntimeId, "/v1/openclaw/tasks", {
         method: "POST",
         body: {
           conversation_id: conversationId,
           project_id: projectId || "",
-          runtime_id: runtimeId || "",
+          runtime_id: effectiveRuntimeId,
           message,
           prompt: message,
           sessionKey,
@@ -605,23 +632,23 @@ export function openclawBridgeClient(env) {
           native_attachments: nativeFiles,
           files,
           file_ids: files.map(file => file.file_id).filter(Boolean),
-          local_task_id: idempotencyKey,
-          idempotencyKey
+          local_task_id: scopedIdempotencyKey,
+          idempotencyKey: scopedIdempotencyKey
         }
       });
     },
     getCatalog({ refresh = false } = {}) {
       const suffix = refresh ? "?refresh=1" : "";
-      return bridgeRequest(env, "/v1/openclaw/catalog" + suffix, { timeoutMs: 30000 });
+      return bridgeRequest(env, clientRuntimeId, "/v1/openclaw/catalog" + suffix, { timeoutMs: 30000 });
     },
     getTaskStatus(taskId) {
-      return bridgeRequest(env, "/v1/openclaw/tasks/" + encodeURIComponent(String(taskId || "")) + "/status");
+      return bridgeRequest(env, clientRuntimeId, "/v1/openclaw/tasks/" + encodeURIComponent(String(taskId || "")) + "/status");
     },
     getTaskResult(taskId) {
-      return bridgeRequest(env, "/v1/openclaw/tasks/" + encodeURIComponent(String(taskId || "")) + "/result");
+      return bridgeRequest(env, clientRuntimeId, "/v1/openclaw/tasks/" + encodeURIComponent(String(taskId || "")) + "/result");
     },
     cancelTask(taskId) {
-      return bridgeRequest(env, "/v1/openclaw/tasks/" + encodeURIComponent(String(taskId || "")) + "/cancel", {
+      return bridgeRequest(env, clientRuntimeId, "/v1/openclaw/tasks/" + encodeURIComponent(String(taskId || "")) + "/cancel", {
         method: "POST"
       });
     }

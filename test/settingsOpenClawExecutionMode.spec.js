@@ -120,7 +120,7 @@ describe("OpenClaw execution mode settings persistence", () => {
     expect(normalizeOpenClawInstances([{ id: "bad", targetId: "private-lan" }])).toEqual([]);
   });
 
-  it("migrates an existing Seattle-only instance list to include Hillsboro once", () => {
+  it("migrates an existing Seattle-only instance list to include Hillsboro and Oracle once", () => {
     const migrated = normalizeModelSettings({
       openClawInstances: [{ id: "openclaw-seattle", label: "Seattle OpenClaw", targetId: "seattle" }],
       providers: [provider("openclaw-seattle", "legacy"), provider("openclaw-hillsboro", "bridge")]
@@ -128,15 +128,19 @@ describe("OpenClaw execution mode settings persistence", () => {
 
     expect(migrated.openClawInstances.map(instance => instance.id)).toEqual([
       "openclaw-seattle",
-      "openclaw-hillsboro"
+      "openclaw-hillsboro",
+      "openclaw-oracle"
     ]);
-    expect(migrated.openClawInstanceConfigVersion).toBe(2);
+    expect(migrated.openClawInstanceConfigVersion).toBe(3);
 
     const afterUserDeletion = normalizeModelSettings({
       ...migrated,
       openClawInstances: migrated.openClawInstances.filter(instance => instance.targetId !== "hillsboro")
     });
-    expect(afterUserDeletion.openClawInstances.map(instance => instance.id)).toEqual(["openclaw-seattle"]);
+    expect(afterUserDeletion.openClawInstances.map(instance => instance.id)).toEqual([
+      "openclaw-seattle",
+      "openclaw-oracle"
+    ]);
   });
 
   it("persists the per-message model info display preference", () => {

@@ -126,7 +126,7 @@ describe("openclawBridgeClient", () => {
       agent_id: agentId,
       session_key: sessionKey,
       session_id: sessionKey,
-      idempotencyKey: "local-task-1"
+      idempotencyKey: "hillsboro-openclaw:local-task-1"
     });
   });
 
@@ -254,7 +254,7 @@ describe("openclawBridgeClient", () => {
       conversation_id: "conversation-1",
       project_id: "default",
       runtime_id: "hillsboro-openclaw",
-      local_task_id: "local-task-1",
+      local_task_id: "hillsboro-openclaw:local-task-1",
       file_ids: ["file-1"]
     });
     expect(body.files[0]).toMatchObject({
@@ -384,6 +384,65 @@ describe("openclawBridgeClient", () => {
       status: "completed",
       progress: 100
     });
+  });
+
+  it("routes Oracle create, status, result, and cancel through Oracle credentials", async () => {
+    const fetchMock = vi.fn(async (url, init = {}) => new Response(JSON.stringify({
+      ok: true,
+      task_id: "oracle-task-1",
+      status: "running"
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const oracleEnv = {
+      ...env,
+      ORACLE_OPENCLAW_BRIDGE_URL: "https://oracle-bridge.example.test/",
+      ORACLE_OPENCLAW_BRIDGE_TOKEN: "oracle-token"
+    };
+    const client = openclawBridgeClient(oracleEnv, "oracle-openclaw");
+
+    await client.createTask({
+      conversationId: "oracle-conversation",
+      projectId: "default",
+      runtimeId: "oracle-openclaw",
+      message: "oracle test",
+      agentId: "main",
+      idempotencyKey: "shared-key"
+    });
+    await client.getTaskStatus("oracle-task-1");
+    await client.getTaskResult("oracle-task-1");
+    await client.cancelTask("oracle-task-1");
+
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual([
+      "https://oracle-bridge.example.test/v1/openclaw/tasks",
+      "https://oracle-bridge.example.test/v1/openclaw/tasks/oracle-task-1/status",
+      "https://oracle-bridge.example.test/v1/openclaw/tasks/oracle-task-1/result",
+      "https://oracle-bridge.example.test/v1/openclaw/tasks/oracle-task-1/cancel"
+    ]);
+    expect(fetchMock.mock.calls.every(([, init]) => init.headers.Authorization === "Bearer oracle-token")).toBe(true);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.runtime_id).toBe("oracle-openclaw");
+    expect(body.local_task_id).toBe("oracle-openclaw:shared-key");
+    expect(body.idempotencyKey).toBe("oracle-openclaw:shared-key");
+  });
+
+  it("keeps identical local idempotency keys isolated by runtime", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, task_id: "task-1" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const dualEnv = {
+      ...env,
+      ORACLE_OPENCLAW_BRIDGE_URL: "https://oracle.example.test",
+      ORACLE_OPENCLAW_BRIDGE_TOKEN: "oracle-token"
+    };
+    await openclawBridgeClient(dualEnv, "hillsboro-openclaw").createTask({ idempotencyKey: "same", runtimeId: "hillsboro-openclaw" });
+    await openclawBridgeClient(dualEnv, "oracle-openclaw").createTask({ idempotencyKey: "same", runtimeId: "oracle-openclaw" });
+    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body));
+    expect(bodies.map(body => body.idempotencyKey)).toEqual([
+      "hillsboro-openclaw:same",
+      "oracle-openclaw:same"
+    ]);
   });
 
   it("prefers final_answer over result and text for bridge result compatibility", () => {

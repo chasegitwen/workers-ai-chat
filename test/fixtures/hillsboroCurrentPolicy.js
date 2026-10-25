@@ -3,7 +3,9 @@ export const HILLSBORO_CURRENT_MODELS_BY_AGENT = Object.freeze({
     "openai/gpt-5.6-terra",
     "openai/gpt-5.6-sol",
     "openai/gpt-5.6-luna",
-    "openai/gpt-6-astra"
+    "openai/gpt-6-astra",
+    "zai/glm-5",
+    "kimi/kimi-for-coding"
   ]),
   glm: Object.freeze([
     "zai/glm-5-turbo",
@@ -16,17 +18,18 @@ export const HILLSBORO_CURRENT_MODELS_BY_AGENT = Object.freeze({
   ])
 });
 
-export const HILLSBORO_CURRENT_MODEL_UNION = Object.freeze([
+export const HILLSBORO_CURRENT_MODEL_UNION = Object.freeze([...new Set([
   ...HILLSBORO_CURRENT_MODELS_BY_AGENT.main,
   ...HILLSBORO_CURRENT_MODELS_BY_AGENT.glm,
   ...HILLSBORO_CURRENT_MODELS_BY_AGENT.kimi
-]);
+])]);
 
 const LABELS = Object.freeze({
   "openai/gpt-5.6-terra": "GPT-5.6 Terra",
   "openai/gpt-5.6-sol": "GPT-5.6 Sol",
   "openai/gpt-5.6-luna": "GPT-5.6 Luna",
   "openai/gpt-6-astra": "GPT-6 Astra",
+  "zai/glm-5": "GLM-5",
   "zai/glm-5-turbo": "GLM-5 Turbo",
   "zai/glm-5.2": "GLM-5.2",
   "zai/glm-5.3": "GLM-5.3",

@@ -13,10 +13,40 @@ const OPENCLAW_INSTANCE_TARGETS = Object.freeze({
     endpoint: "https://hill.hnsnowground.cfd/v1",
     runtimeId: "hillsboro-openclaw",
     catalogId: "hillsboro"
+  }),
+  oracle: Object.freeze({
+    connectionId: "openclaw-oracle",
+    endpoint: "https://oracle-ai.hnsnowground.cfd/v1",
+    runtimeId: "oracle-openclaw",
+    catalogId: "oracle"
   })
 });
 const OPENCLAW_INSTANCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/;
-const OPENCLAW_INSTANCE_CONFIG_VERSION = 2;
+const OPENCLAW_INSTANCE_CONFIG_VERSION = 3;
+const ORACLE_OPENCLAW_PROVIDER = Object.freeze({
+  id: "openclaw-oracle",
+  label: "Oracle / Phoenix OpenClaw",
+  providerType: "openai-compatible",
+  apiBase: "https://oracle-ai.hnsnowground.cfd/v1",
+  apiKeyEnv: "ORACLE_OPENCLAW_BRIDGE_TOKEN",
+  openclawExecutionMode: "bridge",
+  builtin: true,
+  enabled: true,
+  models: [{
+    id: "openclaw-oracle-main",
+    label: "Oracle main",
+    modelName: "openclaw/main",
+    providerType: "openai-compatible",
+    capabilities: { text: true, streaming: true },
+    enabled: true
+  }]
+});
+
+function openClawTargetLabel(targetId) {
+  if (targetId === "seattle") return "Seattle OpenClaw";
+  if (targetId === "oracle") return "Oracle / Phoenix OpenClaw";
+  return "Hillsboro OpenClaw";
+}
 
 function ensureSettingsDb(env) {
   if (!env.DB) {
@@ -93,7 +123,7 @@ export function normalizeOpenClawInstances(instances, { providers = [], inferDef
       if (!providers.some(provider => normalizeProviderId(provider) === target.connectionId)) continue;
       normalized.push({
         id: target.connectionId,
-        label: targetId === "seattle" ? "Seattle OpenClaw" : "Hillsboro OpenClaw",
+        label: openClawTargetLabel(targetId),
         targetId,
         ...target
       });
@@ -103,16 +133,22 @@ export function normalizeOpenClawInstances(instances, { providers = [], inferDef
 }
 
 function migrateOpenClawInstances(instances, configVersion) {
-  const normalized = normalizeOpenClawInstances(instances);
-  if (Number(configVersion || 0) >= OPENCLAW_INSTANCE_CONFIG_VERSION
-    || normalized.some(instance => instance.targetId === "hillsboro")) {
-    return normalized;
+  let normalized = normalizeOpenClawInstances(instances);
+  if (Number(configVersion || 0) < 2 && !normalized.some(instance => instance.targetId === "hillsboro")) {
+    normalized = normalizeOpenClawInstances([...normalized, {
+      id: "openclaw-hillsboro",
+      label: "Hillsboro OpenClaw",
+      targetId: "hillsboro"
+    }]);
   }
-  return normalizeOpenClawInstances([...normalized, {
-    id: "openclaw-hillsboro",
-    label: "Hillsboro OpenClaw",
-    targetId: "hillsboro"
-  }]);
+  if (Number(configVersion || 0) < 3 && !normalized.some(instance => instance.targetId === "oracle")) {
+    normalized = normalizeOpenClawInstances([...normalized, {
+      id: "openclaw-oracle",
+      label: "Oracle / Phoenix OpenClaw",
+      targetId: "oracle"
+    }]);
+  }
+  return normalized;
 }
 
 export function upsertOpenClawInstanceSettings(instances, draft) {
@@ -367,6 +403,9 @@ export function normalizeModelSettings(settings) {
   }
   const normalized = { ...settings };
   const providers = sourceProviders(normalized);
+  if (!providers.some(provider => normalizeProviderId(provider) === ORACLE_OPENCLAW_PROVIDER.id)) {
+    providers.push(JSON.parse(JSON.stringify(ORACLE_OPENCLAW_PROVIDER)));
+  }
   normalized.showPerMessageModelInfo = Boolean(normalized.showPerMessageModelInfo);
   normalized.autoArchiveDays = normalizeAutoArchiveDays(normalized.autoArchiveDays);
   const legacySelected = String(normalized.lastModel || normalized.selectedModel || normalized.defaultModel || "");

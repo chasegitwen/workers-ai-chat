@@ -64,16 +64,6 @@ and resets only the dispatch budget:
 POST /v1/openclaw/callbacks/<event_id>/requeue
 ```
 
-## When a task completes
-
-A task completes only after an authoritative run-end signal for its exact
-runId: the Gateway chat `final` event (not `yielded`), or, during recovery,
-`agent.wait` returning `ok`. `stopReason: "stop"` alone never completes a task.
-The final answer is the `final_answer`-phase text of the turn's last
-assistant entry; commentary (message `phase` or block `textSignature`), messages
-with tool calls or `toolUse`, entries followed by more tool activity, and
-streamed deltas are never promoted to the final answer.
-
 ## Shutdown
 
 On SIGINT/SIGTERM the Bridge stops accepting HTTP, stops the Gateway, then

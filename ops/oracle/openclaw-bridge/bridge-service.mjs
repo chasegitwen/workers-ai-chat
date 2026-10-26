@@ -44,22 +44,6 @@ function parseJson(value, fallback = null) {
   if (!value) return fallback;
   try { return JSON.parse(value); } catch { return fallback; }
 }
-/**
- * Ask the Gateway whether this exact run has ended. `agent.wait` is the
- * authoritative run-terminal signal; a short wait returns "timeout"/"pending"
- * while the run is active. A yielded run is waiting, not finished. Any other
- * answer, or a failed request, means the run end is unproven.
- */
-async function gatewayRunEnded(request, runId) {
-  if (!runId) return false;
-  try {
-    const wait = await request("agent.wait", { runId, timeoutMs: 1 }, { timeoutMs: 10_000 });
-    return wait?.status === "ok" && wait?.yielded !== true;
-  } catch {
-    return false;
-  }
-}
-
 function deadlineExpired(task, now = Date.now()) {
   const deadline = Date.parse(task?.recovery_deadline_at || "");
   return Number.isFinite(deadline) && deadline <= now;
@@ -401,20 +385,12 @@ export class BridgeController {
             continue;
           }
 
-          // History never proves completion by itself: progress messages can
-          // carry stopReason "stop". Only a run the Gateway reports as ended
-          // may be completed from history.
-          const runEnded = await gatewayRunEnded((method, params, options) => this.request(method, params, options), task.run_id);
-          const history = runEnded
-            ? await this.request("chat.history", {
-              sessionKey: task.session_key,
-              agentId: task.agent_id,
-              limit: this.recoveryHistoryLimit,
-            }, { timeoutMs: 15_000 })
-            : null;
-          const recovered = runEnded
-            ? findRecoveredAssistantMessage(history, task, { runEnded: true })
-            : { message: null };
+          const history = await this.request("chat.history", {
+            sessionKey: task.session_key,
+            agentId: task.agent_id,
+            limit: this.recoveryHistoryLimit,
+          }, { timeoutMs: 15_000 });
+          const recovered = findRecoveredAssistantMessage(history, task);
           if (!recovered.message) {
             if (deadlineExpired(task) && ["chat_send_dispatching", "chat_send_dispatched"].includes(task.submission_phase)) {
               const detail = "chat.send outcome remained unconfirmed through the bounded recovery window; session retained for manual reconciliation";
@@ -523,11 +499,6 @@ export class BridgeController {
         if (latest?.cancel_requested && !TERMINAL.has(latest.status)) await this.coordinateCancellation(latest.task_id);
         return;
       }
-      if (payload.yielded === true) {
-        // The run yielded while waiting on other work; it has not answered yet.
-        this.store.markRecovering(latest.task_id, "run yielded before its final answer");
-        return;
-      }
       let record = null;
       try {
         const history = await this.request("chat.history", {
@@ -544,9 +515,8 @@ export class BridgeController {
         }
       } catch {}
       if (!record && latest.run_id === runId) {
-        // The terminal event's own message is authoritative. Streamed deltas may
-        // include commentary, so they are never promoted to the final answer.
-        const finalText = usableFinalText(payload.message);
+        const finalText = usableFinalText(messageText(payload.message))
+          || usableFinalText(this.partialByRunId.get(runId) || latest.partial_text || "");
         if (finalText) {
           record = resultRecord(latest, {
             message: payload.message || null,

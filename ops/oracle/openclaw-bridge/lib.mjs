@@ -302,30 +302,98 @@ export function messageStopReason(message) {
   return "";
 }
 
-export function hasTerminalAssistantStop(message) {
-  return new Set(["stop", "end_turn", "end-turn", "length"]).has(messageStopReason(message));
+/* ── OpenClaw assistant phases ──
+ * OpenClaw marks provider commentary (progress narration) and the final answer
+ * with an assistant phase: either a message-level `phase` or a per text block
+ * `textSignature` JSON `{"v":1,"id":…,"phase":"commentary"|"final_answer"}`.
+ * Tool calls are `toolCall` content blocks and end the message with
+ * stopReason `toolUse`. A stopReason of `stop` alone does not end a run.
+ */
+
+const ASSISTANT_TEXT_BLOCK_TYPES = new Set(["text", "input_text", "output_text"]);
+const TOOL_CALL_BLOCK_TYPES = new Set(["toolCall", "tool_call", "toolUse", "tool_use", "functionCall", "function_call"]);
+const NON_FINAL_STOP_REASONS = new Set(["tooluse", "tool_use", "error", "aborted"]);
+
+function normalizeAssistantPhase(value) {
+  return value === "commentary" || value === "final_answer" ? value : "";
+}
+
+export function textBlockPhase(block) {
+  const signature = block?.textSignature;
+  if (typeof signature !== "string" || !signature.startsWith("{")) return "";
+  try {
+    const parsed = JSON.parse(signature);
+    return parsed?.v === 1 ? normalizeAssistantPhase(parsed.phase) : "";
+  } catch {
+    return "";
+  }
+}
+
+function isTextBlock(block) {
+  return Boolean(block && typeof block === "object" && ASSISTANT_TEXT_BLOCK_TYPES.has(block.type));
+}
+
+function hasToolCallBlock(message) {
+  return Array.isArray(message?.content)
+    && message.content.some((block) => block && typeof block === "object" && TOOL_CALL_BLOCK_TYPES.has(block.type));
+}
+
+/**
+ * Final-answer text of an assistant message, excluding commentary:
+ *   - explicitly phased blocks: only `final_answer` blocks count;
+ *   - otherwise the message-level phase decides; unphased (legacy) text counts.
+ * Gateway display projections of stream segments (`openclawStreamFallback`)
+ * are never a final answer.
+ */
+export function assistantFinalAnswerText(message) {
+  if (!message || typeof message !== "object" || message.openclawStreamFallback) return "";
+  const messagePhase = normalizeAssistantPhase(message.phase);
+  if (!Array.isArray(message.content)) {
+    return messagePhase === "commentary" ? "" : messageText(message);
+  }
+  const textBlocks = message.content.filter(isTextBlock);
+  const explicitlyPhased = textBlocks.some((block) => textBlockPhase(block));
+  return textBlocks
+    .filter((block) => (explicitlyPhased ? textBlockPhase(block) === "final_answer" : messagePhase !== "commentary"))
+    .map((block) => (typeof block.text === "string" ? block.text : ""))
+    .join("");
+}
+
+/** An assistant message that cannot end a run: tool use, commentary-only, errors. */
+export function isIntermediateAssistantMessage(message) {
+  return hasToolCallBlock(message)
+    || NON_FINAL_STOP_REASONS.has(messageStopReason(message))
+    || !assistantFinalAnswerText(message).trim();
+}
+
+function isToolResultMessage(message) {
+  const role = message?.role ?? message?.type;
+  return role === "toolResult" || role === "tool_result" || role === "tool";
 }
 
 export function usableFinalText(value) {
-  const text = typeof value === "string" ? value : messageText(value);
+  const text = typeof value === "string" ? value : assistantFinalAnswerText(value);
   const trimmed = text.trim();
   return trimmed && classifyAssistantMessage(trimmed) === "valid_final" ? text : "";
 }
 
 /**
- * Find the best assistant message from a chat history result.
+ * Find this turn's final assistant reply in a chat history result.
  *
- * A result is returned only with evidence that it belongs to this turn:
- *   - the message carries this task's runId; or
+ * Ownership — the message must belong to this turn:
+ *   - it carries this task's runId; or
  *   - it follows the durable user transcript record whose idempotency key is
  *     exactly `${task.run_id}:user` (OpenClaw's persisted turn identity).
- * The assistant message must be non-empty, non-transitional, and terminal.
- * A matching final chat event may supply the terminal evidence when history
- * omits stopReason, but it never supplies turn ownership by itself.
+ * Run end — history alone never proves the run ended. The caller supplies an
+ * authoritative signal: `finalEventRunId` (the Gateway chat `final` event for
+ * this run) or `runEnded` (Gateway `agent.wait` reported the run finished).
+ * Finality — the message must be the last assistant/tool entry of the turn,
+ * carry final-answer text (commentary excluded), have no tool calls and a
+ * non-tool, non-error stopReason, and be substantive.
  *
  * @param {object|Array} historyResult — raw result from chat.history RPC
- * @param {{message?: string, created_at?: string}} task
- * @returns {{message: object|null, text: string, match: string, messageCount: number, selectedMessageIndex: number, classification: string, fallback: boolean, fallback_reason?: string}}
+ * @param {{run_id?: string, idempotency_key?: string}} task
+ * @param {{finalEventRunId?: string, runEnded?: boolean}} [options]
  */
 export function findRecoveredAssistantMessage(historyResult, task, options = {}) {
   const messages = extractHistoryMessages(historyResult);
@@ -334,6 +402,8 @@ export function findRecoveredAssistantMessage(historyResult, task, options = {})
   const finalEventRunId = typeof options?.finalEventRunId === "string"
     ? options.finalEventRunId.trim()
     : "";
+  const finalEventMatches = Boolean(finalEventRunId && taskRunId && finalEventRunId === taskRunId);
+  const runEnded = finalEventMatches || options?.runEnded === true;
 
   // Forks copy timestamps and text. Neither is an ownership boundary. The
   // Gateway persists accepted user input under `${clientRunId}:user`, so only
@@ -349,46 +419,56 @@ export function findRecoveredAssistantMessage(historyResult, task, options = {})
     }
   }
 
+  const ownership = (message, index) => {
+    const candidateRunId = messageRunId(message);
+    if (candidateRunId && taskRunId && candidateRunId !== taskRunId) return null;
+    const runMatches = Boolean(taskRunId && candidateRunId === taskRunId);
+    let afterBoundary = userIndex >= 0 && index > userIndex;
+    if (afterBoundary && messages.slice(userIndex + 1, index).some(isUserMessage)) afterBoundary = false;
+    return runMatches || afterBoundary ? { runMatches, afterBoundary } : null;
+  };
+
+  // The newest assistant or tool entry of this turn; anything before it is
+  // progress, never the final reply.
+  let lastTurnActivityIndex = -1;
   const assistants = [];
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
+    if (!isAssistantMessage(message) && !isToolResultMessage(message)) continue;
+    const owned = ownership(message, index);
+    if (!owned) continue;
+    lastTurnActivityIndex = index;
     if (!isAssistantMessage(message)) continue;
-    const candidateRunId = messageRunId(message);
-    const runMatches = Boolean(taskRunId && candidateRunId === taskRunId);
-    const afterBoundary = userIndex >= 0 && index > userIndex;
-    if (candidateRunId && taskRunId && candidateRunId !== taskRunId) continue;
-    if (!runMatches && !afterBoundary) continue;
-    if (afterBoundary) {
-      const interveningUser = messages.slice(userIndex + 1, index).some(isUserMessage);
-      if (interveningUser) continue;
-    }
-    const text = messageText(message);
-    const classification = classifyAssistantMessage(text);
-    const eventConfirmsTerminal = Boolean(finalEventRunId && taskRunId
-      && finalEventRunId === taskRunId && (runMatches || (!candidateRunId && afterBoundary)));
-    const terminal = hasTerminalAssistantStop(message) || eventConfirmsTerminal;
-    assistants.push({ message, text, index, classification, terminal, runMatches, afterBoundary });
+    const text = assistantFinalAnswerText(message);
+    assistants.push({
+      message,
+      text,
+      index,
+      classification: classifyAssistantMessage(text),
+      intermediate: isIntermediateAssistantMessage(message),
+      ...owned,
+    });
   }
 
-  for (let i = assistants.length - 1; i >= 0; i -= 1) {
-    const candidate = assistants[i];
-    if (candidate.classification === "valid_final" && candidate.terminal && candidate.text.trim()) {
-      return {
-        message: candidate.message,
-        text: candidate.text,
-        match: candidate.runMatches ? "matching_run_id" : "matching_user_idempotency_boundary",
-        messageCount: messages.length,
-        selectedMessageIndex: candidate.index,
-        classification: candidate.classification,
-        fallback: false,
-        evidence: {
-          run_id_match: candidate.runMatches,
-          user_idempotency_boundary_match: candidate.afterBoundary,
-          terminal_stop: hasTerminalAssistantStop(candidate.message),
-          final_event_match: Boolean(finalEventRunId && finalEventRunId === taskRunId),
-        },
-      };
-    }
+  const candidate = assistants.at(-1);
+  if (runEnded && candidate && candidate.index === lastTurnActivityIndex
+    && !candidate.intermediate && candidate.classification === "valid_final" && candidate.text.trim()) {
+    return {
+      message: candidate.message,
+      text: candidate.text,
+      match: candidate.runMatches ? "matching_run_id" : "matching_user_idempotency_boundary",
+      messageCount: messages.length,
+      selectedMessageIndex: candidate.index,
+      classification: candidate.classification,
+      fallback: false,
+      evidence: {
+        run_id_match: candidate.runMatches,
+        user_idempotency_boundary_match: candidate.afterBoundary,
+        stop_reason: messageStopReason(candidate.message),
+        final_event_match: finalEventMatches,
+        run_ended: runEnded,
+      },
+    };
   }
 
   return {
@@ -402,8 +482,9 @@ export function findRecoveredAssistantMessage(historyResult, task, options = {})
     evidence: {
       run_id_match: assistants.some(item => item.runMatches),
       user_idempotency_boundary_match: userIndex >= 0,
-      terminal_stop: assistants.some(item => hasTerminalAssistantStop(item.message)),
-      final_event_match: Boolean(finalEventRunId && taskRunId && finalEventRunId === taskRunId),
+      final_event_match: finalEventMatches,
+      run_ended: runEnded,
+      last_entry_is_final: Boolean(candidate && candidate.index === lastTurnActivityIndex && !candidate.intermediate),
     },
   };
 }

@@ -479,6 +479,7 @@ test("chat.send is never resent after onSent uncertainty and restart recovers th
 
   const second = boot(async (method) => {
     if (method === "chat.send") throw new Error("chat.send must not be resent");
+    if (method === "agent.wait") return { status: "ok", endedAt: Date.now() };
     if (method === "chat.history") {
       return { messages: [{
         role: "assistant",
@@ -890,4 +891,123 @@ test("database size and free disk limits refuse new tasks", async (t) => {
   assert.equal(byDisk.status, 503);
   assert.deepEqual(byDisk.body.reasons, ["free_disk_limit"]);
   assert.equal(full.gateway().count("chat.send"), 0);
+});
+
+/* ── progress message → tool call → real final answer ── */
+
+function phasedText(phase, text) {
+  return { type: "text", text, textSignature: JSON.stringify({ v: 1, id: `msg_${phase}_${text.length}`, phase }) };
+}
+
+function progressToolFinalHistory(runId, { includeFinal }) {
+  const messages = [
+    { role: "user", content: "检查服务器状态", idempotencyKey: `${runId}:user` },
+    { role: "assistant", content: [phasedText("commentary", "正在核对服务配置和最近日志，随后汇总结论。")], stopReason: "stop", __openclaw: { runId } },
+    {
+      role: "assistant",
+      content: [phasedText("commentary", "正在读取 systemd 状态。"), { type: "toolCall", id: "call_1", name: "exec", arguments: {} }],
+      stopReason: "toolUse",
+      __openclaw: { runId },
+    },
+    { role: "toolResult", toolCallId: "call_1", content: [{ type: "text", text: "active (running)" }], __openclaw: { runId } },
+  ];
+  if (includeFinal) {
+    messages.push({
+      role: "assistant",
+      content: [phasedText("commentary", "检查完毕。"), phasedText("final_answer", "服务运行正常，没有发现异常。")],
+      stopReason: "stop",
+      __openclaw: { runId },
+    });
+  }
+  return { messages };
+}
+
+test("recovery does not complete a running turn from a stop-marked progress message, then completes with the real final", async (t) => {
+  let runEnded = false;
+  const { runtime, gateway, callbacks, request } = await fixture(t, async (method, params, options) => {
+    if (method === "chat.send") {
+      options.onSent?.();
+      const error = new Error("confirmation lost");
+      error.requestSent = true;
+      throw error;
+    }
+    if (method === "agent.wait") {
+      assert.equal(params.runId, "progress-turn");
+      return runEnded ? { status: "ok", endedAt: Date.now() } : { status: "timeout" };
+    }
+    if (method === "chat.history") return progressToolFinalHistory("progress-turn", { includeFinal: runEnded });
+    throw new Error(`unexpected ${method}`);
+  });
+  const created = await request("POST", "/v1/openclaw/tasks", { message: "检查服务器状态", idempotency_key: "progress-turn", conversation_id: "progress" });
+  assert.equal(created.body.status, "recovering");
+  const task = runtime.store.getByIdempotencyKey("progress-turn");
+
+  await runtime.controller.recoverySweep("run-still-active");
+  assert.equal(runtime.store.get(task.task_id).status, "recovering");
+  assert.equal(gateway.count("chat.history"), 0);
+  assert.equal(callbacks.some((payload) => payload.event_type === "bridge.final"), false);
+
+  runEnded = true;
+  await runtime.controller.recoverySweep("run-ended");
+  const completed = runtime.store.get(task.task_id);
+  assert.equal(completed.status, "completed");
+  assert.equal(JSON.parse(completed.result_json).final_answer, "服务运行正常，没有发现异常。");
+  const finals = callbacks.filter((payload) => payload.event_type === "bridge.final");
+  assert.equal(finals.length, 1);
+  assert.equal(finals[0].content.final_answer, "服务运行正常，没有发现异常。");
+  assert.equal(gateway.count("chat.send"), 1);
+});
+
+test("a live final uses the terminal answer, not streamed commentary or an older stop-marked progress message", async (t) => {
+  const { runtime, callbacks, request } = await fixture(t, async (method, params, options) => {
+    if (method === "chat.send") {
+      options.onSent?.();
+      options.onAccepted?.({ runId: params.idempotencyKey });
+      return { runId: params.idempotencyKey, status: "started" };
+    }
+    // The final answer is not yet visible in history when the event arrives.
+    if (method === "chat.history") return progressToolFinalHistory("live-progress", { includeFinal: false });
+    throw new Error(`unexpected ${method}`);
+  });
+  await request("POST", "/v1/openclaw/tasks", { message: "检查服务器状态", idempotency_key: "live-progress", conversation_id: "live" });
+  const task = runtime.store.getByIdempotencyKey("live-progress");
+  await runtime.controller.handleEvent({ event: "chat", payload: { runId: "live-progress", sessionKey: task.session_key, state: "delta", deltaText: "正在核对服务配置和最近日志，随后汇总结论。" } });
+  assert.equal(runtime.store.get(task.task_id).status, "running");
+
+  await runtime.controller.handleEvent({
+    event: "chat",
+    payload: {
+      runId: "live-progress",
+      sessionKey: task.session_key,
+      state: "final",
+      message: { role: "assistant", content: [phasedText("final_answer", "服务运行正常，没有发现异常。")], stopReason: "stop" },
+    },
+  });
+  const completed = runtime.store.get(task.task_id);
+  assert.equal(completed.status, "completed");
+  assert.equal(JSON.parse(completed.result_json).final_answer, "服务运行正常，没有发现异常。");
+  assert.equal(callbacks.filter((payload) => payload.event_type === "bridge.final")[0].content.final_answer, "服务运行正常，没有发现异常。");
+});
+
+test("a live final without answer text or a yielded final does not complete from streamed progress", async (t) => {
+  const { runtime, callbacks, request } = await fixture(t, async (method, params, options) => {
+    if (method === "chat.send") {
+      options.onSent?.();
+      options.onAccepted?.({ runId: params.idempotencyKey });
+      return { runId: params.idempotencyKey, status: "started" };
+    }
+    if (method === "chat.history") return progressToolFinalHistory(params.sessionKey.includes("yielded") ? "yielded-run" : "silent-run", { includeFinal: false });
+    throw new Error(`unexpected ${method}`);
+  });
+  for (const [key, finalPayload] of [
+    ["silent-run", {}],
+    ["yielded-run", { yielded: true, message: { role: "assistant", content: [phasedText("final_answer", "子任务完成后再回复。")] } }],
+  ]) {
+    await request("POST", "/v1/openclaw/tasks", { message: "m", idempotency_key: key, conversation_id: key });
+    const task = runtime.store.getByIdempotencyKey(key);
+    await runtime.controller.handleEvent({ event: "chat", payload: { runId: key, sessionKey: task.session_key, state: "delta", deltaText: "正在核对服务配置和最近日志，随后汇总结论。" } });
+    await runtime.controller.handleEvent({ event: "chat", payload: { runId: key, sessionKey: task.session_key, state: "final", ...finalPayload } });
+    assert.equal(runtime.store.get(task.task_id).status, "recovering", key);
+  }
+  assert.equal(callbacks.some((payload) => payload.event_type === "bridge.final"), false);
 });

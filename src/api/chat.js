@@ -1249,14 +1249,20 @@ async function applyOpenClawBridgeCallbackEvent(env, payload, resolvedTask = nul
   };
 }
 
-async function storeOpenClawBridgeCallbackEvent(env, payload, task, bridgeId, applied, duplicate, error) {
-  if (!env.DB) {
-    return;
-  }
-  const projectId = String(task?.projectId || task?.project_id || payloadScopeValue(payload, "project_id") || "").trim();
-  const runtimeId = String(task?.runtimeId || task?.runtime_id || payloadScopeValue(payload, "runtime_id") || "").trim();
-  await env.DB.prepare(
-    `INSERT INTO bridge_events (
+// A bridge_events row is the idempotency record of a callback. It is inserted
+// as a claim before the event is applied and only becomes a final record once
+// the outcome is stored. A claim whose apply fails is released so the Bridge
+// can retry the same event_id; a claim left behind by a Worker invocation that
+// died mid-apply may be taken over after OPENCLAW_CALLBACK_CLAIM_STALE_MS.
+// Re-applying is safe: every task update is guarded by status/sequence/hash CAS.
+const OPENCLAW_CALLBACK_APPLY_IN_PROGRESS = "apply_in_progress";
+const OPENCLAW_CALLBACK_CLAIM_STALE_MS = 30_000;
+
+async function claimOpenClawBridgeCallbackEvent(env, payload, task, bridgeId) {
+  const eventId = String(payload?.event_id || "");
+  const now = new Date();
+  const inserted = await env.DB.prepare(
+    `INSERT OR IGNORE INTO bridge_events (
       event_id,
       task_id,
       project_id,
@@ -1273,7 +1279,50 @@ async function storeOpenClawBridgeCallbackEvent(env, payload, task, bridgeId, ap
       duplicate,
       error
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
+  ).bind(...bridgeCallbackEventRowBindings(payload, task, bridgeId, now.toISOString())).run();
+  if (Number(inserted?.meta?.changes ?? 0) === 1) {
+    return "claimed";
+  }
+  const existing = await env.DB.prepare(
+    `SELECT event_id, error, received_at
+      FROM bridge_events
+      WHERE event_id = ?
+      LIMIT 1`
+  ).bind(eventId).first();
+  if (!existing) {
+    // The row vanished between INSERT and SELECT (a failed claim was released).
+    return "in_progress";
+  }
+  if (existing.error !== OPENCLAW_CALLBACK_APPLY_IN_PROGRESS) {
+    return "duplicate";
+  }
+  const claimedAt = Date.parse(existing.received_at || "");
+  if (Number.isFinite(claimedAt) && now.getTime() - claimedAt < OPENCLAW_CALLBACK_CLAIM_STALE_MS) {
+    return "in_progress";
+  }
+  const takeover = await env.DB.prepare(
+    `UPDATE bridge_events
+      SET received_at = ?,
+        bridge_id = ?
+      WHERE event_id = ?
+        AND error = ?
+        AND received_at = ?`
+  ).bind(now.toISOString(), bridgeId, eventId, OPENCLAW_CALLBACK_APPLY_IN_PROGRESS, existing.received_at).run();
+  return Number(takeover?.meta?.changes ?? 0) === 1 ? "claimed" : "in_progress";
+}
+
+async function releaseOpenClawBridgeCallbackClaim(env, eventId) {
+  await env.DB.prepare(
+    `DELETE FROM bridge_events
+      WHERE event_id = ?
+        AND error = ?`
+  ).bind(eventId, OPENCLAW_CALLBACK_APPLY_IN_PROGRESS).run();
+}
+
+function bridgeCallbackEventRowBindings(payload, task, bridgeId, receivedAt) {
+  const projectId = String(task?.projectId || task?.project_id || payloadScopeValue(payload, "project_id") || "").trim();
+  const runtimeId = String(task?.runtimeId || task?.runtime_id || payloadScopeValue(payload, "runtime_id") || "").trim();
+  return [
     String(payload?.event_id || ""),
     String(payload?.task_id || ""),
     projectId,
@@ -1288,22 +1337,24 @@ async function storeOpenClawBridgeCallbackEvent(env, payload, task, bridgeId, ap
       runtime_id: runtimeId
     }),
     String(payload?.created_at || ""),
-    new Date().toISOString(),
+    receivedAt,
     bridgeId,
-    applied ? 1 : 0,
-    duplicate ? 1 : 0,
-    error || ""
-  ).run();
+    0,
+    0,
+    OPENCLAW_CALLBACK_APPLY_IN_PROGRESS
+  ];
 }
 
 async function updateOpenClawBridgeCallbackStoredEvent(env, eventId, applied, error) {
   if (!env.DB || !eventId) {
     return;
   }
+  // Never downgrade a row that another path (ledger recovery) already marked
+  // applied; SQLite evaluates both CASE expressions against the old row.
   await env.DB.prepare(
     `UPDATE bridge_events
-      SET applied = ?,
-        error = ?
+      SET applied = CASE WHEN applied = 1 THEN 1 ELSE ? END,
+        error = CASE WHEN applied = 1 THEN error ELSE ? END
       WHERE event_id = ?`
   ).bind(applied ? 1 : 0, error || "", eventId).run();
 }
@@ -1408,13 +1459,8 @@ async function handleOpenClawBridgeCallbackRequest(request, env) {
     return bridgeCallbackUnauthorizedResponse("invalid_signature", rejectionDetail);
   }
 
-  const existing = await env.DB.prepare(
-    `SELECT event_id, task_id
-      FROM bridge_events
-      WHERE event_id = ?
-      LIMIT 1`
-  ).bind(eventId).first();
-  if (existing) {
+  const claim = await claimOpenClawBridgeCallbackEvent(env, payload, callbackTask, bridgeId);
+  if (claim === "duplicate") {
     return jsonResponse({
       ok: true,
       event_id: eventId,
@@ -1423,8 +1469,10 @@ async function handleOpenClawBridgeCallbackRequest(request, env) {
       duplicate: true
     });
   }
-
-  await storeOpenClawBridgeCallbackEvent(env, payload, callbackTask, bridgeId, false, false, "");
+  if (claim === "in_progress") {
+    // Another delivery of this event is being applied; ask the Bridge to retry.
+    return bridgeCallbackErrorResponse("callback_in_progress", 409);
+  }
   let applied = false;
   let applyError = "";
   try {
@@ -1432,9 +1480,16 @@ async function handleOpenClawBridgeCallbackRequest(request, env) {
     applied = Boolean(result.applied);
     applyError = result.error || "";
   } catch (err) {
-    applied = false;
-    applyError = err?.message || String(err);
-    console.warn("[openclaw-bridge-callback] failed to apply event", applyError);
+    // The outcome is unknown or failed transiently: release the claim and
+    // answer non-2xx so the Bridge retries the same event_id instead of
+    // marking it delivered.
+    console.warn("[openclaw-bridge-callback] failed to apply event", err?.message || String(err));
+    try {
+      await releaseOpenClawBridgeCallbackClaim(env, eventId);
+    } catch (releaseError) {
+      console.warn("[openclaw-bridge-callback] failed to release claim", releaseError?.message || String(releaseError));
+    }
+    return bridgeCallbackErrorResponse("callback_apply_failed", 503);
   }
   await updateOpenClawBridgeCallbackStoredEvent(env, eventId, applied, applyError);
   if (applied) {

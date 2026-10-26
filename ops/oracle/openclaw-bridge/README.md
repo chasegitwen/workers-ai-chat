@@ -36,10 +36,23 @@ payload across every retry and restart, and the Worker deduplicates by
   `delivered`, `dead_letter` or `superseded`, so a failing predecessor delays a
   final by at most its own dispatch budget. Across tasks, `bridge.final` and
   `bridge.error` go before `bridge.started`, and that before activity.
-- `delivered` and `superseded` rows older than `retention.delivered_ms`
-  (default 7 days) are pruned; `dead_letter` rows are kept.
+- Outbox size is bounded by an hourly maintenance pass that runs on the
+  recovery timer, with or without a callback client:
+  - `pending`/`retrying` events older than 7 days expire to `dead_letter`
+    (still requeueable);
+  - `delivered`/`superseded` rows are deleted after 7 days, `dead_letter` rows
+    after 30 days;
+  - at most 20,000 finished rows are kept (delivered/superseded deleted
+    before dead_letter, oldest first). Open rows are never deleted.
+  Override with `OPENCLAW_BRIDGE_CALLBACK_PENDING_MAX_AGE_MS`,
+  `OPENCLAW_BRIDGE_CALLBACK_DELIVERED_RETENTION_MS`,
+  `OPENCLAW_BRIDGE_CALLBACK_DEAD_LETTER_RETENTION_MS` and
+  `OPENCLAW_BRIDGE_CALLBACK_MAX_FINISHED_ROWS`. `/health` reports
+  `callback_outbox_rows` and the last maintenance result.
 - If callbacks are disabled or `url` / secret is missing, no row is claimed and
-  no request is sent; events stay `pending`.
+  no request is sent; events stay `pending` until they expire as above.
+- The Worker answers non-2xx when it could not apply an event, so the event
+  is retried rather than recorded as delivered.
 - Callback failures, recovery and requeue never call `chat.send`.
 
 Administrator requeue (Bearer token required) keeps the `event_id` and payload
@@ -48,6 +61,14 @@ and resets only the dispatch budget:
 ```
 POST /v1/openclaw/callbacks/<event_id>/requeue
 ```
+
+## Shutdown
+
+On SIGINT/SIGTERM the Bridge stops accepting HTTP, stops the Gateway, then
+waits up to 10 s for in-flight request, event and recovery work, stops the
+callback dispatcher, and only then closes SQLite. If work is still running
+after the drain window, SQLite is left open and the process exits; WAL keeps
+the database consistent and unfinished work is resumed by recovery.
 
 ## SQLite schema
 

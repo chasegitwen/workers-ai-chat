@@ -132,6 +132,8 @@ class FakeD1 {
     this.openclawTasks = new Map();
     this.messages = new Map();
     this.conversations = new Map();
+    // SQL fragments that make the next matching write fail once (simulated D1 outage).
+    this.failOnce = [];
   }
 
   prepare(sql) {
@@ -211,7 +213,15 @@ class FakeD1 {
 
   run(sql, bindings) {
     const normalized = sql.replace(/\s+/g, " ").trim().toLowerCase();
-    if (normalized.startsWith("insert into bridge_events")) {
+    const failure = this.failOnce.findIndex(fragment => normalized.includes(fragment));
+    if (failure >= 0) {
+      this.failOnce.splice(failure, 1);
+      throw new Error("simulated D1 failure");
+    }
+    if (normalized.startsWith("insert or ignore into bridge_events")) {
+      if (this.bridgeEvents.has(bindings[0])) {
+        return 0;
+      }
       this.bridgeEvents.set(bindings[0], {
         event_id: bindings[0],
         task_id: bindings[1],
@@ -229,11 +239,28 @@ class FakeD1 {
         duplicate: bindings[13],
         error: bindings[14]
       });
-      return;
+      return 1;
+    }
+    if (normalized.startsWith("delete from bridge_events")) {
+      const event = this.bridgeEvents.get(bindings[0]);
+      if (event && event.error === bindings[1]) {
+        this.bridgeEvents.delete(bindings[0]);
+        return 1;
+      }
+      return 0;
+    }
+    if (normalized.startsWith("update bridge_events set received_at")) {
+      const event = this.bridgeEvents.get(bindings[2]);
+      if (event && event.error === bindings[3] && event.received_at === bindings[4]) {
+        event.received_at = bindings[0];
+        event.bridge_id = bindings[1];
+        return 1;
+      }
+      return 0;
     }
     if (normalized.startsWith("update bridge_events")) {
       const event = this.bridgeEvents.get(bindings[2]);
-      if (event) {
+      if (event && event.applied !== 1) {
         event.applied = bindings[0];
         event.error = bindings[1];
       }
@@ -1218,6 +1245,87 @@ describe("OpenClaw bridge callback endpoint", () => {
     expect(task.remote_status).toBe("cancel_requested");
     expect(task.assistant_message_id).toBe("");
     expect(db.messages.size).toBe(0);
+  });
+
+  it("does not acknowledge a final whose apply failed and applies it on the Bridge retry", async () => {
+    const payload = basePayload({
+      event_id: "evt_final_transient_failure",
+      event_type: "bridge.final",
+      sequence: 2,
+      content: { text: "最终答案。", final_answer: "最终答案。", result_finality: "final" }
+    });
+    db.failOnce.push("update openclaw_tasks set status = 'finalizing'");
+
+    const failed = await postCallback(payload);
+    expect(failed.status).toBe(503);
+    expect(await failed.json()).toEqual({ ok: false, error: "callback_apply_failed" });
+    expect(db.bridgeEvents.has(payload.event_id)).toBe(false);
+    expect((await readTask()).status).toBe("running");
+    expect(db.messages.size).toBe(0);
+
+    const retried = await postCallback(payload);
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toMatchObject({ ok: true, applied: true, duplicate: false });
+    expect(db.bridgeEvents.get(payload.event_id)).toMatchObject({ applied: 1, error: "" });
+    expect(db.messages.size).toBe(1);
+    expect((await readTask()).status).toBe("completed");
+
+    const duplicate = await postCallback(payload);
+    expect(await duplicate.json()).toMatchObject({ ok: true, applied: false, duplicate: true });
+    expect(db.messages.size).toBe(1);
+  });
+
+  it("asks the Bridge to retry while another delivery holds a fresh claim and takes over a stale one", async () => {
+    const payload = basePayload({
+      event_id: "evt_claimed_elsewhere",
+      event_type: "bridge.final",
+      sequence: 2,
+      content: { text: "接管后的答案。", final_answer: "接管后的答案。", result_finality: "final" }
+    });
+    const claimedAt = new Date().toISOString();
+    db.bridgeEvents.set(payload.event_id, {
+      event_id: payload.event_id, task_id: payload.task_id, project_id: "", runtime_id: "hillsboro-openclaw",
+      conversation_id: payload.conversation_id, assistant_message_id: "", event_type: payload.event_type,
+      sequence: payload.sequence, payload_json: JSON.stringify(payload), created_at: payload.created_at,
+      received_at: claimedAt, bridge_id: BRIDGE_ID, applied: 0, duplicate: 0, error: "apply_in_progress"
+    });
+
+    const busy = await postCallback(payload);
+    expect(busy.status).toBe(409);
+    expect(await busy.json()).toEqual({ ok: false, error: "callback_in_progress" });
+    expect(db.messages.size).toBe(0);
+    expect((await readTask()).status).toBe("running");
+
+    // The invocation holding the claim died; after the stale window a retry takes over.
+    db.bridgeEvents.get(payload.event_id).received_at = new Date(Date.now() - 60_000).toISOString();
+    const takeover = await postCallback(payload);
+    expect(takeover.status).toBe(200);
+    expect(await takeover.json()).toMatchObject({ ok: true, applied: true, duplicate: false });
+    expect(db.bridgeEvents.get(payload.event_id)).toMatchObject({ applied: 1, error: "" });
+    expect(db.messages.size).toBe(1);
+  });
+
+  it("keeps an unreleasable failed claim retryable until it becomes stale", async () => {
+    const payload = basePayload({
+      event_id: "evt_release_failure",
+      event_type: "bridge.final",
+      sequence: 2,
+      content: { text: "稍后应用。", final_answer: "稍后应用。", result_finality: "final" }
+    });
+    db.failOnce.push("update openclaw_tasks set status = 'finalizing'", "delete from bridge_events");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const failed = await postCallback(payload);
+    expect(failed.status).toBe(503);
+    expect(db.bridgeEvents.get(payload.event_id)).toMatchObject({ applied: 0, error: "apply_in_progress" });
+    expect(warn).toHaveBeenCalledWith("[openclaw-bridge-callback] failed to release claim", "simulated D1 failure");
+
+    expect((await postCallback(payload)).status).toBe(409);
+    db.bridgeEvents.get(payload.event_id).received_at = new Date(Date.now() - 60_000).toISOString();
+    const recovered = await postCallback(payload);
+    expect(recovered.status).toBe(200);
+    expect(await recovered.json()).toMatchObject({ applied: true });
+    expect(db.messages.size).toBe(1);
   });
 
   it("rejects invalid signatures", async () => {

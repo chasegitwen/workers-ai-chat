@@ -17,6 +17,26 @@ export const TASK_DB_SCHEMA_VERSION = 3;
 // Hard ceiling for automatic dispatches of one event per delivery cycle.
 export const CALLBACK_MAX_DISPATCH_ATTEMPTS = 5;
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+// Every outbox row has a bounded lifetime: open rows expire to dead_letter
+// (still requeueable) and finished rows are deleted after their retention.
+// maxFinishedRows caps finished rows in between; open rows are never deleted.
+export const DEFAULT_CALLBACK_OUTBOX_POLICY = Object.freeze({
+  pendingMaxAgeMs: 7 * DAY_MS,
+  deliveredRetentionMs: 7 * DAY_MS,
+  deadLetterRetentionMs: 30 * DAY_MS,
+  maxFinishedRows: 20_000,
+});
+
+export function resolveCallbackOutboxPolicy(overrides = {}) {
+  const policy = { ...DEFAULT_CALLBACK_OUTBOX_POLICY };
+  for (const key of Object.keys(policy)) {
+    const value = Math.floor(Number(overrides?.[key]));
+    if (Number.isFinite(value) && value > 0) policy[key] = value;
+  }
+  return policy;
+}
+
 const TASK_COLUMNS = [
   ["selection_mode", "TEXT NOT NULL DEFAULT 'classic'"],
   ["requested_base_model_id", "TEXT"],
@@ -381,10 +401,34 @@ export class TaskStore {
         last_http_status = NULL, last_error = NULL, updated_at = ?
       WHERE event_id = ? AND status = 'dead_letter'
     `);
-    this.pruneCallbacksStmt = db.prepare(`
+    this.expireOpenCallbacksStmt = db.prepare(`
+      UPDATE callback_outbox
+      SET status = 'dead_letter', next_retry_at = NULL, lease_until = NULL,
+        last_error = ?, updated_at = ?
+      WHERE status IN ${CALLBACK_DUE_STATUSES} AND created_at < ?
+    `);
+    this.pruneFinishedCallbacksStmt = db.prepare(`
       DELETE FROM callback_outbox
       WHERE status IN ('delivered', 'superseded') AND updated_at < ?
     `);
+    this.pruneDeadLetterCallbacksStmt = db.prepare(`
+      DELETE FROM callback_outbox
+      WHERE status = 'dead_letter' AND updated_at < ?
+    `);
+    this.countFinishedCallbacksStmt = db.prepare(`
+      SELECT COUNT(*) AS count FROM callback_outbox
+      WHERE status IN ('delivered', 'superseded', 'dead_letter')
+    `);
+    // Over the cap, delete delivered/superseded before dead_letter, oldest first.
+    this.trimFinishedCallbacksStmt = db.prepare(`
+      DELETE FROM callback_outbox WHERE event_id IN (
+        SELECT event_id FROM callback_outbox
+        WHERE status IN ('delivered', 'superseded', 'dead_letter')
+        ORDER BY CASE status WHEN 'dead_letter' THEN 1 ELSE 0 END, updated_at ASC
+        LIMIT ?
+      )
+    `);
+    this.countCallbackRowsStmt = db.prepare("SELECT COUNT(*) AS count FROM callback_outbox");
     this.countCallbackStatusStmt = db.prepare("SELECT COUNT(*) AS count FROM callback_outbox WHERE status = ?");
     this.countByStatusStmt = db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE status = ?");
     this.completedRecentStmt = db.prepare(`
@@ -600,9 +644,31 @@ export class TaskStore {
     const ts = nowIso();
     return (this.requeueCallbackStmt.run(ts, ts, eventId).changes ?? 0) === 1;
   }
-  pruneCallbacks(olderThan) {
-    return this.pruneCallbacksStmt.run(olderThan).changes ?? 0;
+  /** Apply the outbox retention policy in one transaction; returns per-step counts. */
+  maintainCallbackOutbox(policyOverrides = {}, now = Date.now()) {
+    const policy = resolveCallbackOutboxPolicy(policyOverrides);
+    const at = new Date(now).toISOString();
+    const before = (ms) => new Date(now - ms).toISOString();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const expired = this.expireOpenCallbacksStmt.run(
+        `expired before delivery after ${policy.pendingMaxAgeMs} ms`,
+        at,
+        before(policy.pendingMaxAgeMs),
+      ).changes ?? 0;
+      const prunedFinished = this.pruneFinishedCallbacksStmt.run(before(policy.deliveredRetentionMs)).changes ?? 0;
+      const prunedDeadLetter = this.pruneDeadLetterCallbacksStmt.run(before(policy.deadLetterRetentionMs)).changes ?? 0;
+      const finished = this.countFinishedCallbacksStmt.get()?.count ?? 0;
+      const overCap = Math.max(0, finished - policy.maxFinishedRows);
+      const trimmed = overCap > 0 ? this.trimFinishedCallbacksStmt.run(overCap).changes ?? 0 : 0;
+      this.db.exec("COMMIT");
+      return { expired, prunedFinished, prunedDeadLetter, trimmed };
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch {}
+      throw error;
+    }
   }
+  countCallbackRows() { return this.countCallbackRowsStmt.get()?.count ?? 0; }
   countCallbackStatus(status) { return this.countCallbackStatusStmt.get(status)?.count ?? 0; }
   countStatus(status) { return this.countByStatusStmt.get(status)?.count ?? 0; }
   completedRecent() { return this.completedRecentStmt.get()?.count ?? 0; }

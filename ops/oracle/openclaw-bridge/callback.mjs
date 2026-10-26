@@ -21,8 +21,6 @@ const MAX_DELIVERY_ATTEMPTS = 5;
 const MAX_BACKOFF_MS = 60_000;
 const LEASE_MARGIN_MS = 20_000;     // sending lease outlives the HTTP timeout
 const MIN_WAKEUP_MS = 25;
-const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
-const DELIVERED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 /* ── helpers ── */
 
@@ -199,7 +197,6 @@ export function buildHeaders(bridgeId, timestamp, signature, eventId) {
  * @param {number} [config.maxAttempts] — dispatch attempts per cycle (capped at 5)
  * @param {number} [config.httpTimeoutMs]
  * @param {number} [config.leaseMs] — sending lease; always longer than the HTTP timeout
- * @param {number} [config.deliveredRetentionMs] — retention for delivered/superseded rows
  * @param {object} [config.store] — TaskStore (or attach later with attachStore)
  * @param {object} [config.logger] — { warn, info, error }
  * @param {Function} [config.fetchImpl] — injectable fetch for testing
@@ -218,7 +215,6 @@ export function createCallbackClient(config) {
     : MAX_DELIVERY_ATTEMPTS;
   const httpTimeoutMs = Math.max(100, Math.min(60_000, Number(config.httpTimeoutMs) || HTTP_TIMEOUT_MS));
   const leaseMs = Math.max(httpTimeoutMs + LEASE_MARGIN_MS, Number(config.leaseMs) || 0);
-  const retentionMs = Math.max(60_000, Number(config.deliveredRetentionMs) || DELIVERED_RETENTION_MS);
   const logger = config.logger ?? console;
   const fetchImpl = config.fetchImpl ?? globalThis.fetch?.bind(globalThis);
 
@@ -238,7 +234,6 @@ export function createCallbackClient(config) {
   let running = null;
   let rerun = false;
   let inflight = null;
-  let lastPruneAt = 0;
   const stats = {
     dispatched: 0,
     delivered: 0,
@@ -297,19 +292,7 @@ export function createCallbackClient(config) {
       });
   }
 
-  function maybePrune() {
-    const now = Date.now();
-    if (!store?.pruneCallbacks || now - lastPruneAt < PRUNE_INTERVAL_MS) return;
-    lastPruneAt = now;
-    try {
-      store.pruneCallbacks(new Date(now - retentionMs).toISOString());
-    } catch (error) {
-      warn("delivered callback pruning failed", error);
-    }
-  }
-
   async function processQueue() {
-    maybePrune();
     // Disabled or incomplete configuration never claims rows: no request is
     // sent and no dispatch attempt is consumed.
     if (!deliveryEnabled) return;
@@ -463,6 +446,5 @@ export function resolveCallbackConfig(rawConfig, env) {
     backoffMs: cfg.retry?.backoff_ms,
     maxAttempts: cfg.retry?.max_attempts,
     httpTimeoutMs: cfg.http_timeout_ms,
-    deliveredRetentionMs: cfg.retention?.delivered_ms,
   };
 }

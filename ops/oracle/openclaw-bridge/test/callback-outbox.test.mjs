@@ -394,22 +394,63 @@ test("activity snapshots are superseded and terminal events are dispatched first
   assert.equal(store.claimNextCallback(), null);
 });
 
-test("delivered and superseded rows are pruned after retention; dead_letter is kept", async (t) => {
+test("outbox maintenance expires stale open events and prunes finished rows by retention", async (t) => {
   const { db, store } = await openStore(t);
   store.createOrGet(taskRow());
-  const old = store.enqueueCallback("task-one", payloadFactory("bridge.started"));
-  store.markCallbackDelivered(old.payload.event_id, store.claimNextCallback().dispatch_attempts, 200);
+  const day = 24 * 60 * 60 * 1000;
+  const ago = (days) => new Date(Date.now() - days * day).toISOString();
+  const setTimes = (eventId, createdAt, updatedAt) => db
+    .prepare("UPDATE callback_outbox SET created_at = ?, updated_at = ? WHERE event_id = ?")
+    .run(createdAt, updatedAt, eventId);
+
+  const deliveredOld = store.enqueueCallback("task-one", payloadFactory("bridge.started"));
+  store.markCallbackDelivered(deliveredOld.payload.event_id, store.claimNextCallback().dispatch_attempts, 200);
+  setTimes(deliveredOld.payload.event_id, ago(10), ago(10));
+  const deadRecent = store.enqueueCallback("task-one", payloadFactory("bridge.started"));
+  store.markCallbackDeadLetter(deadRecent.payload.event_id, store.claimNextCallback().dispatch_attempts, "HTTP 400", 400);
+  setTimes(deadRecent.payload.event_id, ago(10), ago(10));
+  const deadOld = store.enqueueCallback("task-one", payloadFactory("bridge.started"));
+  store.markCallbackDeadLetter(deadOld.payload.event_id, store.claimNextCallback().dispatch_attempts, "HTTP 400", 400);
+  setTimes(deadOld.payload.event_id, ago(40), ago(40));
+  const deliveredFresh = store.enqueueCallback("task-one", payloadFactory("bridge.started"));
+  store.markCallbackDelivered(deliveredFresh.payload.event_id, store.claimNextCallback().dispatch_attempts, 200);
+  const stalePending = store.enqueueCallback("task-one", payloadFactory("bridge.started"));
+  setTimes(stalePending.payload.event_id, ago(8), ago(8));
+  const freshPending = store.enqueueCallback("task-one", payloadFactory("bridge.started"));
+
+  assert.deepEqual(store.maintainCallbackOutbox(), { expired: 1, prunedFinished: 1, prunedDeadLetter: 1, trimmed: 0 });
+  assert.equal(store.getCallback(deliveredOld.payload.event_id), null);
+  assert.equal(store.getCallback(deadOld.payload.event_id), null);
+  assert.equal(store.getCallback(deadRecent.payload.event_id).status, "dead_letter");
+  assert.equal(store.getCallback(deliveredFresh.payload.event_id).status, "delivered");
+  const expired = store.getCallback(stalePending.payload.event_id);
+  assert.equal(expired.status, "dead_letter");
+  assert.match(expired.last_error, /expired before delivery/);
+  assert.equal(store.getCallback(freshPending.payload.event_id).status, "pending");
+  // An expired event remains recoverable by the administrator within retention.
+  assert.equal(store.requeueCallback(stalePending.payload.event_id), true);
+});
+
+test("outbox maintenance caps finished rows, dropping delivered before dead_letter and never open rows", async (t) => {
+  const { store } = await openStore(t);
+  store.createOrGet(taskRow());
+  const delivered = [];
+  for (let index = 0; index < 3; index += 1) {
+    const event = store.enqueueCallback("task-one", payloadFactory("bridge.started"));
+    store.markCallbackDelivered(event.payload.event_id, store.claimNextCallback().dispatch_attempts, 200);
+    delivered.push(event.payload.event_id);
+  }
   const dead = store.enqueueCallback("task-one", payloadFactory("bridge.started"));
   store.markCallbackDeadLetter(dead.payload.event_id, store.claimNextCallback().dispatch_attempts, "HTTP 400", 400);
-  const fresh = store.enqueueCallback("task-one", payloadFactory("bridge.started"));
-  store.markCallbackDelivered(fresh.payload.event_id, store.claimNextCallback().dispatch_attempts, 200);
-  const longAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  db.prepare("UPDATE callback_outbox SET updated_at = ? WHERE event_id IN (?, ?)").run(longAgo, old.payload.event_id, dead.payload.event_id);
+  const open = store.enqueueCallback("task-one", payloadFactory("bridge.started"));
 
-  assert.equal(store.pruneCallbacks(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()), 1);
-  assert.equal(store.getCallback(old.payload.event_id), null);
+  assert.equal(store.maintainCallbackOutbox({ maxFinishedRows: 2 }).trimmed, 2);
+  assert.equal(store.getCallback(delivered[0]), null);
+  assert.equal(store.getCallback(delivered[1]), null);
+  assert.equal(store.getCallback(delivered[2]).status, "delivered");
   assert.equal(store.getCallback(dead.payload.event_id).status, "dead_letter");
-  assert.equal(store.getCallback(fresh.payload.event_id).status, "delivered");
+  assert.equal(store.getCallback(open.payload.event_id).status, "pending");
+  assert.equal(store.countCallbackRows(), 3);
 });
 
 test("administrator requeue keeps event_id and payload and resets only the dispatch budget", async (t) => {

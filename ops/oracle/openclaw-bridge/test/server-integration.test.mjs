@@ -712,3 +712,114 @@ test("runtime close waits for an in-flight callback before closing SQLite", asyn
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.deepEqual(unhandled, []);
 });
+
+async function runningTaskWithPendingHistory(t) {
+  const history = deferred();
+  let historyRequested;
+  const historySeen = new Promise((resolve) => { historyRequested = resolve; });
+  const fixtureResult = await fixture(t, async (method, params, options) => {
+    if (method === "chat.send") {
+      options.onSent?.();
+      options.onAccepted?.({ runId: params.idempotencyKey });
+      return { runId: params.idempotencyKey, status: "started" };
+    }
+    if (method === "chat.history") {
+      historyRequested();
+      return history.promise;
+    }
+    throw new Error(`unexpected ${method}`);
+  });
+  const created = await fixtureResult.request("POST", "/v1/openclaw/tasks", {
+    message: "shutdown drain",
+    idempotency_key: "shutdown-drain",
+    conversation_id: "shutdown-drain",
+  });
+  assert.equal(created.status, 202);
+  const task = fixtureResult.runtime.store.getByIdempotencyKey("shutdown-drain");
+  assert.equal(task.status, "running");
+  // A Gateway final arrives; handling it waits on chat.history.
+  fixtureResult.gateway.handlers.onEvent({
+    event: "chat",
+    payload: {
+      runId: "shutdown-drain",
+      sessionKey: task.session_key,
+      state: "final",
+      message: { role: "assistant", text: "drained final answer", runId: "shutdown-drain" },
+    },
+  });
+  await historySeen;
+  return { ...fixtureResult, task, history };
+}
+
+test("close drains in-flight Gateway work before closing SQLite", async (t) => {
+  const unhandled = [];
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  t.after(() => process.off("unhandledRejection", onUnhandled));
+  const { runtime, callbacks, history } = await runningTaskWithPendingHistory(t);
+
+  let settled = false;
+  const closing = runtime.close().then((result) => { settled = true; return result; });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(settled, false);
+  assert.equal(runtime.store.dbOk(), true);
+
+  history.resolve({ messages: [] });
+  assert.deepEqual(await closing, { sqliteClosed: true });
+  assert.throws(() => runtime.store.dbOk());
+  // The drained work completed the task before SQLite closed.
+  assert.equal(callbacks.filter((payload) => payload.event_type === "bridge.final").length, 1);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(unhandled, []);
+});
+
+test("close leaves SQLite open when tracked work outlives the drain window", async (t) => {
+  const unhandled = [];
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  t.after(() => process.off("unhandledRejection", onUnhandled));
+  const { runtime, task, history } = await runningTaskWithPendingHistory(t);
+  const warn = t.mock.method(console, "warn", () => {});
+
+  assert.deepEqual(await runtime.close({ drainMs: 30 }), { sqliteClosed: false });
+  assert.equal(runtime.store.dbOk(), true);
+  assert.ok(warn.mock.calls.some((call) => /drain timed out/.test(String(call.arguments[0]))));
+
+  // The late work still finds an open database and finishes cleanly.
+  history.resolve({ messages: [] });
+  await runtime.controller.drain(1_000);
+  assert.equal(runtime.store.get(task.task_id).status, "completed");
+  assert.deepEqual(unhandled, []);
+  runtime.db.close();
+});
+
+test("outbox maintenance runs at startup even without a callback client", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "oracle-bridge-maintenance-"));
+  const runtime = createBridgeApplication({
+    dbPath: path.join(dir, "state.sqlite"),
+    token: "test-bridge-token",
+    port: 0,
+    gatewayFactory: (handlers) => new FakeGateway(handlers, async () => ({ messages: [] })),
+  });
+  t.after(async () => {
+    await runtime.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+  const now = new Date().toISOString();
+  runtime.store.createOrGet({
+    task_id: "no-client", conversation_id: "c", session_key: "s", session_id: null, agent_id: "main",
+    run_id: "r", idempotency_key: "no-client", status: "running", message: "m", partial_text: "",
+    result_json: null, error: null, created_at: now, updated_at: now, completed_at: null,
+    requested_base_model_id: null, resolved_base_model_id: null, actual_model_id: null, parent_session_key: null,
+  });
+  assert.equal(runtime.controller.emitCallback("bridge.started", runtime.store.get("no-client"), { text: "started" }), true);
+  const row = runtime.store.db.prepare("SELECT event_id FROM callback_outbox").get();
+  const longAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+  runtime.store.db.prepare("UPDATE callback_outbox SET created_at = ?, updated_at = ?").run(longAgo, longAgo);
+
+  await runtime.controller.start(0);
+  assert.equal(runtime.store.getCallback(row.event_id).status, "dead_letter");
+  assert.equal(runtime.controller.lastOutboxMaintenance.expired, 1);
+  // Throttled: a second pass within the interval does nothing.
+  assert.equal(runtime.controller.maintainCallbackOutbox(), null);
+});

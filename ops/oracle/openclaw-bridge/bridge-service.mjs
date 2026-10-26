@@ -27,11 +27,12 @@ import {
 } from "./model-routing.mjs";
 import { PendingRunEventBuffer } from "./gateway-adapter.mjs";
 import { isUncertainSubmissionFailure } from "./submission-state.mjs";
-import { openTaskDatabase, TaskStore } from "./task-store.mjs";
+import { openTaskDatabase, resolveCallbackOutboxPolicy, TaskStore } from "./task-store.mjs";
 import { BRIDGE_VERSION } from "./version.mjs";
 
 const TERMINAL = new Set(["completed", "failed", "canceled", "indeterminate"]);
 const PRE_SEND_PHASES = new Set(["prepared", "session_create_dispatched", "session_ready"]);
+const OUTBOX_MAINTENANCE_INTERVAL_MS = 60 * 60 * 1000;
 
 function nowIso() { return new Date().toISOString(); }
 function normalizeOptionalString(value) {
@@ -111,7 +112,14 @@ function resultRecord(task, recovered, messages, source, extra = {}) {
 }
 
 export class BridgeController {
-  constructor({ store, gateway, callbackClient = null, recoveryHistoryLimit = 80, maxSessionCreateAttempts = 2 }) {
+  constructor({
+    store,
+    gateway,
+    callbackClient = null,
+    recoveryHistoryLimit = 80,
+    maxSessionCreateAttempts = 2,
+    callbackOutboxPolicy = {},
+  }) {
     this.store = store;
     this.gateway = gateway;
     this.callbackClient = callbackClient;
@@ -129,6 +137,25 @@ export class BridgeController {
     this.submissionRunner = null;
     this.stopped = false;
     this.backgroundWork = new Set();
+    this.callbackOutboxPolicy = resolveCallbackOutboxPolicy(callbackOutboxPolicy);
+    this.lastOutboxMaintenanceAt = 0;
+    this.lastOutboxMaintenance = null;
+  }
+
+  /**
+   * Bound callback_outbox growth. Runs on the recovery timer whether or not a
+   * callback client is configured, because events are recorded either way.
+   */
+  maintainCallbackOutbox({ force = false, now = Date.now() } = {}) {
+    if (this.stopped) return null;
+    if (!force && now - this.lastOutboxMaintenanceAt < OUTBOX_MAINTENANCE_INTERVAL_MS) return null;
+    this.lastOutboxMaintenanceAt = now;
+    try {
+      this.lastOutboxMaintenance = { at: new Date(now).toISOString(), ...this.store.maintainCallbackOutbox(this.callbackOutboxPolicy, now) };
+    } catch (error) {
+      this.lastOutboxMaintenance = { at: new Date(now).toISOString(), error: error instanceof Error ? error.message : String(error) };
+    }
+    return this.lastOutboxMaintenance;
   }
 
   /** Track asynchronous gateway/timer work so stop() can drain it before SQLite closes. */
@@ -191,28 +218,49 @@ export class BridgeController {
   }
 
   async start(recoverySweepMs = 20_000) {
+    this.maintainCallbackOutbox({ force: true });
     await this.gateway.start?.();
     if (!this.recoveryTimer && recoverySweepMs > 0) {
-      this.recoveryTimer = setInterval(() => void this.track(this.recoverySweep("timer")), recoverySweepMs);
+      this.recoveryTimer = setInterval(() => {
+        this.maintainCallbackOutbox();
+        void this.track(this.recoverySweep("timer"));
+      }, recoverySweepMs);
       this.recoveryTimer.unref?.();
     }
     await this.recoverySweep("connect");
   }
 
-  async stop({ drainMs = 5_000 } = {}) {
+  /**
+   * Stop new Gateway/timer work, stop the Gateway, then wait for tracked work.
+   * Resolves true only when every tracked operation has settled; false means
+   * work may still touch SQLite and the caller must not close the database.
+   */
+  async stop({ drainMs = 10_000 } = {}) {
     this.stopped = true;
     if (this.recoveryTimer) clearInterval(this.recoveryTimer);
     this.recoveryTimer = null;
     try {
       await this.gateway.stop?.();
-    } finally {
+    } catch (error) {
+      this.lastRecoveryError = error instanceof Error ? error.message : String(error);
+    }
+    return this.drain(drainMs);
+  }
+
+  async drain(drainMs) {
+    const deadline = Date.now() + Math.max(0, Number(drainMs) || 0);
+    // Tracked work can start further tracked work, so drain until empty.
+    while (this.backgroundWork.size > 0) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return false;
       let drainTimer;
       await Promise.race([
         Promise.allSettled([...this.backgroundWork]),
-        new Promise((resolve) => { drainTimer = setTimeout(resolve, drainMs); }),
+        new Promise((resolve) => { drainTimer = setTimeout(resolve, remaining); }),
       ]);
       clearTimeout(drainTimer);
     }
+    return true;
   }
 
   deferEvents(taskId) { this.deferredTaskIds.add(taskId); }
@@ -516,10 +564,15 @@ export class BridgeHttpApplication {
     this.recoveryDeadlineMs = recoveryDeadlineMs;
     this.maxSessionCreateAttempts = Math.max(1, Math.min(2, Number(maxSessionCreateAttempts) || 2));
     this.server = http.createServer((req, res) => {
-      this.route(req, res).catch((error) => {
+      if (controller.stopped) {
+        this.jsonResponse(res, 503, { error: "bridge is shutting down" });
+        return;
+      }
+      // Request handlers touch SQLite, so shutdown drains them like Gateway work.
+      void controller.track(this.route(req, res).catch((error) => {
         const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
         this.jsonResponse(res, statusCode, { error: error instanceof Error ? error.message : String(error) });
-      });
+      }));
     });
     controller.setSubmissionRunner((taskId, options) => this.submitTask(taskId, options));
   }
@@ -783,7 +836,7 @@ export class BridgeHttpApplication {
           sent = true;
           this.store.markChatSendDispatched(taskId, exactRunId);
           if (this.store.get(taskId)?.cancel_requested) {
-            queueMicrotask(() => void this.controller.coordinateCancellation(taskId));
+            queueMicrotask(() => void this.controller.track(this.controller.coordinateCancellation(taskId)));
           }
         },
         onAccepted: (payload) => {
@@ -895,6 +948,8 @@ export class BridgeHttpApplication {
         callback_retrying: this.store.countCallbackStatus("retrying"),
         callback_dead_letter: this.store.countCallbackStatus("dead_letter"),
         callback_superseded: this.store.countCallbackStatus("superseded"),
+        callback_outbox_rows: this.store.countCallbackRows(),
+        callback_outbox_maintenance: this.controller.lastOutboxMaintenance,
         callback_delivery_enabled: this.controller.callbackClient?.stats?.().deliveryEnabled ?? false,
         callback_delivery_semantics: "at-least-once",
         version: BRIDGE_VERSION,
@@ -939,8 +994,12 @@ export class BridgeHttpApplication {
     });
   }
 
-  async close() {
-    await new Promise((resolve) => this.server.listening ? this.server.close(resolve) : resolve());
+  /** Stop accepting connections; in-flight requests are drained by the controller. */
+  close() {
+    if (!this.server.listening) return Promise.resolve();
+    const closed = new Promise((resolve) => this.server.close(() => resolve()));
+    this.server.closeIdleConnections?.();
+    return closed;
   }
 }
 
@@ -955,6 +1014,8 @@ export function createBridgeApplication({
   recoveryDeadlineMs,
   maxSessionCreateAttempts = 2,
   recoveryHistoryLimit = 80,
+  shutdownDrainMs = 10_000,
+  callbackOutboxPolicy = {},
 } = {}) {
   if (!dbPath) throw new Error("dbPath is required");
   if (!token) throw new Error("Bridge bearer token is required");
@@ -978,6 +1039,7 @@ export function createBridgeApplication({
     callbackClient,
     recoveryHistoryLimit,
     maxSessionCreateAttempts,
+    callbackOutboxPolicy,
   });
   const app = new BridgeHttpApplication({
     store,
@@ -996,18 +1058,30 @@ export function createBridgeApplication({
     store,
     db,
     gateway,
-    async close() {
+    /**
+     * Shut down without using SQLite after it is closed. Order: stop accepting
+     * HTTP, stop the Gateway and drain tracked request/event/recovery work,
+     * stop the callback dispatcher, then close SQLite. If tracked work is still
+     * running after the drain window, SQLite is deliberately left open (WAL
+     * keeps it crash-safe when the process exits) and sqliteClosed is false.
+     */
+    async close({ drainMs = shutdownDrainMs } = {}) {
       if (closePromise) return closePromise;
       closePromise = (async () => {
-        // Order matters: stop accepting HTTP work, stop Gateway-driven work,
-        // let the callback dispatcher write its final outbox update, and only
-        // then close SQLite.
-        await app.close();
-        await controller.stop().catch(() => {});
+        const serverClosed = app.close();
+        const drained = await controller.stop({ drainMs }).catch(() => false);
         if (typeof callbackClient?.stop === "function") await callbackClient.stop({ graceMs: 3_000 });
         else await callbackClient?.flush?.(3_000);
+        if (!drained) {
+          console.warn("[bridge] shutdown drain timed out; SQLite left open for in-flight work");
+          return { sqliteClosed: false };
+        }
+        // All requests have settled; drop lingering keep-alive sockets.
+        app.server.closeAllConnections?.();
+        await serverClosed;
         closed = true;
         db.close();
+        return { sqliteClosed: true };
       })();
       return closePromise;
     },

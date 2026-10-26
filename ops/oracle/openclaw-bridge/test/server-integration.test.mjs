@@ -793,33 +793,101 @@ test("close leaves SQLite open when tracked work outlives the drain window", asy
   runtime.db.close();
 });
 
-test("outbox maintenance runs at startup even without a callback client", async (t) => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "oracle-bridge-maintenance-"));
+async function bootWithoutClient(t, options = {}) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "oracle-bridge-capacity-"));
+  let gateway;
   const runtime = createBridgeApplication({
     dbPath: path.join(dir, "state.sqlite"),
     token: "test-bridge-token",
     port: 0,
-    gatewayFactory: (handlers) => new FakeGateway(handlers, async () => ({ messages: [] })),
+    gatewayFactory: (handlers) => {
+      gateway = new FakeGateway(handlers, async (method, params, options) => {
+        if (method === "chat.send") {
+          options.onSent?.();
+          options.onAccepted?.({ runId: params.idempotencyKey });
+          return { runId: params.idempotencyKey, status: "started" };
+        }
+        if (method === "chat.history") return { messages: [] };
+        throw new Error(`unexpected ${method}`);
+      });
+      return gateway;
+    },
+    ...options,
   });
   t.after(async () => {
     await runtime.close();
     await fs.rm(dir, { recursive: true, force: true });
   });
-  const now = new Date().toISOString();
-  runtime.store.createOrGet({
-    task_id: "no-client", conversation_id: "c", session_key: "s", session_id: null, agent_id: "main",
-    run_id: "r", idempotency_key: "no-client", status: "running", message: "m", partial_text: "",
-    result_json: null, error: null, created_at: now, updated_at: now, completed_at: null,
-    requested_base_model_id: null, resolved_base_model_id: null, actual_model_id: null, parent_session_key: null,
-  });
-  assert.equal(runtime.controller.emitCallback("bridge.started", runtime.store.get("no-client"), { text: "started" }), true);
-  const row = runtime.store.db.prepare("SELECT event_id FROM callback_outbox").get();
-  const longAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+  const address = await runtime.app.listen();
+  const base = `http://127.0.0.1:${address.port}`;
+  async function call(method, pathname, body) {
+    const response = await fetch(`${base}${pathname}`, {
+      method,
+      headers: { authorization: "Bearer test-bridge-token", ...(body ? { "content-type": "application/json" } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    return { status: response.status, body: await response.json() };
+  }
+  return { runtime, call, gateway: () => gateway };
+}
+
+test("outbox maintenance runs at startup without a callback client and keeps unresolved rows", async (t) => {
+  const { runtime, call } = await bootWithoutClient(t);
+  const created = await call("POST", "/v1/openclaw/tasks", { message: "m", idempotency_key: "no-client", conversation_id: "no-client" });
+  assert.equal(created.status, 202);
+  const startedRow = runtime.store.db.prepare("SELECT event_id FROM callback_outbox").get();
+  const longAgo = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000).toISOString();
   runtime.store.db.prepare("UPDATE callback_outbox SET created_at = ?, updated_at = ?").run(longAgo, longAgo);
 
   await runtime.controller.start(0);
-  assert.equal(runtime.store.getCallback(row.event_id).status, "dead_letter");
-  assert.equal(runtime.controller.lastOutboxMaintenance.expired, 1);
+  assert.equal(runtime.store.getCallback(startedRow.event_id).status, "pending");
+  assert.deepEqual(
+    { prunedFinished: runtime.controller.lastOutboxMaintenance.prunedFinished },
+    { prunedFinished: 0 },
+  );
   // Throttled: a second pass within the interval does nothing.
   assert.equal(runtime.controller.maintainCallbackOutbox(), null);
+});
+
+test("capacity limits refuse new tasks but let existing tasks finish and record callbacks", async (t) => {
+  const { runtime, call, gateway } = await bootWithoutClient(t, { capacityLimits: { maxUnresolvedCallbacks: 1 } });
+  const first = await call("POST", "/v1/openclaw/tasks", { message: "m", idempotency_key: "before-limit", conversation_id: "c1" });
+  assert.equal(first.status, 202);
+  const task = runtime.store.getByIdempotencyKey("before-limit");
+  assert.equal(runtime.store.countUnresolvedCallbacks(), 1);
+
+  const refused = await call("POST", "/v1/openclaw/tasks", { message: "m", idempotency_key: "after-limit", conversation_id: "c2" });
+  assert.equal(refused.status, 503);
+  assert.deepEqual(refused.body, { error: "bridge_capacity_exhausted", reasons: ["unresolved_callbacks_limit"] });
+  assert.equal(runtime.store.getByIdempotencyKey("after-limit"), null);
+  assert.equal(gateway().count("chat.send"), 1);
+
+  // An idempotent replay of the existing task is still answered.
+  const replay = await call("POST", "/v1/openclaw/tasks", { message: "m", idempotency_key: "before-limit", conversation_id: "c1" });
+  assert.equal(replay.body.deduplicated, true);
+
+  // The existing task still completes and its final is recorded, not dropped.
+  await runtime.controller.handleEvent({
+    event: "chat",
+    payload: { runId: "before-limit", sessionKey: task.session_key, state: "final", message: { role: "assistant", text: "finished under limit" } },
+  });
+  assert.equal(runtime.store.get(task.task_id).status, "completed");
+  assert.equal(runtime.store.db.prepare("SELECT COUNT(*) AS count FROM callback_outbox WHERE event_type = 'bridge.final'").get().count, 1);
+
+  const health = await fetch(`http://127.0.0.1:${runtime.app.server.address().port}/health`).then((response) => response.json());
+  assert.equal(health.ok, false);
+  assert.deepEqual(health.capacity.reasons, ["unresolved_callbacks_limit"]);
+});
+
+test("database size and free disk limits refuse new tasks", async (t) => {
+  const small = await bootWithoutClient(t, { capacityLimits: { maxDatabaseBytes: 1 } });
+  const bySize = await small.call("POST", "/v1/openclaw/tasks", { message: "m", idempotency_key: "size", conversation_id: "c" });
+  assert.equal(bySize.status, 503);
+  assert.deepEqual(bySize.body.reasons, ["database_size_limit"]);
+
+  const full = await bootWithoutClient(t, { capacityLimits: { minFreeDiskBytes: Number.MAX_SAFE_INTEGER } });
+  const byDisk = await full.call("POST", "/v1/openclaw/tasks", { message: "m", idempotency_key: "disk", conversation_id: "c" });
+  assert.equal(byDisk.status, 503);
+  assert.deepEqual(byDisk.body.reasons, ["free_disk_limit"]);
+  assert.equal(full.gateway().count("chat.send"), 0);
 });

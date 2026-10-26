@@ -36,21 +36,23 @@ payload across every retry and restart, and the Worker deduplicates by
   `delivered`, `dead_letter` or `superseded`, so a failing predecessor delays a
   final by at most its own dispatch budget. Across tasks, `bridge.final` and
   `bridge.error` go before `bridge.started`, and that before activity.
-- Outbox size is bounded by an hourly maintenance pass that runs on the
-  recovery timer, with or without a callback client:
-  - `pending`/`retrying` events older than 7 days expire to `dead_letter`
-    (still requeueable);
-  - `delivered`/`superseded` rows are deleted after 7 days, `dead_letter` rows
-    after 30 days;
-  - at most 20,000 finished rows are kept (delivered/superseded deleted
-    before dead_letter, oldest first). Open rows are never deleted.
-  Override with `OPENCLAW_BRIDGE_CALLBACK_PENDING_MAX_AGE_MS`,
-  `OPENCLAW_BRIDGE_CALLBACK_DELIVERED_RETENTION_MS`,
-  `OPENCLAW_BRIDGE_CALLBACK_DEAD_LETTER_RETENTION_MS` and
-  `OPENCLAW_BRIDGE_CALLBACK_MAX_FINISHED_ROWS`. `/health` reports
-  `callback_outbox_rows` and the last maintenance result.
+- Retention: an hourly maintenance pass on the recovery timer (with or without
+  a callback client) deletes `delivered`/`superseded` rows older than 7 days
+  (`OPENCLAW_BRIDGE_CALLBACK_DELIVERED_RETENTION_MS`). Open rows and
+  `dead_letter` rows are never deleted automatically; they stay available for
+  audit and administrator requeue.
+- Capacity: because unresolved rows are kept, `POST /v1/openclaw/tasks` answers
+  `503 bridge_capacity_exhausted` while any limit is reached. Existing tasks keep
+  running, recovering and recording callbacks; idempotent replays are still
+  answered. `/health` reports `ok: false` and the `capacity` object.
+
+  | limit | default | variable |
+  |---|---|---|
+  | unresolved callbacks (pending, retrying, sending, dead_letter) | 10,000 | `OPENCLAW_BRIDGE_MAX_UNRESOLVED_CALLBACKS` |
+  | database + WAL size | 1 GiB | `OPENCLAW_BRIDGE_MAX_DATABASE_BYTES` |
+  | minimum free disk space | 512 MiB | `OPENCLAW_BRIDGE_MIN_FREE_DISK_BYTES` |
 - If callbacks are disabled or `url` / secret is missing, no row is claimed and
-  no request is sent; events stay `pending` until they expire as above.
+  no request is sent; events stay `pending`.
 - The Worker answers non-2xx when it could not apply an event, so the event
   is retried rather than recorded as delivered.
 - Callback failures, recovery and requeue never call `chat.send`.

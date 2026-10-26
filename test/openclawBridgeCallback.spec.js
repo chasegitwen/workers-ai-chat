@@ -241,23 +241,6 @@ class FakeD1 {
       });
       return 1;
     }
-    if (normalized.startsWith("delete from bridge_events")) {
-      const event = this.bridgeEvents.get(bindings[0]);
-      if (event && event.error === bindings[1]) {
-        this.bridgeEvents.delete(bindings[0]);
-        return 1;
-      }
-      return 0;
-    }
-    if (normalized.startsWith("update bridge_events set received_at")) {
-      const event = this.bridgeEvents.get(bindings[2]);
-      if (event && event.error === bindings[3] && event.received_at === bindings[4]) {
-        event.received_at = bindings[0];
-        event.bridge_id = bindings[1];
-        return 1;
-      }
-      return 0;
-    }
     if (normalized.startsWith("update bridge_events")) {
       const event = this.bridgeEvents.get(bindings[2]);
       if (event && event.applied !== 1) {
@@ -1275,57 +1258,114 @@ describe("OpenClaw bridge callback endpoint", () => {
     expect(db.messages.size).toBe(1);
   });
 
-  it("asks the Bridge to retry while another delivery holds a fresh claim and takes over a stale one", async () => {
-    const payload = basePayload({
-      event_id: "evt_claimed_elsewhere",
+  function finalPayload(eventId, text) {
+    return basePayload({
+      event_id: eventId,
       event_type: "bridge.final",
       sequence: 2,
-      content: { text: "接管后的答案。", final_answer: "接管后的答案。", result_finality: "final" }
+      content: { text, final_answer: text, result_finality: "final" }
     });
-    const claimedAt = new Date().toISOString();
-    db.bridgeEvents.set(payload.event_id, {
-      event_id: payload.event_id, task_id: payload.task_id, project_id: "", runtime_id: "hillsboro-openclaw",
-      conversation_id: payload.conversation_id, assistant_message_id: "", event_type: payload.event_type,
-      sequence: payload.sequence, payload_json: JSON.stringify(payload), created_at: payload.created_at,
-      received_at: claimedAt, bridge_id: BRIDGE_ID, applied: 0, duplicate: 0, error: "apply_in_progress"
-    });
+  }
 
-    const busy = await postCallback(payload);
-    expect(busy.status).toBe(409);
-    expect(await busy.json()).toEqual({ ok: false, error: "callback_in_progress" });
-    expect(db.messages.size).toBe(0);
-    expect((await readTask()).status).toBe("running");
-
-    // The invocation holding the claim died; after the stale window a retry takes over.
-    db.bridgeEvents.get(payload.event_id).received_at = new Date(Date.now() - 60_000).toISOString();
-    const takeover = await postCallback(payload);
-    expect(takeover.status).toBe(200);
-    expect(await takeover.json()).toMatchObject({ ok: true, applied: true, duplicate: false });
-    expect(db.bridgeEvents.get(payload.event_id)).toMatchObject({ applied: 1, error: "" });
-    expect(db.messages.size).toBe(1);
-  });
-
-  it("keeps an unreleasable failed claim retryable until it becomes stale", async () => {
-    const payload = basePayload({
-      event_id: "evt_release_failure",
-      event_type: "bridge.final",
-      sequence: 2,
-      content: { text: "稍后应用。", final_answer: "稍后应用。", result_finality: "final" }
-    });
-    db.failOnce.push("update openclaw_tasks set status = 'finalizing'", "delete from bridge_events");
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("completes a final whose message was written before the task completion failed", async () => {
+    const payload = finalPayload("evt_message_written_then_failed", "消息已写入的答案。");
+    db.failOnce.push("set status = 'completed', assistant_message_id");
 
     const failed = await postCallback(payload);
     expect(failed.status).toBe(503);
-    expect(db.bridgeEvents.get(payload.event_id)).toMatchObject({ applied: 0, error: "apply_in_progress" });
-    expect(warn).toHaveBeenCalledWith("[openclaw-bridge-callback] failed to release claim", "simulated D1 failure");
-
-    expect((await postCallback(payload)).status).toBe(409);
-    db.bridgeEvents.get(payload.event_id).received_at = new Date(Date.now() - 60_000).toISOString();
-    const recovered = await postCallback(payload);
-    expect(recovered.status).toBe(200);
-    expect(await recovered.json()).toMatchObject({ applied: true });
+    expect(db.bridgeEvents.size).toBe(0);
     expect(db.messages.size).toBe(1);
+    expect((await readTask()).status).toBe("finalizing");
+
+    const retried = await postCallback(payload);
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toMatchObject({ ok: true, applied: true, duplicate: false });
+    const task = await readTask();
+    expect(task.status).toBe("completed");
+    expect(task.assistant_message_id).toBe("openclaw-assistant-local_callback_task");
+    expect(db.messages.size).toBe(1);
+    expect(db.messages.get(task.assistant_message_id).content).toBe("消息已写入的答案。");
+    expect(db.bridgeEvents.get(payload.event_id)).toMatchObject({ applied: 1, error: "" });
+  });
+
+  it("completes a final that already replaced a polling message before the task completion failed", async () => {
+    db = new FakeD1();
+    await createBridgeTask({ assistant_message_id: "polling-snapshot" });
+    db.messages.set("polling-snapshot", {
+      id: "polling-snapshot", conversation_id: "conversation_callback", role: "assistant",
+      content: "轮询中间结果", metadata: null
+    });
+    // Progress was reported, so the polling snapshot is not treated as final.
+    expect((await postCallback(basePayload({ event_type: "bridge.activity", sequence: 1, content: { text: "处理中" } }))).status).toBe(200);
+    const payload = finalPayload("evt_polling_replaced_then_failed", "回调最终答案。");
+    db.failOnce.push("set status = 'completed', assistant_message_id");
+
+    expect((await postCallback(payload)).status).toBe(503);
+    expect(db.messages.get("polling-snapshot").content).toBe("回调最终答案。");
+    expect((await readTask()).status).toBe("finalizing");
+
+    const retried = await postCallback(payload);
+    expect(await retried.json()).toMatchObject({ ok: true, applied: true });
+    expect((await readTask()).status).toBe("completed");
+    expect(db.messages.size).toBe(1);
+    expect(db.bridgeEvents.get(payload.event_id)).toMatchObject({ applied: 1 });
+  });
+
+  it("records an applied final on retry after the ledger write failed, without applying it twice", async () => {
+    const payload = finalPayload("evt_ledger_write_failed", "只应用一次。");
+    db.failOnce.push("insert or ignore into bridge_events");
+
+    expect((await postCallback(payload)).status).toBe(503);
+    expect((await readTask()).status).toBe("completed");
+    expect(db.bridgeEvents.size).toBe(0);
+
+    const retried = await postCallback(payload);
+    expect(await retried.json()).toMatchObject({ ok: true, applied: true, duplicate: false });
+    expect(db.messages.size).toBe(1);
+    expect(db.bridgeEvents.get(payload.event_id)).toMatchObject({ applied: 1, error: "" });
+    expect(await (await postCallback(payload)).json()).toMatchObject({ applied: false, duplicate: true });
+  });
+
+  it("refuses an event_id already recorded for another runtime's task without touching either", async () => {
+    await createBridgeTask({
+      id: "local_oracle_task",
+      bridge_task_id: "oracle_bridge_task",
+      remote_task_id: "oracle_bridge_task",
+      project_id: "default",
+      runtime_id: "oracle-openclaw"
+    });
+    const shared = "evt_shared_between_runtimes";
+    const first = await postCallback(basePayload({ event_id: shared, event_type: "bridge.started", sequence: 1 }));
+    expect(first.status).toBe(200);
+    const before = databaseSnapshot();
+
+    const reused = await postCallback(basePayload({
+      event_id: shared,
+      task_id: "oracle_bridge_task",
+      project_id: "default",
+      runtime_id: "oracle-openclaw",
+      event_type: "bridge.final",
+      sequence: 2,
+      content: { text: "冒用", final_answer: "冒用", result_finality: "final" }
+    }), {
+      bridgeId: ORACLE_BRIDGE_ID,
+      secret: ORACLE_SECRET,
+      env: { ORACLE_OPENCLAW_CALLBACK_SECRET: ORACLE_SECRET }
+    });
+    expect(reused.status).toBe(409);
+    expect(await reused.json()).toEqual({ ok: false, error: "event_id_conflict" });
+    expect(databaseSnapshot()).toBe(before);
+    expect(db.openclawTasks.get("local_oracle_task").status).toBe("running");
+  });
+
+  it("refuses a reused event_id whose signed payload differs", async () => {
+    const original = basePayload({ event_id: "evt_payload_changed", event_type: "bridge.activity", sequence: 3, content: { text: "原始" } });
+    expect((await postCallback(original)).status).toBe(200);
+    const before = databaseSnapshot();
+    const changed = await postCallback({ ...original, content: { text: "篡改" } });
+    expect(changed.status).toBe(409);
+    expect(databaseSnapshot()).toBe(before);
+    expect(await (await postCallback(original)).json()).toMatchObject({ ok: true, duplicate: true });
   });
 
   it("rejects invalid signatures", async () => {

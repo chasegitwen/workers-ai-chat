@@ -47,10 +47,12 @@ const runtime = createBridgeApplication({
   recoveryHistoryLimit: Number(process.env.OPENCLAW_BRIDGE_RECOVERY_HISTORY_LIMIT || 80),
   callbackClient,
   callbackOutboxPolicy: {
-    pendingMaxAgeMs: process.env.OPENCLAW_BRIDGE_CALLBACK_PENDING_MAX_AGE_MS,
     deliveredRetentionMs: process.env.OPENCLAW_BRIDGE_CALLBACK_DELIVERED_RETENTION_MS,
-    deadLetterRetentionMs: process.env.OPENCLAW_BRIDGE_CALLBACK_DEAD_LETTER_RETENTION_MS,
-    maxFinishedRows: process.env.OPENCLAW_BRIDGE_CALLBACK_MAX_FINISHED_ROWS,
+  },
+  capacityLimits: {
+    maxUnresolvedCallbacks: process.env.OPENCLAW_BRIDGE_MAX_UNRESOLVED_CALLBACKS,
+    maxDatabaseBytes: process.env.OPENCLAW_BRIDGE_MAX_DATABASE_BYTES,
+    minFreeDiskBytes: process.env.OPENCLAW_BRIDGE_MIN_FREE_DISK_BYTES,
   },
   gatewayFactory: (handlers) => createOracleGatewayAdapter({ handlers }),
 });

@@ -1,4 +1,6 @@
+import fs from "node:fs/promises";
 import http from "node:http";
+import path from "node:path";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import {
   BridgeTaskError,
@@ -27,7 +29,7 @@ import {
 } from "./model-routing.mjs";
 import { PendingRunEventBuffer } from "./gateway-adapter.mjs";
 import { isUncertainSubmissionFailure } from "./submission-state.mjs";
-import { openTaskDatabase, resolveCallbackOutboxPolicy, TaskStore } from "./task-store.mjs";
+import { openTaskDatabase, resolveCallbackOutboxPolicy, resolveCapacityLimits, TaskStore } from "./task-store.mjs";
 import { BRIDGE_VERSION } from "./version.mjs";
 
 const TERMINAL = new Set(["completed", "failed", "canceled", "indeterminate"]);
@@ -554,6 +556,8 @@ export class BridgeHttpApplication {
     maxBodyBytes = 24 * 1024 * 1024,
     recoveryDeadlineMs = 240_000,
     maxSessionCreateAttempts = 2,
+    dbPath = null,
+    capacityLimits = {},
   }) {
     this.store = store;
     this.controller = controller;
@@ -563,6 +567,8 @@ export class BridgeHttpApplication {
     this.maxBodyBytes = maxBodyBytes;
     this.recoveryDeadlineMs = recoveryDeadlineMs;
     this.maxSessionCreateAttempts = Math.max(1, Math.min(2, Number(maxSessionCreateAttempts) || 2));
+    this.dbPath = dbPath;
+    this.capacityLimits = resolveCapacityLimits(capacityLimits);
     this.server = http.createServer((req, res) => {
       if (controller.stopped) {
         this.jsonResponse(res, 503, { error: "bridge is shutting down" });
@@ -621,6 +627,37 @@ export class BridgeHttpApplication {
     return true;
   }
 
+  /**
+   * Admission control for new tasks. Unresolved callbacks and dead letters are
+   * never deleted automatically, so the Bridge stops accepting new work when
+   * they, the database or the free disk space reach their limits. Existing
+   * tasks keep running, recovering and recording callbacks.
+   */
+  async capacityStatus() {
+    const limits = this.capacityLimits;
+    const unresolvedCallbacks = this.store.countUnresolvedCallbacks();
+    let databaseBytes = this.store.databaseSizeBytes();
+    let freeDiskBytes = null;
+    if (this.dbPath && this.dbPath !== ":memory:") {
+      databaseBytes += await fs.stat(`${this.dbPath}-wal`).then((stat) => stat.size, () => 0);
+      freeDiskBytes = await fs.statfs(path.dirname(this.dbPath))
+        .then((stat) => Number(stat.bavail) * Number(stat.bsize), () => null);
+    }
+    const reasons = [];
+    if (unresolvedCallbacks >= limits.maxUnresolvedCallbacks) reasons.push("unresolved_callbacks_limit");
+    if (databaseBytes >= limits.maxDatabaseBytes) reasons.push("database_size_limit");
+    // An unreadable free-space value is reported (null) but does not block.
+    if (freeDiskBytes !== null && freeDiskBytes < limits.minFreeDiskBytes) reasons.push("free_disk_limit");
+    return {
+      ok: reasons.length === 0,
+      reasons,
+      unresolved_callbacks: unresolvedCallbacks,
+      database_bytes: databaseBytes,
+      free_disk_bytes: freeDiskBytes,
+      limits,
+    };
+  }
+
   async readGatewayCatalog(refreshModels = false) {
     return readAgentScopedGatewayCatalog((method, params) => this.controller.request(method, params), { refreshModels });
   }
@@ -642,6 +679,10 @@ export class BridgeHttpApplication {
     const providedIdempotencyKey = normalizeOptionalString(body.idempotency_key);
     const existing = providedIdempotencyKey ? this.store.getByIdempotencyKey(providedIdempotencyKey) : null;
     if (existing) return this.deduplicatedResponse(res, existing);
+    const capacity = await this.capacityStatus();
+    if (!capacity.ok) {
+      return this.jsonResponse(res, 503, { error: "bridge_capacity_exhausted", reasons: capacity.reasons });
+    }
 
     let attachmentInfo;
     try { attachmentInfo = normalizeNativeAttachments(body); }
@@ -936,8 +977,11 @@ export class BridgeHttpApplication {
     const url = new URL(req.url || "/", `http://${this.host}:${port}`);
     if (req.method === "GET" && url.pathname === "/health") {
       const dbOk = this.store.dbOk();
+      const capacity = await this.capacityStatus();
       return this.jsonResponse(res, dbOk ? 200 : 500, {
-        ok: dbOk && this.controller.connected,
+        ok: dbOk && this.controller.connected && capacity.ok,
+        capacity,
+        callback_unresolved: capacity.unresolved_callbacks,
         gateway_connected: this.controller.connected,
         db_ok: dbOk,
         running_tasks: this.store.countStatus("running"),
@@ -1016,6 +1060,7 @@ export function createBridgeApplication({
   recoveryHistoryLimit = 80,
   shutdownDrainMs = 10_000,
   callbackOutboxPolicy = {},
+  capacityLimits = {},
 } = {}) {
   if (!dbPath) throw new Error("dbPath is required");
   if (!token) throw new Error("Bridge bearer token is required");
@@ -1050,6 +1095,8 @@ export function createBridgeApplication({
     maxBodyBytes,
     recoveryDeadlineMs,
     maxSessionCreateAttempts,
+    dbPath,
+    capacityLimits,
   });
   let closePromise = null;
   return {

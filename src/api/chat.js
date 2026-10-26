@@ -982,7 +982,7 @@ async function updateOpenClawTaskBridgeHeartbeat(env, task, payload) {
   return true;
 }
 
-async function applyOpenClawBridgeFinalCallback(env, task, payload) {
+async function applyOpenClawBridgeFinalCallback(env, task, payload, { fromCallbackDelivery = false } = {}) {
   if (!env.DB || !task?.id) {
     return false;
   }
@@ -1000,12 +1000,22 @@ async function applyOpenClawBridgeFinalCallback(env, task, payload) {
     ? await readAssistantMessageById(env, existingMessageId)
     : null;
   const completion = openClawMessageCompletion(existingMessage);
+  // A previous delivery of this same event may have written the message and
+  // stopped before the task reached completed. That is a resume, not a
+  // duplicate: finish the guarded finalizing -> completed transition.
+  const resumingThisEvent = completion.source === "callback"
+    && String(completion.event_id || "") === String(payload?.event_id || "");
+  if (resumingThisEvent && latestStatus === "completed") {
+    // Fully applied by an earlier delivery whose ledger write failed: report it
+    // as applied to that redelivery only, not to ledger replays from /result.
+    return fromCallbackDelivery;
+  }
   const events = await readOpenClawBridgeCompletionEvents(env, latestTask);
   // A polling snapshot is not a terminal callback. Only an applied final event
   // (or a verified polling final) locks the message against further completion.
-  if (completion.source === "callback" || completion.verified_final
+  if (!resumingThisEvent && (completion.source === "callback" || completion.verified_final
     || (events.final?.applied && existingMessage?.id)
-    || (!events.activity && !completion.source && classifyOpenClawBridgeResultFinality(existingMessage?.content) === "final")) {
+    || (!events.activity && !completion.source && classifyOpenClawBridgeResultFinality(existingMessage?.content) === "final"))) {
     console.info("[openclaw-bridge-completion]", {
       source: "callback",
       outcome: "duplicate_final",
@@ -1063,7 +1073,6 @@ async function applyOpenClawBridgeFinalCallback(env, task, payload) {
     openclaw_completion: { source: "callback", event_id: payload.event_id, sequence: bridgeCallbackSequence(payload) }
   };
   let assistantMessage = existingMessage;
-  let created = false;
   if (assistantMessage?.id) {
     assistantMessage = await updateAssistantMessageContent(env, assistantMessage.id, finalText, metadata, { preserveCallbackFinal: true });
   } else {
@@ -1073,7 +1082,6 @@ async function applyOpenClawBridgeFinalCallback(env, task, payload) {
       assistantMessageId: String(latestTask.assistantMessageId || latestTask.assistant_message_id || "").trim()
     }, finalText, metadata);
     assistantMessage = saved.message;
-    created = saved.created;
   }
   if (!assistantMessage?.id) {
     console.warn("[openclaw-bridge-completion]", {
@@ -1088,8 +1096,9 @@ async function applyOpenClawBridgeFinalCallback(env, task, payload) {
     });
     return false;
   }
-  const applied = openClawMessageCompletion(assistantMessage).event_id === payload.event_id
-    && (created || Boolean(existingMessage?.id));
+  // The message carries this event's callback marker whether it was written
+  // now or by an earlier delivery of the same event (deterministic message id).
+  const applied = openClawMessageCompletion(assistantMessage).event_id === payload.event_id;
   if (!applied) {
     return false;
   }
@@ -1182,7 +1191,7 @@ async function applyOpenClawBridgeCallbackEvent(env, payload, resolvedTask = nul
     };
   }
   if (eventType === "bridge.final") {
-    const applied = await applyOpenClawBridgeFinalCallback(env, task, payload);
+    const applied = await applyOpenClawBridgeFinalCallback(env, task, payload, { fromCallbackDelivery: true });
     return {
       applied,
       error: applied ? "" : "final_not_applied"
@@ -1249,19 +1258,53 @@ async function applyOpenClawBridgeCallbackEvent(env, payload, resolvedTask = nul
   };
 }
 
-// A bridge_events row is the idempotency record of a callback. It is inserted
-// as a claim before the event is applied and only becomes a final record once
-// the outcome is stored. A claim whose apply fails is released so the Bridge
-// can retry the same event_id; a claim left behind by a Worker invocation that
-// died mid-apply may be taken over after OPENCLAW_CALLBACK_CLAIM_STALE_MS.
-// Re-applying is safe: every task update is guarded by status/sequence/hash CAS.
-const OPENCLAW_CALLBACK_APPLY_IN_PROGRESS = "apply_in_progress";
-const OPENCLAW_CALLBACK_CLAIM_STALE_MS = 30_000;
+// A bridge_events row is the idempotency record of a callback. It is written
+// only after the event's outcome is known, so a failed apply leaves no record
+// and the Bridge retries the same event_id. Re-applying after a lost response
+// or a failed record write is safe: every task update is guarded by
+// status/sequence/hash CAS and the final message id is deterministic.
+function bridgeCallbackEventScope(payload, task) {
+  return {
+    projectId: String(task?.projectId || task?.project_id || payloadScopeValue(payload, "project_id") || "").trim(),
+    runtimeId: String(task?.runtimeId || task?.runtime_id || payloadScopeValue(payload, "runtime_id") || "").trim()
+  };
+}
 
-async function claimOpenClawBridgeCallbackEvent(env, payload, task, bridgeId) {
-  const eventId = String(payload?.event_id || "");
-  const now = new Date();
-  const inserted = await env.DB.prepare(
+function bridgeCallbackPayloadWithoutScope(payload) {
+  const { project_id: _projectId, runtime_id: _runtimeId, ...rest } = payload || {};
+  return JSON.stringify(rest);
+}
+
+// An event_id may only be reused by an identical delivery: same Bridge task,
+// same Bridge identity, same runtime and the same signed payload. Rows written
+// before migration 0021 may carry an empty runtime.
+function bridgeCallbackStoredEventMatches(existing, payload, task, bridgeId) {
+  let storedPayload = null;
+  try {
+    storedPayload = JSON.parse(existing?.payload_json || "");
+  } catch (err) {
+    return false;
+  }
+  const { runtimeId } = bridgeCallbackEventScope(payload, task);
+  const storedRuntimeId = String(existing?.runtime_id || "");
+  return String(existing?.task_id || "") === String(payload?.task_id || "")
+    && String(existing?.bridge_id || "") === bridgeId
+    && (storedRuntimeId === runtimeId || storedRuntimeId === "")
+    && bridgeCallbackPayloadWithoutScope(storedPayload) === bridgeCallbackPayloadWithoutScope(payload);
+}
+
+async function readStoredOpenClawBridgeCallbackEvent(env, eventId) {
+  return env.DB.prepare(
+    `SELECT event_id, task_id, runtime_id, bridge_id, payload_json
+      FROM bridge_events
+      WHERE event_id = ?
+      LIMIT 1`
+  ).bind(eventId).first();
+}
+
+async function recordOpenClawBridgeCallbackEvent(env, payload, task, bridgeId, applied, error) {
+  const { projectId, runtimeId } = bridgeCallbackEventScope(payload, task);
+  const result = await env.DB.prepare(
     `INSERT OR IGNORE INTO bridge_events (
       event_id,
       task_id,
@@ -1279,50 +1322,7 @@ async function claimOpenClawBridgeCallbackEvent(env, payload, task, bridgeId) {
       duplicate,
       error
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(...bridgeCallbackEventRowBindings(payload, task, bridgeId, now.toISOString())).run();
-  if (Number(inserted?.meta?.changes ?? 0) === 1) {
-    return "claimed";
-  }
-  const existing = await env.DB.prepare(
-    `SELECT event_id, error, received_at
-      FROM bridge_events
-      WHERE event_id = ?
-      LIMIT 1`
-  ).bind(eventId).first();
-  if (!existing) {
-    // The row vanished between INSERT and SELECT (a failed claim was released).
-    return "in_progress";
-  }
-  if (existing.error !== OPENCLAW_CALLBACK_APPLY_IN_PROGRESS) {
-    return "duplicate";
-  }
-  const claimedAt = Date.parse(existing.received_at || "");
-  if (Number.isFinite(claimedAt) && now.getTime() - claimedAt < OPENCLAW_CALLBACK_CLAIM_STALE_MS) {
-    return "in_progress";
-  }
-  const takeover = await env.DB.prepare(
-    `UPDATE bridge_events
-      SET received_at = ?,
-        bridge_id = ?
-      WHERE event_id = ?
-        AND error = ?
-        AND received_at = ?`
-  ).bind(now.toISOString(), bridgeId, eventId, OPENCLAW_CALLBACK_APPLY_IN_PROGRESS, existing.received_at).run();
-  return Number(takeover?.meta?.changes ?? 0) === 1 ? "claimed" : "in_progress";
-}
-
-async function releaseOpenClawBridgeCallbackClaim(env, eventId) {
-  await env.DB.prepare(
-    `DELETE FROM bridge_events
-      WHERE event_id = ?
-        AND error = ?`
-  ).bind(eventId, OPENCLAW_CALLBACK_APPLY_IN_PROGRESS).run();
-}
-
-function bridgeCallbackEventRowBindings(payload, task, bridgeId, receivedAt) {
-  const projectId = String(task?.projectId || task?.project_id || payloadScopeValue(payload, "project_id") || "").trim();
-  const runtimeId = String(task?.runtimeId || task?.runtime_id || payloadScopeValue(payload, "runtime_id") || "").trim();
-  return [
+  ).bind(
     String(payload?.event_id || ""),
     String(payload?.task_id || ""),
     projectId,
@@ -1337,12 +1337,13 @@ function bridgeCallbackEventRowBindings(payload, task, bridgeId, receivedAt) {
       runtime_id: runtimeId
     }),
     String(payload?.created_at || ""),
-    receivedAt,
+    new Date().toISOString(),
     bridgeId,
+    applied ? 1 : 0,
     0,
-    0,
-    OPENCLAW_CALLBACK_APPLY_IN_PROGRESS
-  ];
+    error || ""
+  ).run();
+  return Number(result?.meta?.changes ?? 0) === 1;
 }
 
 async function updateOpenClawBridgeCallbackStoredEvent(env, eventId, applied, error) {
@@ -1459,8 +1460,13 @@ async function handleOpenClawBridgeCallbackRequest(request, env) {
     return bridgeCallbackUnauthorizedResponse("invalid_signature", rejectionDetail);
   }
 
-  const claim = await claimOpenClawBridgeCallbackEvent(env, payload, callbackTask, bridgeId);
-  if (claim === "duplicate") {
+  const duplicateResponse = async existing => {
+    if (!bridgeCallbackStoredEventMatches(existing, payload, callbackTask, bridgeId)) {
+      // Never let another delivery overwrite or answer for a different event's
+      // ledger row; leave it for manual inspection on the Bridge dead letter.
+      console.warn("[openclaw-bridge-callback] event_id conflict", { event_id: eventId, ...rejectionDetail });
+      return bridgeCallbackErrorResponse("event_id_conflict", 409);
+    }
     return jsonResponse({
       ok: true,
       event_id: eventId,
@@ -1468,10 +1474,10 @@ async function handleOpenClawBridgeCallbackRequest(request, env) {
       applied: false,
       duplicate: true
     });
-  }
-  if (claim === "in_progress") {
-    // Another delivery of this event is being applied; ask the Bridge to retry.
-    return bridgeCallbackErrorResponse("callback_in_progress", 409);
+  };
+  const existing = await readStoredOpenClawBridgeCallbackEvent(env, eventId);
+  if (existing) {
+    return duplicateResponse(existing);
   }
   let applied = false;
   let applyError = "";
@@ -1480,18 +1486,22 @@ async function handleOpenClawBridgeCallbackRequest(request, env) {
     applied = Boolean(result.applied);
     applyError = result.error || "";
   } catch (err) {
-    // The outcome is unknown or failed transiently: release the claim and
-    // answer non-2xx so the Bridge retries the same event_id instead of
-    // marking it delivered.
+    // Unknown or failed outcome: record nothing and answer non-2xx so the
+    // Bridge retries the same event_id instead of marking it delivered.
     console.warn("[openclaw-bridge-callback] failed to apply event", err?.message || String(err));
-    try {
-      await releaseOpenClawBridgeCallbackClaim(env, eventId);
-    } catch (releaseError) {
-      console.warn("[openclaw-bridge-callback] failed to release claim", releaseError?.message || String(releaseError));
-    }
     return bridgeCallbackErrorResponse("callback_apply_failed", 503);
   }
-  await updateOpenClawBridgeCallbackStoredEvent(env, eventId, applied, applyError);
+  let recorded = false;
+  try {
+    recorded = await recordOpenClawBridgeCallbackEvent(env, payload, callbackTask, bridgeId, applied, applyError);
+  } catch (err) {
+    console.warn("[openclaw-bridge-callback] failed to record event", err?.message || String(err));
+    return bridgeCallbackErrorResponse("callback_apply_failed", 503);
+  }
+  if (!recorded) {
+    // A concurrent delivery recorded this event_id first.
+    return duplicateResponse(await readStoredOpenClawBridgeCallbackEvent(env, eventId));
+  }
   if (applied) {
     broadcastOpenClawBridgeEvent({
       ...(payload || {}),

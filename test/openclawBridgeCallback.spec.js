@@ -4,7 +4,11 @@ import { createSession } from "../src/lib/auth.js";
 import { broadcastOpenClawBridgeEvent } from "../src/api/openclawBridgeEvents.js";
 
 const CALLBACK_SECRET = "test-callback-secret";
-const BRIDGE_ID = "openclaw-test-bridge";
+// Fixed runtime -> Bridge identities enforced by the Worker.
+const BRIDGE_ID = "hetzner-main";
+const ORACLE_BRIDGE_ID = "oracle-phoenix-a1-openclaw-bridge";
+const ORACLE_SECRET = "oracle-callback-secret";
+const UNAUTHORIZED = { ok: false, error: "callback_unauthorized" };
 const AUTH_ENV = {
   ADMIN_USERNAME: "admin",
   ADMIN_PASSWORD: "password",
@@ -39,7 +43,7 @@ function callbackEnv() {
     DB: db,
     ...AUTH_ENV,
     OPENCLAW_CALLBACK_SECRET: CALLBACK_SECRET,
-    OPENCLAW_CALLBACK_ALLOWED_BRIDGE_IDS: BRIDGE_ID
+    OPENCLAW_CALLBACK_ALLOWED_BRIDGE_IDS: BRIDGE_ID + "," + ORACLE_BRIDGE_ID
   };
 }
 
@@ -441,12 +445,30 @@ async function createBridgeTask(overrides = {}) {
     bridge_agent_id: "glm5-2",
     bridge_mode_enabled: 1,
     project_id: overrides.project_id || "",
-    runtime_id: overrides.runtime_id || "",
-    runtime_slug: overrides.runtime_slug || overrides.runtime_id || "",
+    // Default to the post-migration-0021 state of a Hillsboro bridge task.
+    runtime_id: overrides.runtime_id ?? "hillsboro-openclaw",
+    runtime_slug: overrides.runtime_slug ?? overrides.runtime_id ?? "hillsboro-openclaw",
     bridge_result_hash: "",
     bridge_last_sequence: overrides.bridge_last_sequence ?? -1,
     bridge_last_seen_at: ""
   });
+}
+
+function databaseSnapshot() {
+  return JSON.stringify({
+    tasks: [...db.openclawTasks.entries()],
+    messages: [...db.messages.entries()],
+    events: [...db.bridgeEvents.entries()]
+  });
+}
+
+async function expectRejectedWithoutSideEffects(responsePromise) {
+  const before = databaseSnapshot();
+  const response = await responsePromise;
+  expect(response.status).toBe(401);
+  expect(await response.json()).toEqual(UNAUTHORIZED);
+  expect(databaseSnapshot()).toBe(before);
+  expect(db.bridgeEvents.size).toBe(0);
 }
 
 async function readTask() {
@@ -497,28 +519,49 @@ describe("OpenClaw bridge callback endpoint", () => {
     expect(body.ok).toBe(true);
   });
 
-  it("logs diagnostics for legacy callbacks resolved to unscoped tasks", async () => {
+  it("fails closed for a task without a persisted runtime", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    db = new FakeD1();
+    await createBridgeTask({ runtime_id: "", runtime_slug: "" });
+    const before = databaseSnapshot();
 
     const response = await postCallback(basePayload({
-      event_id: "evt_legacy_scope_warning",
-      event_type: "bridge.started",
-      sequence: 1
+      event_id: "evt_unbound_runtime",
+      event_type: "bridge.final",
+      sequence: 1,
+      content: { text: "must not apply", final_answer: "must not apply", result_finality: "final" }
     }));
-    const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(body.applied).toBe(true);
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual(UNAUTHORIZED);
+    expect(databaseSnapshot()).toBe(before);
+    expect(db.bridgeEvents.size).toBe(0);
+    expect(db.messages.size).toBe(0);
+    expect((await readTask()).status).toBe("running");
     expect(warn).toHaveBeenCalledWith(
-      "[openclaw-compat]",
-      "bridge_callback_legacy_unscoped_task",
-      expect.objectContaining({
-        task_id: "local_callback_task",
-        bridge_task_id: "bridge_task_callback",
-        project_id: "",
-        runtime_id: ""
-      })
+      "[openclaw-bridge-callback] rejected",
+      "task_runtime_not_bridge_bound",
+      expect.objectContaining({ task_id: "local_callback_task", runtime_id: "" })
     );
+  });
+
+  it("does not let configuration widen the fixed runtime Bridge identity", async () => {
+    db = new FakeD1();
+    await createBridgeTask({ project_id: "default", runtime_id: "oracle-openclaw" });
+    await expectRejectedWithoutSideEffects(postCallback(basePayload({
+      project_id: "default",
+      runtime_id: "oracle-openclaw",
+      event_type: "bridge.started"
+    }), {
+      bridgeId: BRIDGE_ID,
+      secret: ORACLE_SECRET,
+      env: {
+        ORACLE_OPENCLAW_CALLBACK_SECRET: ORACLE_SECRET,
+        ORACLE_OPENCLAW_BRIDGE_ID: BRIDGE_ID,
+        OPENCLAW_BRIDGE_ID: BRIDGE_ID,
+        OPENCLAW_CALLBACK_BRIDGE_IDS_JSON: JSON.stringify({ "oracle-openclaw": BRIDGE_ID })
+      }
+    }));
   });
 
   it("stores bridge_events with task project and runtime scope for new tasks", async () => {
@@ -561,8 +604,8 @@ describe("OpenClaw bridge callback endpoint", () => {
     }));
     const body = await response.json();
 
-    expect(response.status).toBe(403);
-    expect(body).toEqual({ ok: false, error: "runtime_id_mismatch" });
+    expect(response.status).toBe(401);
+    expect(body).toEqual(UNAUTHORIZED);
     expect(db.bridgeEvents.size).toBe(0);
   });
 
@@ -579,8 +622,8 @@ describe("OpenClaw bridge callback endpoint", () => {
     }));
     const body = await response.json();
 
-    expect(response.status).toBe(403);
-    expect(body).toEqual({ ok: false, error: "project_id_mismatch" });
+    expect(response.status).toBe(401);
+    expect(body).toEqual(UNAUTHORIZED);
     expect(db.bridgeEvents.size).toBe(0);
   });
 
@@ -600,7 +643,7 @@ describe("OpenClaw bridge callback endpoint", () => {
     const body = await response.json();
 
     expect(response.status).toBe(401);
-    expect(body).toEqual({ ok: false, error: "invalid_signature" });
+    expect(body).toEqual(UNAUTHORIZED);
     expect(db.bridgeEvents.size).toBe(0);
   });
 
@@ -617,8 +660,8 @@ describe("OpenClaw bridge callback endpoint", () => {
     }));
     const body = await response.json();
 
-    expect(response.status).toBe(500);
-    expect(body).toEqual({ ok: false, error: "callback_secret_not_configured" });
+    expect(response.status).toBe(401);
+    expect(body).toEqual(UNAUTHORIZED);
     expect(db.bridgeEvents.size).toBe(0);
   });
 
@@ -634,20 +677,84 @@ describe("OpenClaw bridge callback endpoint", () => {
       runtime_id: "oracle-openclaw",
       event_type: "bridge.started"
     });
-    const oracleSecret = "oracle-callback-secret";
     const accepted = await postCallback(payload, {
-      secret: oracleSecret,
-      env: { ORACLE_OPENCLAW_CALLBACK_SECRET: oracleSecret }
+      bridgeId: ORACLE_BRIDGE_ID,
+      secret: ORACLE_SECRET,
+      env: { ORACLE_OPENCLAW_CALLBACK_SECRET: ORACLE_SECRET }
     });
     expect(accepted.status).toBe(200);
 
     payload.event_id = "evt_oracle_wrong_secret";
     const rejected = await postCallback(payload, {
+      bridgeId: ORACLE_BRIDGE_ID,
       secret: CALLBACK_SECRET,
-      env: { ORACLE_OPENCLAW_CALLBACK_SECRET: oracleSecret }
+      env: { ORACLE_OPENCLAW_CALLBACK_SECRET: ORACLE_SECRET }
     });
     expect(rejected.status).toBe(401);
-    expect(await rejected.json()).toEqual({ ok: false, error: "invalid_signature" });
+    expect(await rejected.json()).toEqual(UNAUTHORIZED);
+  });
+
+  it("rejects an Oracle Bridge ID for a persisted Hillsboro task even with a valid Hillsboro HMAC", async () => {
+    db = new FakeD1();
+    await createBridgeTask({ project_id: "default", runtime_id: "hillsboro-openclaw" });
+    await expectRejectedWithoutSideEffects(postCallback(basePayload({
+      project_id: "default",
+      runtime_id: "hillsboro-openclaw",
+      event_type: "bridge.final",
+      sequence: 2,
+      content: { text: "cross-runtime final", final_answer: "cross-runtime final", result_finality: "final" }
+    }), {
+      bridgeId: ORACLE_BRIDGE_ID,
+      secret: CALLBACK_SECRET,
+      env: { ORACLE_OPENCLAW_CALLBACK_SECRET: ORACLE_SECRET }
+    }));
+    const task = await readTask();
+    expect(task.status).toBe("running");
+    expect(task.bridge_last_sequence).toBe(-1);
+    expect(task.assistant_message_id).toBe("");
+    expect(db.messages.size).toBe(0);
+  });
+
+  it("rejects a Hillsboro Bridge ID for a persisted Oracle task even with a valid Oracle HMAC", async () => {
+    db = new FakeD1();
+    await createBridgeTask({ project_id: "default", runtime_id: "oracle-openclaw" });
+    await expectRejectedWithoutSideEffects(postCallback(basePayload({
+      project_id: "default",
+      runtime_id: "oracle-openclaw",
+      event_type: "bridge.final",
+      sequence: 2,
+      content: { text: "cross-runtime final", final_answer: "cross-runtime final", result_finality: "final" }
+    }), {
+      bridgeId: BRIDGE_ID,
+      secret: ORACLE_SECRET,
+      env: { ORACLE_OPENCLAW_CALLBACK_SECRET: ORACLE_SECRET }
+    }));
+    const task = await readTask();
+    expect(task.status).toBe("running");
+    expect(task.bridge_last_sequence).toBe(-1);
+    expect(task.assistant_message_id).toBe("");
+    expect(db.messages.size).toBe(0);
+  });
+
+  it("returns the same response for unknown tasks, foreign runtimes and bad signatures", async () => {
+    db = new FakeD1();
+    await createBridgeTask({ project_id: "default", runtime_id: "oracle-openclaw" });
+    const unknownTask = await postCallback(basePayload({ task_id: "no_such_bridge_task" }));
+    const foreignRuntime = await postCallback(basePayload({ project_id: "default", runtime_id: "oracle-openclaw" }));
+    const badSignature = await postCallback(basePayload({ project_id: "default", runtime_id: "oracle-openclaw" }), {
+      bridgeId: ORACLE_BRIDGE_ID,
+      signature: "sha256=bad",
+      env: { ORACLE_OPENCLAW_CALLBACK_SECRET: ORACLE_SECRET }
+    });
+    for (const response of [unknownTask, foreignRuntime, badSignature]) {
+      expect(response.status).toBe(401);
+      const text = await response.text();
+      expect(JSON.parse(text)).toEqual(UNAUTHORIZED);
+      expect(text).not.toContain("oracle");
+      expect(text).not.toContain("hetzner");
+      expect(text).not.toContain("SECRET");
+    }
+    expect(db.bridgeEvents.size).toBe(0);
   });
 
   it("updates message activity from bridge.activity", async () => {
@@ -839,7 +946,8 @@ describe("OpenClaw bridge callback endpoint", () => {
     });
     const payload = basePayload({ event_id: "evt_old_rejected_final", event_type: "bridge.final", sequence: 44, content: { final_answer: "检查完了。CPU、内存和 Swap 的完整数据。" } });
     db.bridgeEvents.set(payload.event_id, {
-      ...payload, payload_json: JSON.stringify(payload), applied: 0, error: "final_not_applied", received_at: new Date().toISOString()
+      ...payload, project_id: task.project_id, runtime_id: task.runtime_id,
+      payload_json: JSON.stringify(payload), applied: 0, error: "final_not_applied", received_at: new Date().toISOString()
     });
     const bridgeFetch = vi.fn();
     vi.stubGlobal("fetch", bridgeFetch);
@@ -1119,7 +1227,7 @@ describe("OpenClaw bridge callback endpoint", () => {
     const body = await response.json();
 
     expect(response.status).toBe(401);
-    expect(body).toEqual({ ok: false, error: "invalid_signature" });
+    expect(body).toEqual(UNAUTHORIZED);
   });
 
   it("rejects stale timestamps", async () => {
@@ -1196,12 +1304,32 @@ describe("OpenClaw bridge callback endpoint", () => {
 
   it("logs diagnostics when legacy unscoped SSE replay is used", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await postCallback(basePayload({
+    db = new FakeD1();
+    await createBridgeTask({ runtime_id: "", runtime_slug: "" });
+    // Historical event stored before callbacks required a bound runtime.
+    const legacyPayload = basePayload({
       event_id: "evt_legacy_sse_warning",
       event_type: "bridge.activity",
       sequence: 7,
       content: { text: "legacy replay activity" }
-    }));
+    });
+    db.bridgeEvents.set(legacyPayload.event_id, {
+      event_id: legacyPayload.event_id,
+      task_id: "local_callback_task",
+      project_id: "",
+      runtime_id: "",
+      conversation_id: legacyPayload.conversation_id,
+      assistant_message_id: "",
+      event_type: legacyPayload.event_type,
+      sequence: legacyPayload.sequence,
+      payload_json: JSON.stringify(legacyPayload),
+      created_at: legacyPayload.created_at,
+      received_at: new Date().toISOString(),
+      bridge_id: BRIDGE_ID,
+      applied: 1,
+      duplicate: 0,
+      error: ""
+    });
 
     const response = await worker.fetch(new Request("http://example.com/api/openclaw/bridge/events/stream?task_id=local_callback_task", {
       headers: {

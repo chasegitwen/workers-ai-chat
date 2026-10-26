@@ -271,4 +271,80 @@ describe("Seattle OpenClaw Legacy SSE parsing", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  async function seattleFailureWithFallback(extraBody = {}) {
+    const originalFetch = globalThis.fetch;
+    let wireRequests = 0;
+    const fallbackRuns = [];
+    globalThis.fetch = async () => {
+      wireRequests += 1;
+      return new Response(JSON.stringify({ error: "selected model unavailable" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" }
+      });
+    };
+
+    try {
+      const response = await handleChat(new Request("http://example.com/", {
+        method: "POST",
+        body: JSON.stringify({
+          messages: [{ role: "user", content: "one line" }],
+          provider: "openclaw-seattle",
+          model: "openclaw-seattle-glm51",
+          runtime_id: "seattle-openclaw",
+          autoFallbackEnabled: true,
+          fallbackModel: "@cf/meta/llama-3.1-8b-instruct-fast",
+          providers: [{
+            id: "openclaw-seattle",
+            label: "OpenClaw Seattle",
+            providerType: "openai-compatible",
+            apiBase: "https://seattle.example.test",
+            apiKeyEnv: "SEATTLE_OPENCLAW_API_KEY",
+            openclawExecutionMode: "legacy",
+            models: [{
+              id: "openclaw-seattle-glm51",
+              label: "Seattle GLM",
+              modelName: "glm-5.1",
+              providerType: "openai-compatible",
+              capabilities: { text: true, streaming: true },
+              enabled: true
+            }]
+          }],
+          ...extraBody
+        })
+      }), {
+        SEATTLE_OPENCLAW_API_KEY: "test-key",
+        OPENCLAW_BRIDGE_MODE: "false",
+        AI: {
+          // Local stand-in for the Workers AI fallback model; no remote binding.
+          run: async (model, input) => {
+            fallbackRuns.push({ model, stream: input?.stream });
+            return new Response(
+              "data: " + JSON.stringify({ response: "fallback answer" }) + "\n\ndata: [DONE]\n\n",
+              { headers: { "Content-Type": "text/event-stream" } }
+            ).body;
+          }
+        }
+      }, { waitUntil() {} });
+      return { status: response.status, body: await response.text(), wireRequests, fallbackRuns };
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  it("keeps the Seattle Legacy SSE fallback for the default OpenClaw agent model", async () => {
+    const { body, wireRequests, fallbackRuns } = await seattleFailureWithFallback();
+    expect(wireRequests).toBe(1);
+    expect(body).toContain("event: fallback");
+    expect(fallbackRuns).toEqual([{ model: "@cf/meta/llama-3.1-8b-instruct-fast", stream: true }]);
+  });
+
+  it("never invokes a fallback model when the user explicitly selected an OpenClaw base model", async () => {
+    const { body, wireRequests, fallbackRuns } = await seattleFailureWithFallback({
+      base_model_id: "zai/glm-5.1"
+    });
+    expect(wireRequests).toBe(1);
+    expect(body).not.toContain("event: fallback");
+    expect(fallbackRuns).toEqual([]);
+  });
 });

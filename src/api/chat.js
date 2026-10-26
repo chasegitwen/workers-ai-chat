@@ -747,6 +747,31 @@ function openClawCallbackSecretForTask(env, task) {
   return String(env.OPENCLAW_CALLBACK_SECRET || "").trim();
 }
 
+// Each callback-capable runtime is bound to exactly one Bridge identity. The
+// mapping is fixed in code so configuration cannot widen it; the global
+// OPENCLAW_CALLBACK_ALLOWED_BRIDGE_IDS allowlist is checked separately.
+const OPENCLAW_RUNTIME_BRIDGE_IDS = Object.freeze({
+  "oracle-openclaw": "oracle-phoenix-a1-openclaw-bridge",
+  "hillsboro-openclaw": "hetzner-main"
+});
+
+function openClawExpectedBridgeIdForTask(task) {
+  const runtimeId = String(task?.runtimeId || task?.runtime_id || "").trim();
+  const runtimeSlug = String(task?.runtimeSlug || task?.runtime_slug || "").trim();
+  if (!runtimeId) {
+    // Tasks without a persisted runtime are not attributable to a Bridge.
+    // Migration 0021 backfills legacy Hillsboro bridge tasks.
+    return "";
+  }
+  const expected = Object.hasOwn(OPENCLAW_RUNTIME_BRIDGE_IDS, runtimeId)
+    ? OPENCLAW_RUNTIME_BRIDGE_IDS[runtimeId]
+    : "";
+  if (!expected || (runtimeSlug && runtimeSlug !== runtimeId)) {
+    return "";
+  }
+  return expected;
+}
+
 function payloadScopeValue(payload, key) {
   const metadata = payload?.metadata && typeof payload.metadata === "object" ? payload.metadata : {};
   return String(payload?.[key] || metadata[key] || "").trim();
@@ -1290,6 +1315,14 @@ function bridgeCallbackErrorResponse(error, status) {
   }, status);
 }
 
+// Every failure that depends on task ownership, runtime binding or HMAC
+// verification returns the same response, so an unauthenticated caller
+// cannot learn whether a task exists or which runtime owns it.
+function bridgeCallbackUnauthorizedResponse(reason, detail = {}) {
+  console.warn("[openclaw-bridge-callback] rejected", reason, detail);
+  return bridgeCallbackErrorResponse("callback_unauthorized", 401);
+}
+
 async function handleOpenClawBridgeCallbackRequest(request, env) {
   if (request.method !== "POST") {
     return bridgeCallbackErrorResponse("method_not_allowed", 405);
@@ -1306,7 +1339,7 @@ async function handleOpenClawBridgeCallbackRequest(request, env) {
   }
   const allowedBridgeIds = openClawCallbackAllowedBridgeIds(env);
   if (allowedBridgeIds.length && !allowedBridgeIds.includes(bridgeId)) {
-    return bridgeCallbackErrorResponse("bridge_id_not_allowed", 403);
+    return bridgeCallbackUnauthorizedResponse("bridge_id_not_allowed", { bridge_id: bridgeId });
   }
   if (!timestamp) {
     return bridgeCallbackErrorResponse("missing_timestamp", 400);
@@ -1342,27 +1375,37 @@ async function handleOpenClawBridgeCallbackRequest(request, env) {
   }
   const callbackTask = await readOpenClawBridgeTaskForCallback(env, payload);
   if (!callbackTask) {
-    return bridgeCallbackErrorResponse("task_not_found", 404);
+    return bridgeCallbackUnauthorizedResponse("task_not_found", { task_id: taskId });
   }
-  if (!callbackTask.projectId || !callbackTask.runtimeId) {
+  const rejectionDetail = {
+    task_id: callbackTask.id || "",
+    bridge_task_id: callbackTask.bridgeTaskId || callbackTask.bridge_task_id || "",
+    runtime_id: callbackTask.runtimeId || callbackTask.runtime_id || ""
+  };
+  if (!callbackTask.projectId) {
     warnOpenClawCompatibility("bridge_callback_legacy_unscoped_task", {
-      task_id: callbackTask.id || "",
-      bridge_task_id: callbackTask.bridgeTaskId || callbackTask.bridge_task_id || "",
-      project_id: callbackTask.projectId || "",
-      runtime_id: callbackTask.runtimeId || ""
+      ...rejectionDetail,
+      project_id: ""
     });
   }
   const scopeMismatch = bridgeCallbackScopeMismatch(callbackTask, payload);
   if (scopeMismatch) {
-    return bridgeCallbackErrorResponse(scopeMismatch, 403);
+    return bridgeCallbackUnauthorizedResponse(scopeMismatch, rejectionDetail);
+  }
+  const expectedBridgeId = openClawExpectedBridgeIdForTask(callbackTask);
+  if (!expectedBridgeId) {
+    return bridgeCallbackUnauthorizedResponse("task_runtime_not_bridge_bound", rejectionDetail);
+  }
+  if (bridgeId !== expectedBridgeId) {
+    return bridgeCallbackUnauthorizedResponse("bridge_id_runtime_mismatch", { ...rejectionDetail, bridge_id: bridgeId });
   }
   const secret = openClawCallbackSecretForTask(env, callbackTask);
   if (!secret) {
-    return bridgeCallbackErrorResponse("callback_secret_not_configured", 500);
+    return bridgeCallbackUnauthorizedResponse("callback_secret_not_configured", rejectionDetail);
   }
   const expectedSignature = await signOpenClawCallback(secret, timestamp, rawBody);
   if (!timingSafeEqualText(signature.toLowerCase(), expectedSignature)) {
-    return bridgeCallbackErrorResponse("invalid_signature", 401);
+    return bridgeCallbackUnauthorizedResponse("invalid_signature", rejectionDetail);
   }
 
   const existing = await env.DB.prepare(
@@ -5296,6 +5339,7 @@ function streamChatWithToolStatus({
   requestedToolCall,
   ragSources,
   debugTools,
+  disableAutoFallback = false,
   openClawTask = null,
   codexControls = null
 }) {
@@ -5410,6 +5454,7 @@ function streamChatWithToolStatus({
           activeResult = result;
         } catch (err) {
           if (["provider_refusal", "output_limit", "empty_response"].includes(err?.code)
+            || disableAutoFallback
             || !autoFallbackEnabled || !fallbackModel || fallbackModel === model) {
             throw err;
           }
@@ -6427,6 +6472,10 @@ export async function handleChat(request, env, ctx) {
     requestedToolCall,
     ragSources,
     debugTools: Boolean(debugTools),
+    // A user-selected OpenClaw base model must fail visibly instead of being
+    // answered by an unrelated fallback model. Default OpenClaw agents
+    // (Hillsboro default, Seattle Legacy SSE) keep the existing fallback.
+    disableAutoFallback: isOpenClawRequest && Boolean(selectedOpenClawBaseModelId),
     openClawTask,
     codexControls
   }), {

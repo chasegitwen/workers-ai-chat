@@ -106,7 +106,7 @@ export function memoryStorage(seed = {}){
 }
 
 const FUNCTIONS = [
-  "normalizeChatSelection", "newChatDefaultSelection", "sameNewChatDefault", "openClawAgentsForInstance",
+  "normalizeChatSelection", "rememberedChatSelection", "rememberChatSelection", "openClawAgentsForInstance",
   "canonicalOpenClawAgentId", "defaultOpenClawAgentId", "openClawSelectableModels", "followAgentDefaultLabel",
   "validateChatSelection", "chatSelectionContext", "chatSelectionBlockReason", "fallbackModelForRequest",
   "fallbackModelNoteText", "readConversationSelections", "readConversationSelection", "writeConversationSelection",
@@ -118,15 +118,16 @@ const FUNCTIONS = [
   "updateEffectiveModelResult", "fillOpenClawSelect", "openClawModelsForAgent", "normalizeHillsboroAgentId",
   "isOpenClawAgentMode", "currentOpenClawSelection", "currentRequestSelection", "openClawInstances",
   "openClawInstance", "openClawCarrierModel", "openClawCatalogForInstance", "openClawCatalogStateForInstance",
-  "effectiveOpenClawBaseModel", "hasModernModel", "isOpenClawModelTarget", "renderSettingsDefaultControls",
-  "selectDefaultKind", "selectDefaultInstance", "selectDefaultAgent", "selectDefaultBaseModel",
+  "effectiveOpenClawBaseModel", "hasModernModel", "isOpenClawModelTarget",
   "refreshSettingsControls", "saveSettingsFromUi", "persistSettings", "cancelSettings"
 ];
 
+const SYNC_FUNCTIONS = ["syncSettingsToServer", "runSettingsSync", "sendSettingsSnapshot"];
+
 const STATE = [
   "chatSelection", "chatSelectionConfirmed", "chatSelectionConversationId", "chatSelectionAutoAgent",
-  "openClawBasePickerOpen", "recentChatModelId", "recentChatAgentSelection", "settingsDefaultDraft",
-  "settingsDefaultBaseline", "settingsModelSelectBaseline", "activeModelMode", "activeNewModeTarget",
+  "openClawBasePickerOpen", "recentChatModelId", "recentChatAgentSelection",
+  "settingsModelSelectBaseline", "activeModelMode", "activeNewModeTarget",
   "modelCatalogReady", "currentConversationId", "modelSettingsState", "modelOptions", "classicModelOptions",
   "modernModelOptions", "modelProviders", "modelCategories", "settingsSnapshot", "seattleOpenClawCatalog",
   "hillsboroOpenClawCatalog", "oracleOpenClawCatalog", "seattleOpenClawCatalogState",
@@ -173,7 +174,9 @@ export function createHarness({
   catalogs = { hillsboro: HILLSBORO_CATALOG, seattle: SEATTLE_CATALOG },
   storage = memoryStorage(),
   modelsReady = true,
-  projectRuntimes = []
+  projectRuntimes = [],
+  // When given, the real serialized settings sync runs against this fetch instead of a counting stub.
+  settingsFetch = null
 } = {}){
   const script = pageScript();
   const calls = { syncSettingsToServer: 0, writeSettingsCache: 0, loadOpenClawCatalog: [], closeSettings: 0 };
@@ -198,13 +201,8 @@ export function createHarness({
     defaultModelSelect: new FakeSelect(),
     fallbackModelSelect: new FakeSelect(),
     fallbackModelNote: element(),
-    defaultSelectionKindSwitch: switchElement("defaultKind", ["model", "agent"]),
-    defaultModelField: element(),
-    defaultAgentFields: element({ hidden: true }),
-    defaultInstanceSelect: new FakeSelect(),
-    defaultAgentSelect: new FakeSelect(),
-    defaultBaseModelSelect: new FakeSelect(),
     modelProviderSelect: new FakeSelect(),
+    rememberLastModelCheck: { checked: false },
     fallbackEnabledCheck: { checked: false },
     showPerMessageModelInfoCheck: { checked: false },
     autoArchiveDaysSelect: { value: "never" },
@@ -239,14 +237,25 @@ export function createHarness({
     // renderModelOptions only rebuilds the plain model list here; the real one ends by calling syncChatModelSelect.
     renderModelOptions: () => {}
   };
+  const syncFunctions = settingsFetch ? SYNC_FUNCTIONS : [];
+  if(settingsFetch){
+    delete stubs.syncSettingsToServer;
+    stubs.fetch = settingsFetch;
+    stubs.normalizeModelSettings = (value, fallbackProviders) => ({
+      ...JSON.parse(JSON.stringify(value)),
+      providers: value.providers || fallbackProviders,
+      categories: value.categories || []
+    });
+  }
   const stubNames = Object.keys(stubs);
   const source = [
     "let " + STATE.join(", ") + ";",
-    FUNCTIONS.map(name => lastDeclaration(script, name)).join("\n"),
+    "let settingsSyncRevision = 0, settingsSyncQueued = false, settingsSyncRunning = null;",
+    [...FUNCTIONS, ...syncFunctions].map(name => lastDeclaration(script, name)).join("\n"),
     "function __get(){ return { " + STATE.join(", ") + " }; }",
     "function __set(values){ " + STATE.map(name => `if(Object.prototype.hasOwnProperty.call(values, "${name}")) ${name} = values.${name};`).join(" ") + " }",
     "renderModelOptions = function(){ modelSelect.innerHTML = ''; modelOptions.forEach(model => { const option = document.createElement('option'); option.value = model.id; modelSelect.appendChild(option); }); syncChatModelSelect(); };",
-    "return { " + FUNCTIONS.join(", ") + ", __get, __set };"
+    "return { " + [...FUNCTIONS, ...syncFunctions].join(", ") + ", __get, __set };"
   ].join("\n");
   const api = new Function(...stubNames, source)(...stubNames.map(name => stubs[name]));
   const modelSettingsState = {

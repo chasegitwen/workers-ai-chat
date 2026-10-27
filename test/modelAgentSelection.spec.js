@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { htmlPage } from "../src/frontend/page.js";
 import { createHarness, lastDeclaration, memoryStorage, pageScript } from "./helpers/selectionHarness.js";
 
-const agentDefault = { newChatDefault: { kind: "agent", instanceId: "openclaw-hillsboro", agentId: "main", baseModelId: "" } };
+const agentMemory = {
+  rememberLastModel: true,
+  lastChatSelection: { kind: "agent", instanceId: "openclaw-hillsboro", agentId: "main", baseModelId: "" }
+};
 
 describe("chat page: 当前使用 with 模型 / Agent", () => {
   it("renders only the 模型 / Agent entries and no mode concepts", () => {
@@ -30,7 +33,7 @@ describe("chat page: 当前使用 with 模型 / Agent", () => {
   });
 
   it("shows instance, Agent and a collapsed base model that follows the Agent default", () => {
-    const h = createHarness({ settings: agentDefault });
+    const h = createHarness({ settings: agentMemory });
     h.api.applyNewChatSelection();
     expect(h.dom.modelSelectField.hidden).toBe(true);
     expect(h.dom.openClawRouteControls.hidden).toBe(false);
@@ -45,7 +48,7 @@ describe("chat page: 当前使用 with 模型 / Agent", () => {
   });
 
   it("builds an Agent request without base_model_id while following the Agent default", () => {
-    const h = createHarness({ settings: agentDefault });
+    const h = createHarness({ settings: agentMemory });
     h.api.applyNewChatSelection();
     const selection = h.api.currentRequestSelection();
     expect(selection).toEqual({
@@ -58,7 +61,7 @@ describe("chat page: 当前使用 with 模型 / Agent", () => {
   });
 
   it("only offers base models from the current Agent and overrides just that Agent", () => {
-    const h = createHarness({ settings: agentDefault });
+    const h = createHarness({ settings: agentMemory });
     h.api.applyNewChatSelection();
     h.api.selectChatBaseModel("openai/gpt-5.6-sol");
     expect(h.api.currentRequestSelection().baseModelId).toBe("openai/gpt-5.6-sol");
@@ -72,7 +75,7 @@ describe("chat page: 当前使用 with 模型 / Agent", () => {
 
   it("picks the instance default Agent and resets the base model when the instance changes", () => {
     const withBinding = createHarness({
-      settings: agentDefault,
+      settings: agentMemory,
       projectRuntimes: [{ runtime_id: "seattle-openclaw", default_agent_id: "ops" }]
     });
     withBinding.api.applyNewChatSelection();
@@ -81,14 +84,14 @@ describe("chat page: 当前使用 with 模型 / Agent", () => {
     expect(withBinding.state().chatSelection).toEqual({
       kind: "agent", modelId: "", instanceId: "openclaw-seattle", agentId: "ops", baseModelId: ""
     });
-    const plain = createHarness({ settings: agentDefault });
+    const plain = createHarness({ settings: agentMemory });
     plain.api.applyNewChatSelection();
     plain.api.selectChatInstance("openclaw-seattle");
     expect(plain.state().chatSelection.agentId).toBe("main");
   });
 
   it("waits for the catalog before choosing the default Agent of a new instance", () => {
-    const h = createHarness({ settings: agentDefault, catalogs: { hillsboro: null, seattle: null } });
+    const h = createHarness({ settings: agentMemory, catalogs: { hillsboro: null, seattle: null } });
     h.api.applyNewChatSelection();
     h.api.selectChatInstance("openclaw-seattle");
     expect(h.calls.loadOpenClawCatalog).toContain("seattle");
@@ -113,9 +116,11 @@ describe("chat page: 当前使用 with 模型 / Agent", () => {
   });
 });
 
-describe("chat selection is isolated from the new-chat default", () => {
-  it("never writes global settings when the chat selection changes", () => {
-    const h = createHarness({ settings: { ...agentDefault, defaultModel: "sol", fallbackModels: ["claude"] } });
+describe("chat selection is isolated from global settings", () => {
+  it("never writes global settings when 记住上次选择 is off", () => {
+    const h = createHarness({ settings: {
+      rememberLastModel: false, lastChatSelection: agentMemory.lastChatSelection, defaultModel: "sol", fallbackModels: ["claude"]
+    } });
     const before = JSON.stringify(h.settings());
     h.set({ currentConversationId: "c1" });
     h.api.restoreConversationSelection("c1", false);
@@ -130,7 +135,7 @@ describe("chat selection is isolated from the new-chat default", () => {
     expect(h.records().c1).toMatchObject({ kind: "model", modelId: "claude" });
   });
 
-  it("starts every new chat from the saved default, not from the last chat selection", () => {
+  it("starts every new chat from defaultModel when 记住上次选择 is off", () => {
     const h = createHarness({ settings: { defaultModel: "sol" } });
     h.api.applyNewChatSelection();
     h.api.setChatSelectionKind("agent");
@@ -138,14 +143,15 @@ describe("chat selection is isolated from the new-chat default", () => {
     expect(h.state().chatSelection).toMatchObject({ kind: "model", modelId: "sol" });
   });
 
-  it("keeps each conversation's own selection when the global default changes", () => {
+  it("keeps each conversation's own selection when the default or the remembered choice changes", () => {
     const storage = memoryStorage();
     const h = createHarness({ storage, settings: { defaultModel: "sol" } });
     h.set({ currentConversationId: "c1" });
     h.api.restoreConversationSelection("c1", false);
     h.api.selectChatModel("claude");
     h.settings().defaultModel = "sol";
-    h.settings().newChatDefault = agentDefault.newChatDefault;
+    h.settings().rememberLastModel = true;
+    h.settings().lastChatSelection = agentMemory.lastChatSelection;
     h.set({ chatSelectionConversationId: null });
     h.api.restoreConversationSelection("c1", true);
     expect(h.state().chatSelection).toMatchObject({ kind: "model", modelId: "claude" });
@@ -154,7 +160,7 @@ describe("chat selection is isolated from the new-chat default", () => {
 
   it("restores recorded selections after a page reload", () => {
     const storage = memoryStorage();
-    const first = createHarness({ storage, settings: agentDefault });
+    const first = createHarness({ storage, settings: agentMemory });
     first.api.bindChatSelectionToConversation("c9", { kind: "agent", instanceId: "openclaw-seattle", agentId: "ops", baseModelId: "a/ops" });
     const reloaded = createHarness({ storage, settings: { defaultModel: "sol" } });
     reloaded.set({ currentConversationId: "c9" });
@@ -187,6 +193,77 @@ describe("chat selection is isolated from the new-chat default", () => {
   });
 });
 
+describe("记住上次选择", () => {
+  it("records explicit chat choices only while it is on, without touching default or fallback", () => {
+    const h = createHarness({ settings: { rememberLastModel: true, defaultModel: "sol", fallbackModels: ["claude", "sol"] } });
+    h.api.applyNewChatSelection();
+    expect(h.calls.syncSettingsToServer).toBe(0);
+    h.api.selectChatInstance("openclaw-seattle");
+    h.api.selectChatAgent("ops");
+    h.api.selectChatBaseModel("a/ops");
+    const saved = h.settings();
+    expect(saved.lastChatSelection).toMatchObject({ kind: "agent", instanceId: "openclaw-seattle", agentId: "ops", baseModelId: "a/ops" });
+    expect(saved.defaultModel).toBe("sol");
+    expect(saved.fallbackModels).toEqual(["claude", "sol"]);
+    expect(saved).not.toHaveProperty("newModeTarget");
+    expect(saved).not.toHaveProperty("openClawSelection");
+    expect(h.calls.syncSettingsToServer).toBe(3);
+    expect(h.calls.writeSettingsCache).toBe(3);
+  });
+
+  it("starts new chats from the remembered model or Agent", () => {
+    const agent = createHarness({ settings: agentMemory });
+    agent.api.applyNewChatSelection();
+    expect(agent.api.currentRequestSelection()).toMatchObject({ mode: "openclaw-agent", instanceId: "openclaw-hillsboro", agentId: "main", baseModelId: "" });
+    const model = createHarness({ settings: { defaultModel: "sol", rememberLastModel: true } });
+    model.api.applyNewChatSelection();
+    model.api.selectChatModel("claude");
+    model.api.applyNewChatSelection();
+    expect(model.state().chatSelection).toMatchObject({ kind: "model", modelId: "claude" });
+  });
+
+  it("does not mistake legacy fields for a remembered choice", () => {
+    const h = createHarness({ settings: {
+      rememberLastModel: true, defaultModel: "sol", lastModel: "claude", selectionMode: "modern",
+      newModeTarget: "openclaw", openClawSelection: { instanceId: "openclaw-hillsboro", agentId: "glm", baseModelId: "" },
+      classicSelectedModel: "claude", modernSelectedModel: "claude"
+    } });
+    h.api.applyNewChatSelection();
+    expect(h.state().chatSelection).toEqual({ kind: "model", modelId: "sol", instanceId: "", agentId: "", baseModelId: "" });
+    h.api.setChatSelectionKind("agent");
+    expect(h.state().chatSelection).toMatchObject({ instanceId: "openclaw-hillsboro", agentId: "main" });
+  });
+
+  it("ignores the memory while the option is off and falls back to defaultModel when it is confirmed gone", () => {
+    const off = createHarness({ settings: { ...agentMemory, rememberLastModel: false, defaultModel: "claude" } });
+    off.api.applyNewChatSelection();
+    expect(off.state().chatSelection).toMatchObject({ kind: "model", modelId: "claude" });
+    const gone = createHarness({ settings: { rememberLastModel: true, defaultModel: "claude", lastChatSelection: { kind: "model", modelId: "retired" } } });
+    gone.api.applyNewChatSelection();
+    expect(gone.state().chatSelection).toMatchObject({ kind: "model", modelId: "claude" });
+    const pending = createHarness({ settings: agentMemory, catalogs: { hillsboro: null, seattle: null } });
+    pending.api.applyNewChatSelection();
+    expect(pending.state().chatSelection).toMatchObject({ kind: "agent", instanceId: "openclaw-hillsboro", agentId: "main" });
+  });
+
+  it("does not mix selections between conversations", () => {
+    const h = createHarness({ settings: { rememberLastModel: true, defaultModel: "sol" } });
+    h.set({ currentConversationId: "a" });
+    h.api.restoreConversationSelection("a", false);
+    h.api.selectChatInstance("openclaw-seattle");
+    h.set({ currentConversationId: "b" });
+    h.api.restoreConversationSelection("b", false);
+    h.api.selectChatModel("claude");
+    h.set({ currentConversationId: "a" });
+    h.api.restoreConversationSelection("a", true);
+    expect(h.state().chatSelection).toMatchObject({ kind: "agent", instanceId: "openclaw-seattle", agentId: "main" });
+    h.set({ currentConversationId: "b" });
+    h.api.restoreConversationSelection("b", true);
+    expect(h.state().chatSelection).toMatchObject({ kind: "model", modelId: "claude" });
+    expect(h.settings().lastChatSelection).toMatchObject({ kind: "model", modelId: "claude" });
+  });
+});
+
 describe("old conversations and unavailable selections", () => {
   it("asks to confirm a conversation without a local record and never sends the default silently", () => {
     const h = createHarness({ settings: { defaultModel: "sol" } });
@@ -195,7 +272,7 @@ describe("old conversations and unavailable selections", () => {
     expect(h.state().chatSelectionConfirmed).toBe(false);
     expect(h.api.chatSelectionBlockReason()).toBe("此对话未记录原模型选择，请重新选择模型或 Agent");
     expect(h.dom.chatSelectionNotice.hidden).toBe(false);
-    expect(h.dom.chatSelectionNoticeText.textContent).toContain("新对话默认");
+    expect(h.dom.chatSelectionNoticeText.textContent).toContain("新对话的初始选择");
     expect(h.dom.chatSelectionConfirmBtn.hidden).toBe(false);
     expect(h.records()).toEqual({});
     h.api.confirmChatSelection();

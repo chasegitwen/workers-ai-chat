@@ -3140,22 +3140,10 @@ body.dark .toolErrorNotice{
       <button id="closeSettingsBtn" class="settingsBtn" type="button">关闭</button>
     </div>
     <div class="settingsGrid">
-      <div class="settingsField full">
-        新对话默认
-        <div id="defaultSelectionKindSwitch" class="modelModeSwitch" aria-label="新对话默认">
-          <button type="button" data-default-kind="model">模型</button>
-          <button type="button" data-default-kind="agent">Agent</button>
-        </div>
-        <label id="defaultModelField" class="selectionField">
-          默认模型
-          <select id="defaultModelSelect"></select>
-        </label>
-        <div id="defaultAgentFields" class="openClawRouteControls" hidden>
-          <label>默认实例 <select id="defaultInstanceSelect" aria-label="默认 OpenClaw 实例"></select></label>
-          <label>默认 Agent <select id="defaultAgentSelect" aria-label="默认 Agent"></select></label>
-          <label>基础模型 <select id="defaultBaseModelSelect" aria-label="默认基础模型"></select></label>
-        </div>
-      </div>
+      <label class="settingsField">
+        默认模型
+        <select id="defaultModelSelect"></select>
+      </label>
       <label class="settingsField">
         fallback 模型
         <select id="fallbackModelSelect"></select>
@@ -3169,6 +3157,10 @@ body.dark .toolErrorNotice{
           <option value="60">60 days</option>
           <option value="90">90 days</option>
         </select>
+      </label>
+      <label class="settingsCheck">
+        <input id="rememberLastModelCheck" type="checkbox" />
+        记住上次选择
       </label>
       <label class="settingsCheck">
         <input id="fallbackEnabledCheck" type="checkbox" />
@@ -5754,12 +5746,6 @@ const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const defaultModelSelect = document.getElementById("defaultModelSelect");
 const fallbackModelSelect = document.getElementById("fallbackModelSelect");
 const fallbackModelNote = document.getElementById("fallbackModelNote");
-const defaultSelectionKindSwitch = document.getElementById("defaultSelectionKindSwitch");
-const defaultModelField = document.getElementById("defaultModelField");
-const defaultAgentFields = document.getElementById("defaultAgentFields");
-const defaultInstanceSelect = document.getElementById("defaultInstanceSelect");
-const defaultAgentSelect = document.getElementById("defaultAgentSelect");
-const defaultBaseModelSelect = document.getElementById("defaultBaseModelSelect");
 const autoArchiveDaysSelect = document.getElementById("autoArchiveDaysSelect");
 const rememberLastModelCheck = document.getElementById("rememberLastModelCheck");
 const fallbackEnabledCheck = document.getElementById("fallbackEnabledCheck");
@@ -5806,8 +5792,6 @@ let chatSelectionAutoAgent = false;
 let openClawBasePickerOpen = false;
 let recentChatModelId = "";
 let recentChatAgentSelection = null;
-let settingsDefaultDraft = null;
-let settingsDefaultBaseline = null;
 let seattleOpenClawCatalog = null;
 let seattleOpenClawCatalogState = "unconfigured";
 let hillsboroOpenClawCatalog = null;
@@ -6515,8 +6499,37 @@ function renderProvidersList(){
   });
 }
 
-async function syncSettingsToServer(settings){
+// Settings writes are serialized: one POST at a time, each sending the latest modelSettingsState.
+// Calls made while a request is in flight are merged into the next send, so the server sees writes in
+// order and the newest local state always goes last. A response only replaces local state when no newer
+// local change happened meanwhile.
+let settingsSyncRevision = 0;
+let settingsSyncQueued = false;
+let settingsSyncRunning = null;
+
+function syncSettingsToServer(){
+  settingsSyncRevision += 1;
+  settingsSyncQueued = true;
+  if(!settingsSyncRunning){
+    settingsSyncRunning = runSettingsSync();
+  }
+  return settingsSyncRunning;
+}
+
+async function runSettingsSync(){
+  let synced = true;
+  while(settingsSyncQueued){
+    settingsSyncQueued = false;
+    synced = await sendSettingsSnapshot(settingsSyncRevision);
+  }
+  // Cleared synchronously after the last check so a later call always starts a new run.
+  settingsSyncRunning = null;
+  return synced;
+}
+
+async function sendSettingsSnapshot(revision){
   try{
+    const settings = modelSettingsState;
     const payload = {
       ...settings,
       clientUpdatedAt:settings?.updatedAt || settings?.version || 0
@@ -6530,15 +6543,23 @@ async function syncSettingsToServer(settings){
       throw new Error(await res.text());
     }
     const data = await res.json().catch(() => null);
-    if(data?.settings){
+    const updatedAt = data?.settings?.updatedAt || data?.updatedAt || data?.settings?.version || data?.version;
+    const version = data?.settings?.version || data?.version || updatedAt;
+    if(revision !== settingsSyncRevision){
+      // Newer local changes are queued; keep them and only adopt the server version for the next send.
+      if(updatedAt && modelSettingsState){
+        modelSettingsState.updatedAt = updatedAt;
+        modelSettingsState.version = version;
+      }
+    }else if(data?.settings){
       modelSettingsState = normalizeModelSettings(data.settings, modelProviders);
       modelCategories = modelSettingsState.categories;
       modelProviders = modelSettingsState.providers;
       writeSettingsCache(modelSettingsState);
       renderModelOptions();
-    }else if(data?.version || data?.updatedAt){
-      settings.updatedAt = data.updatedAt || data.version;
-      settings.version = data.version || data.updatedAt;
+    }else if(updatedAt){
+      settings.updatedAt = updatedAt;
+      settings.version = version;
       writeSettingsCache(settings);
     }
     settingsSyncStatus.textContent = "Synced";
@@ -6583,13 +6604,11 @@ function saveSettingsFromUi(closeAfter){
       ? [...new Set([fallbackModelSelect.value, ...storedFallbacks.slice(1)].filter(Boolean))]
       : [];
   }
-  if(settingsDefaultDraft && !sameNewChatDefault(settingsDefaultDraft, settingsDefaultBaseline)){
-    const { kind, instanceId, agentId, baseModelId } = settingsDefaultDraft;
-    modelSettingsState.newChatDefault = { kind, instanceId, agentId, baseModelId };
-    // Mirror into the legacy fields so older clients open new chats with the same default.
-    modelSettingsState.selectionMode = "modern";
-    modelSettingsState.newModeTarget = kind === "agent" ? "openclaw" : "model";
-    if(kind === "agent") modelSettingsState.openClawSelection = { instanceId, agentId, baseModelId };
+  modelSettingsState.rememberLastModel = rememberLastModelCheck.checked;
+  if(!modelSettingsState.rememberLastModel){
+    // null (not delete) so the server-side shallow merge also forgets it.
+    modelSettingsState.lastChatSelection = null;
+    modelSettingsState.lastModel = "";
   }
   modelSettingsState.fallbackEnabled = fallbackEnabledCheck.checked;
   modelSettingsState.showPerMessageModelInfo = showPerMessageModelInfoCheck.checked;
@@ -7419,7 +7438,7 @@ function normalizeModelSettings(settings, fallbackProviders){
       normalizedInstances,
       base.openClawInstanceConfigVersion
     ),
-    ...(base.newChatDefault && typeof base.newChatDefault === "object" ? { newChatDefault:base.newChatDefault } : {}),
+    lastChatSelection:base.lastChatSelection && typeof base.lastChatSelection === "object" ? base.lastChatSelection : null,
     openClawInstanceConfigVersion:OPENCLAW_INSTANCE_CONFIG_VERSION,
     updatedAt:Number(base.updatedAt || base.version || 0) || 0,
     version:Number(base.version || base.updatedAt || 0) || 0
@@ -7487,64 +7506,6 @@ function hasModernModel(modelId){
   return Boolean(modernModelOptions.find(model => model.id === modelId));
 }
 
-function renderSettingsDefaultControls(){
-  const draft = settingsDefaultDraft;
-  if(!draft || !defaultSelectionKindSwitch) return;
-  defaultSelectionKindSwitch.querySelectorAll("[data-default-kind]").forEach(button => {
-    button.classList.toggle("active", button.dataset.defaultKind === draft.kind);
-  });
-  defaultModelField.hidden = draft.kind !== "model";
-  defaultAgentFields.hidden = draft.kind !== "agent";
-  if(draft.kind !== "agent") return;
-  const instances = openClawInstances();
-  fillSelectionSelect(defaultInstanceSelect, instances.map(item => ({ id:item.id, name:item.label || item.id })),
-    draft.instanceId, { emptyLabel:draft.instanceId ? "" : "请选择实例" });
-  const instance = openClawInstance(draft.instanceId);
-  const { catalog, agents, ready } = openClawAgentsForInstance(instance);
-  if(instance && draft.autoAgent && agents.length
-    && (!draft.agentId || (ready && !agents.some(agent => agent.id === draft.agentId)))){
-    draft.agentId = defaultOpenClawAgentId(instance, agents);
-  }
-  if(instance && ready) draft.autoAgent = false;
-  // Show the canonical agent alias without rewriting an untouched stored value.
-  const agentId = canonicalOpenClawAgentId(instance, draft.agentId);
-  const missingPrefix = !instance || ready ? "不可用：" : "待验证：";
-  fillSelectionSelect(defaultAgentSelect, agents, agentId, {
-    emptyLabel:agentId ? "" : (agents.length ? "请选择 Agent" : "目录未就绪"),
-    missingPrefix
-  });
-  const selectedAgent = agents.find(agent => agent.id === agentId);
-  fillSelectionSelect(defaultBaseModelSelect, openClawSelectableModels(catalog, agentId), draft.baseModelId,
-    { emptyLabel:followAgentDefaultLabel(selectedAgent), missingPrefix });
-}
-
-function selectDefaultKind(kind){
-  if(!settingsDefaultDraft || (kind !== "model" && kind !== "agent")) return;
-  settingsDefaultDraft.kind = kind;
-  if(kind === "agent" && !settingsDefaultDraft.instanceId){
-    Object.assign(settingsDefaultDraft, { instanceId:openClawInstances()[0]?.id || "", agentId:"", baseModelId:"", autoAgent:true });
-    ensureOpenClawCatalogForInstance(openClawInstance(settingsDefaultDraft.instanceId));
-  }
-  renderSettingsDefaultControls();
-}
-
-function selectDefaultInstance(instanceId){
-  if(!settingsDefaultDraft) return;
-  Object.assign(settingsDefaultDraft, { instanceId, agentId:"", baseModelId:"", autoAgent:true });
-  ensureOpenClawCatalogForInstance(openClawInstance(instanceId));
-  renderSettingsDefaultControls();
-}
-
-function selectDefaultAgent(agentId){
-  if(!settingsDefaultDraft) return;
-  Object.assign(settingsDefaultDraft, { agentId, baseModelId:"", autoAgent:false });
-  renderSettingsDefaultControls();
-}
-
-function selectDefaultBaseModel(baseModelId){
-  if(settingsDefaultDraft) settingsDefaultDraft.baseModelId = baseModelId;
-}
-
 function refreshSettingsControls(){
   const settingsPanel = settingsModal.querySelector(".settingsPanel");
   const settingsScrollTop = settingsPanel?.scrollTop || 0;
@@ -7582,9 +7543,7 @@ function refreshSettingsControls(){
   fallbackModelSelect.value = storedFallback;
   settingsModelSelectBaseline = { defaultModel:defaultModelSelect.value, fallbackModel:fallbackModelSelect.value };
   if(fallbackModelNote) fallbackModelNote.textContent = fallbackModelNoteText(modelSettingsState, chatSelectionContext());
-  settingsDefaultDraft = newChatDefaultSelection(modelSettingsState);
-  settingsDefaultBaseline = { ...settingsDefaultDraft };
-  renderSettingsDefaultControls();
+  rememberLastModelCheck.checked = Boolean(modelSettingsState?.rememberLastModel);
   fallbackEnabledCheck.checked = Boolean(modelSettingsState?.fallbackEnabled);
   showPerMessageModelInfoCheck.checked = Boolean(modelSettingsState?.showPerMessageModelInfo);
   setConversationAttachmentLimitInputs(modelSettingsState?.conversationAttachmentLimits);
@@ -8879,24 +8838,13 @@ function normalizeChatSelection(value){
   return { kind:"model", modelId:String(source.modelId || ""), instanceId:"", agentId:"", baseModelId:"" };
 }
 
-// The new-chat default: kind and Agent fields come from newChatDefault (or the legacy fields when it
-// was never saved); the model always comes from defaultModel so renames/deletes keep applying to it.
-function newChatDefaultSelection(settings){
-  const stored = settings?.newChatDefault && typeof settings.newChatDefault === "object" ? settings.newChatDefault : null;
-  const legacy = settings?.openClawSelection && typeof settings.openClawSelection === "object" ? settings.openClawSelection : {};
-  const source = stored || legacy;
-  const agentKind = stored ? stored.kind === "agent" : settings?.selectionMode === "modern" && settings?.newModeTarget === "openclaw";
-  return {
-    kind:agentKind ? "agent" : "model",
-    modelId:String(settings?.defaultModel || ""),
-    instanceId:String(source.instanceId || ""),
-    agentId:String(source.agentId || ""),
-    baseModelId:String(source.baseModelId || "")
-  };
-}
-
-function sameNewChatDefault(a, b){
-  return ["kind", "instanceId", "agentId", "baseModelId"].every(key => (a?.[key] || "") === (b?.[key] || ""));
+// 记住上次选择 keeps its own record (lastChatSelection), written only by explicit chat choices while the
+// option is on; legacy fields such as lastModel / newModeTarget / openClawSelection are never read as memory.
+function rememberedChatSelection(settings){
+  const value = settings?.rememberLastModel && settings?.lastChatSelection && typeof settings.lastChatSelection === "object"
+    ? settings.lastChatSelection
+    : null;
+  return value ? normalizeChatSelection(value) : null;
 }
 
 function openClawAgentsForInstance(instance){
@@ -9030,11 +8978,20 @@ function writeConversationSelection(conversationId, selection){
   }
 }
 
+// New chats start from the remembered selection when it is still usable, otherwise from defaultModel.
 function newChatSelection(){
-  const value = newChatDefaultSelection(modelSettingsState);
-  if(value.kind === "model" && !value.modelId) value.modelId = modernModelOptions[0]?.id || "";
-  if(value.kind === "agent" && !value.instanceId) value.instanceId = openClawInstances()[0]?.id || "";
-  return value;
+  const remembered = rememberedChatSelection(modelSettingsState);
+  if(remembered && ["ok", "pending"].includes(validateChatSelection(remembered, chatSelectionContext()).state)){
+    return remembered;
+  }
+  return normalizeChatSelection({ kind:"model", modelId:modelSettingsState?.defaultModel || modernModelOptions[0]?.id || "" });
+}
+
+function rememberChatSelection(selection){
+  if(!modelSettingsState?.rememberLastModel) return;
+  modelSettingsState.lastChatSelection = { ...normalizeChatSelection(selection), updatedAt:Date.now() };
+  writeSettingsCache(modelSettingsState);
+  syncSettingsToServer(modelSettingsState);
 }
 
 function syncChatModelSelect(){
@@ -9105,6 +9062,7 @@ function commitChatSelection(selection){
   chatSelectionConfirmed = true;
   syncChatSelectionUi();
   rememberRecentChatSelection(chatSelection);
+  rememberChatSelection(chatSelection);
   if(currentConversationId){
     bindChatSelectionToConversation(currentConversationId, chatSelection);
   }
@@ -9113,16 +9071,17 @@ function commitChatSelection(selection){
 function setChatSelectionKind(kind){
   if((kind !== "model" && kind !== "agent") || kind === chatSelection.kind) return;
   rememberRecentChatSelection(chatSelection);
-  const defaults = newChatDefaultSelection(modelSettingsState);
+  const remembered = rememberedChatSelection(modelSettingsState);
   openClawBasePickerOpen = false;
   if(kind === "model"){
-    const modelId = [recentChatModelId, defaults.modelId].find(id => id && hasModernModel(id))
+    const rememberedModel = remembered?.kind === "model" ? remembered.modelId : "";
+    const modelId = [recentChatModelId, rememberedModel, modelSettingsState?.defaultModel].find(id => id && hasModernModel(id))
       || modernModelOptions[0]?.id || "";
     chatSelectionAutoAgent = false;
     commitChatSelection({ kind:"model", modelId });
     return;
   }
-  const target = [recentChatAgentSelection, defaults.kind === "agent" ? defaults : null]
+  const target = [recentChatAgentSelection, remembered?.kind === "agent" ? remembered : null]
     .find(item => item && openClawInstance(item.instanceId))
     || { instanceId:openClawInstances()[0]?.id || "", agentId:"" };
   const instance = openClawInstance(target.instanceId);
@@ -9171,7 +9130,7 @@ function refreshChatSelectionNotice(){
   let text = "";
   if(!chatSelectionConfirmed){
     text = "此对话未记录原模型选择，请重新选择模型或 Agent。"
-      + (["invalid", "incomplete"].includes(result.state) ? "" : "当前显示的是“新对话默认”，确认后才能继续发送。");
+      + (["invalid", "incomplete"].includes(result.state) ? "" : "当前显示的是新对话的初始选择（默认模型或上次选择），确认后才能继续发送。");
   }else if(result.state === "invalid"){
     text = "原模型或配置已不可用，请重新选择（" + result.message + "）";
   }else if(result.state !== "ok"){
@@ -9312,7 +9271,6 @@ async function loadOpenClawCatalog(force = false, requestedCatalogId = ""){
   }finally{
     openClawCatalogRefresh.disabled = false;
     syncOpenClawRouteControls();
-    renderSettingsDefaultControls();
   }
 }
 
@@ -12287,10 +12245,6 @@ closeSettingsBtn.addEventListener("click", closeSettings);
 cancelSettingsBtn.addEventListener("click", cancelSettings);
 applySettingsBtn.addEventListener("click", () => saveSettingsFromUi(false));
 saveSettingsBtn.addEventListener("click", () => saveSettingsFromUi(true));
-defaultSelectionKindSwitch.addEventListener("click", event => selectDefaultKind(event.target?.dataset?.defaultKind));
-defaultInstanceSelect.addEventListener("change", () => selectDefaultInstance(defaultInstanceSelect.value));
-defaultAgentSelect.addEventListener("change", () => selectDefaultAgent(defaultAgentSelect.value));
-defaultBaseModelSelect.addEventListener("change", () => selectDefaultBaseModel(defaultBaseModelSelect.value));
 addProviderBtn.addEventListener("click", addProvider);
 cancelProviderEditBtn.addEventListener("click", clearProviderForm);
 addProviderModelBtn.addEventListener("click", addProviderModel);

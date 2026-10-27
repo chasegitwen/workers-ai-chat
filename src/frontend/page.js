@@ -2518,7 +2518,6 @@ body.dark .toolErrorNotice{
 .effectiveModelResult{font-size:12px;line-height:1.45;color:var(--muted);margin-top:7px;overflow-wrap:anywhere}
 .openClawInstancesSettings{margin-top:0}
 .openClawInstanceMeta{font-size:12px;color:var(--muted);margin-top:3px;overflow-wrap:anywhere}
-.settingsModal:not([data-mode="modern"]) .openClawInstancesSettings{display:none}
 
 .settingsModal{
   position:fixed;
@@ -3130,10 +3129,6 @@ body.dark .toolErrorNotice{
     <div class="settingsHeader">
       <h3>模型设置中心</h3>
       <button id="closeSettingsBtn" class="settingsBtn" type="button">关闭</button>
-    </div>
-    <div class="modelModeSwitch" aria-label="模型设置模式">
-      <button type="button" data-settings-mode="classic">经典模式</button>
-      <button type="button" data-settings-mode="modern">新模式</button>
     </div>
     <div class="settingsGrid">
       <label class="settingsField">
@@ -4203,10 +4198,6 @@ function refreshSettingsControls(){
   });
   renderProvidersList();
   renderOpenClawInstancesList();
-  settingsModal.dataset.mode = activeModelMode;
-  settingsModal.querySelectorAll("[data-settings-mode]").forEach(button => {
-    button.classList.toggle("active", button.dataset.settingsMode === activeModelMode);
-  });
 }
 
 async function loadModels(){
@@ -5786,6 +5777,7 @@ let modelOptions = [];
 let classicModelOptions = [];
 let modernModelOptions = [];
 let activeModelMode = "classic";
+let settingsModelSelectBaseline = null;
 let activeNewModeTarget = "model";
 let seattleOpenClawCatalog = null;
 let seattleOpenClawCatalogState = "unconfigured";
@@ -6552,11 +6544,20 @@ function saveCurrentSettings(message){
 }
 
 function saveSettingsFromUi(closeAfter){
-  const nextDefault = defaultModelSelect.value || "";
-  modelSettingsState.defaultModel = nextDefault;
+  // Selects only list modern models; leave stored values alone unless the user changed them.
+  if(defaultModelSelect.value !== settingsModelSelectBaseline?.defaultModel){
+    modelSettingsState.defaultModel = defaultModelSelect.value || "";
+  }
+  if(fallbackModelSelect.value !== settingsModelSelectBaseline?.fallbackModel){
+    const storedFallbacks = Array.isArray(modelSettingsState.fallbackModels) ? modelSettingsState.fallbackModels : [];
+    // An explicit None turns off every fallback; another choice replaces only the first entry.
+    modelSettingsState.fallbackModels = fallbackModelSelect.value
+      ? [...new Set([fallbackModelSelect.value, ...storedFallbacks.slice(1)].filter(Boolean))]
+      : [];
+  }
+  const nextDefault = modelSettingsState.defaultModel || "";
   modelSettingsState.rememberLastModel = rememberLastModelCheck.checked;
   modelSettingsState.fallbackEnabled = fallbackEnabledCheck.checked;
-  modelSettingsState.fallbackModels = fallbackModelSelect.value ? [fallbackModelSelect.value] : [];
   modelSettingsState.showPerMessageModelInfo = showPerMessageModelInfoCheck.checked;
   modelSettingsState.autoArchiveDays = normalizeAutoArchiveDays(autoArchiveDaysSelect.value);
   modelSettingsState.conversationAttachmentLimits = readConversationAttachmentLimitInputs();
@@ -7462,7 +7463,7 @@ function hasModernModel(modelId){
 function refreshSettingsControls(){
   const settingsPanel = settingsModal.querySelector(".settingsPanel");
   const settingsScrollTop = settingsPanel?.scrollTop || 0;
-  const settingsModels = activeModelMode === "classic" ? classicModelOptions : modernModelOptions;
+  const settingsModels = modernModelOptions;
   const hasSettingsModel = modelId => settingsModels.some(model => model.id === modelId);
   const fillSelect = (select, includeEmpty) => {
     select.innerHTML = "";
@@ -7483,6 +7484,7 @@ function refreshSettingsControls(){
   fillSelect(fallbackModelSelect, true);
   defaultModelSelect.value = hasSettingsModel(modelSettingsState?.defaultModel) ? modelSettingsState.defaultModel : (settingsModels[0]?.id || "");
   fallbackModelSelect.value = hasSettingsModel(modelSettingsState?.fallbackModels?.[0]) ? modelSettingsState.fallbackModels[0] : "";
+  settingsModelSelectBaseline = { defaultModel:defaultModelSelect.value, fallbackModel:fallbackModelSelect.value };
   rememberLastModelCheck.checked = Boolean(modelSettingsState?.rememberLastModel);
   fallbackEnabledCheck.checked = Boolean(modelSettingsState?.fallbackEnabled);
   showPerMessageModelInfoCheck.checked = Boolean(modelSettingsState?.showPerMessageModelInfo);
@@ -7494,7 +7496,7 @@ function refreshSettingsControls(){
   modelProviderSelect.appendChild(workersOption);
   modelProviders
     .filter(provider => (provider.providerType === "claude-compatible" || provider.providerType === "openai-compatible")
-      && (activeModelMode === "classic" || !isOpenClawModelTarget(provider)))
+      && !isOpenClawModelTarget(provider))
     .forEach(provider => {
       const option = document.createElement("option");
       option.value = provider.id;
@@ -7503,10 +7505,6 @@ function refreshSettingsControls(){
     });
   renderProvidersList();
   renderOpenClawInstancesList();
-  settingsModal.dataset.mode = activeModelMode;
-  settingsModal.querySelectorAll("[data-settings-mode]").forEach(button => {
-    button.classList.toggle("active", button.dataset.settingsMode === activeModelMode);
-  });
   if(settingsPanel){
     settingsPanel.scrollTop = settingsScrollTop;
   }
@@ -8506,7 +8504,6 @@ function renderCategoryTop(section, categoryDef){
 
 function classicCategoryProviders(category){
   const providers = category?.providers || [];
-  if(activeModelMode === "classic") return providers;
   return providers.filter(provider =>
     !isOpenClawModelTarget({ ...provider, provider:provider.providerId || provider.id }));
 }
@@ -11927,13 +11924,6 @@ modelModeSwitch.addEventListener("click", event => {
 newModeTargetSwitch.addEventListener("click", event => {
   const target = event.target?.dataset?.newModeTarget;
   if(target) setNewModeTarget(target);
-});
-settingsModal.addEventListener("click", event => {
-  const mode = event.target?.dataset?.settingsMode;
-  if(!mode) return;
-  setModelSelectionMode(mode, { persist:false });
-  settingsModal.dataset.mode = activeModelMode;
-  refreshSettingsControls();
 });
 openClawProviderSelect.addEventListener("change", () => {
   syncOpenClawRouteControls();

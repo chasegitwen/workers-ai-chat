@@ -6098,7 +6098,11 @@ export async function handleChat(request, env, ctx) {
     if (!validSelection) {
       return jsonResponse({ ok: false, error: "invalid_openclaw_selection" }, 400);
     }
-    if (openClawTarget?.model && runtimeResolution?.execution_mode !== "bridge") {
+    if (openClawTarget?.model && oracleBridgeTarget && runtimeResolution?.execution_mode === "bridge") {
+      const agentRoute = "openclaw/" + effectiveAgentId;
+      openClawTarget.model.modelName = agentRoute;
+      openClawTarget.model.upstreamModelName = agentRoute;
+    } else if (openClawTarget?.model && runtimeResolution?.execution_mode !== "bridge") {
       openClawTarget.model.modelName = "openclaw/" + effectiveAgentId;
       openClawTarget.model.baseModelId = selectedOpenClawBaseModelId;
     }

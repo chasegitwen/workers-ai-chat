@@ -2511,10 +2511,19 @@ body.dark .toolErrorNotice{
 .modelModeSwitch{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
 .modelModeSwitch button{border:1px solid var(--border);border-radius:10px;padding:8px;background:transparent;color:var(--text);cursor:pointer}
 .modelModeSwitch button.active{background:var(--primary);border-color:var(--primary);color:white}
-.newModeTargetSwitch{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0}
-.newModeTargetSwitch[hidden]{display:none}
-.newModeTargetSwitch button{border:1px solid var(--border);border-radius:10px;padding:7px;background:transparent;color:var(--text);cursor:pointer}
-.newModeTargetSwitch button.active{background:var(--primary);border-color:var(--primary);color:white}
+.selectionField{display:grid;gap:4px;font-size:12px;color:var(--muted)}
+.selectionField[hidden]{display:none}
+.openClawBaseModelLine{display:flex;align-items:center;flex-wrap:wrap;gap:6px;color:var(--muted)}
+.openClawBaseModelLine span{color:var(--text);overflow-wrap:anywhere}
+.openClawBaseModelLine button{border:1px solid var(--border);border-radius:8px;padding:3px 8px;background:transparent;color:var(--text);cursor:pointer}
+.openClawBaseModelLine button:disabled{opacity:.5;cursor:default}
+.chatSelectionNotice{display:grid;gap:6px;margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:12px;line-height:1.45;color:var(--text);overflow-wrap:anywhere}
+.chatSelectionNotice[hidden]{display:none}
+.chatSelectionNotice[data-state="invalid"],.chatSelectionNotice[data-state="incomplete"],.chatSelectionNotice[data-state="unrecorded"]{border-color:#d97706}
+.chatSelectionNotice button{justify-self:start;border:1px solid var(--border);border-radius:8px;padding:4px 10px;background:transparent;color:var(--text);cursor:pointer}
+.chatSelectionNotice button[hidden]{display:none}
+.settingsFieldNote{font-size:12px;line-height:1.4;color:var(--muted)}
+.settingsFieldNote:empty{display:none}
 .effectiveModelResult{font-size:12px;line-height:1.45;color:var(--muted);margin-top:7px;overflow-wrap:anywhere}
 .openClawInstancesSettings{margin-top:0}
 .openClawInstanceMeta{font-size:12px;color:var(--muted);margin-top:3px;overflow-wrap:anywhere}
@@ -3131,13 +3140,26 @@ body.dark .toolErrorNotice{
       <button id="closeSettingsBtn" class="settingsBtn" type="button">关闭</button>
     </div>
     <div class="settingsGrid">
-      <label class="settingsField">
-        默认模型
-        <select id="defaultModelSelect"></select>
-      </label>
+      <div class="settingsField full">
+        新对话默认
+        <div id="defaultSelectionKindSwitch" class="modelModeSwitch" aria-label="新对话默认">
+          <button type="button" data-default-kind="model">模型</button>
+          <button type="button" data-default-kind="agent">Agent</button>
+        </div>
+        <label id="defaultModelField" class="selectionField">
+          默认模型
+          <select id="defaultModelSelect"></select>
+        </label>
+        <div id="defaultAgentFields" class="openClawRouteControls" hidden>
+          <label>默认实例 <select id="defaultInstanceSelect" aria-label="默认 OpenClaw 实例"></select></label>
+          <label>默认 Agent <select id="defaultAgentSelect" aria-label="默认 Agent"></select></label>
+          <label>基础模型 <select id="defaultBaseModelSelect" aria-label="默认基础模型"></select></label>
+        </div>
+      </div>
       <label class="settingsField">
         fallback 模型
         <select id="fallbackModelSelect"></select>
+        <span id="fallbackModelNote" class="settingsFieldNote"></span>
       </label>
       <label class="settingsField">
         自动归档
@@ -3147,10 +3169,6 @@ body.dark .toolErrorNotice{
           <option value="60">60 days</option>
           <option value="90">90 days</option>
         </select>
-      </label>
-      <label class="settingsCheck">
-        <input id="rememberLastModelCheck" type="checkbox" />
-        记住上次选择
       </label>
       <label class="settingsCheck">
         <input id="fallbackEnabledCheck" type="checkbox" />
@@ -3331,16 +3349,13 @@ body.dark .toolErrorNotice{
       </div>
 
       <div class="modelArea">
-        <div class="modelLabel">当前模型</div>
-      <div id="modelModeSwitch" class="modelModeSwitch" aria-label="模型选择模式">
-        <button type="button" data-model-mode="classic">经典模式</button>
-        <button type="button" data-model-mode="modern">新模式</button>
+        <div class="modelLabel">当前使用</div>
+      <div id="selectionKindSwitch" class="modelModeSwitch" aria-label="当前使用">
+        <button type="button" data-selection-kind="model">模型</button>
+        <button type="button" data-selection-kind="agent">Agent</button>
       </div>
-      <div id="newModeTargetSwitch" class="newModeTargetSwitch" aria-label="新模式模型类型" hidden>
-        <button type="button" data-new-mode-target="model">普通模型</button>
-        <button type="button" data-new-mode-target="openclaw">OpenClaw 实例</button>
-      </div>
-    
+      <label id="modelSelectField" class="selectionField">
+      模型
       <select
         id="modelSelect"
         style="
@@ -3354,11 +3369,17 @@ body.dark .toolErrorNotice{
         "
       >
       </select>
+      </label>
       <div id="openClawRouteControls" class="openClawRouteControls" hidden>
         <label>实例 <select id="openClawProviderSelect" aria-label="OpenClaw 实例"></select></label>
         <label>Agent <select id="openClawAgentSelect" aria-label="OpenClaw Agent"></select></label>
-        <label>基础模型 <select id="openClawBaseModelSelect" aria-label="OpenClaw 基础模型"></select></label>
+        <div class="openClawBaseModelLine">基础模型：<span id="openClawBaseModelSummary"></span><button id="openClawBaseModelChangeBtn" type="button">更改</button></div>
+        <label id="openClawBaseModelField" hidden>基础模型 <select id="openClawBaseModelSelect" aria-label="OpenClaw 基础模型"></select></label>
         <div class="openClawCatalogLine"><span id="openClawCatalogStatus"></span><button id="openClawCatalogRefresh" type="button">刷新目录</button></div>
+      </div>
+      <div id="chatSelectionNotice" class="chatSelectionNotice" hidden>
+        <span id="chatSelectionNoticeText"></span>
+        <button id="chatSelectionConfirmBtn" type="button" hidden>使用此选择</button>
       </div>
       <div id="effectiveModelResult" class="effectiveModelResult"></div>
       <button id="modelSettingsBtn" class="modelSettingsBtn" type="button">模型设置</button>
@@ -4138,30 +4159,13 @@ function hasModel(modelId){
 }
 
 function selectInitialModel(){
-  activeModelMode = modelSettingsState?.selectionMode === "modern" ? "modern" : "classic";
-  activeNewModeTarget = modelSettingsState?.newModeTarget === "openclaw" ? "openclaw" : "model";
+  activeModelMode = "modern";
   renderModelOptions();
-  let nextModel = "";
-  if(activeModelMode === "classic"){
-    if(modelSettingsState?.classicSelectedModel && hasClassicModel(modelSettingsState.classicSelectedModel)){
-      nextModel = modelSettingsState.classicSelectedModel;
-    }else if(modelSettingsState?.rememberLastModel && hasClassicModel(modelSettingsState.lastModel)){
-      nextModel = modelSettingsState.lastModel;
-    }else if(hasClassicModel(modelSettingsState?.defaultModel)){
-      nextModel = modelSettingsState.defaultModel;
-    }else{
-      nextModel = classicModelOptions[0]?.id || "";
-    }
-  }else if(modelSettingsState?.modernSelectedModel && hasModernModel(modelSettingsState.modernSelectedModel)){
-    nextModel = modelSettingsState.modernSelectedModel;
-  }else if(hasModernModel(modelSettingsState?.defaultModel)){
-    nextModel = modelSettingsState.defaultModel;
-  }else{
-    nextModel = modernModelOptions[0]?.id || "";
+  if(currentConversationId && chatSelectionConversationId === currentConversationId){
+    syncChatSelectionUi();
+    return;
   }
-  modelSelect.value = nextModel;
-  syncModelModeUi();
-  syncOpenClawTaskVisibility();
+  applyNewChatSelection();
 }
 
 function refreshSettingsControls(){
@@ -5703,13 +5707,19 @@ fileInput.addEventListener("change", async () => {
 
 
 const modelSelect = document.getElementById("modelSelect");
-const modelModeSwitch = document.getElementById("modelModeSwitch");
-const newModeTargetSwitch = document.getElementById("newModeTargetSwitch");
+const selectionKindSwitch = document.getElementById("selectionKindSwitch");
+const modelSelectField = document.getElementById("modelSelectField");
+const chatSelectionNotice = document.getElementById("chatSelectionNotice");
+const chatSelectionNoticeText = document.getElementById("chatSelectionNoticeText");
+const chatSelectionConfirmBtn = document.getElementById("chatSelectionConfirmBtn");
 const effectiveModelResult = document.getElementById("effectiveModelResult");
 const openClawRouteControls = document.getElementById("openClawRouteControls");
 const openClawProviderSelect = document.getElementById("openClawProviderSelect");
 const openClawAgentSelect = document.getElementById("openClawAgentSelect");
 const openClawBaseModelSelect = document.getElementById("openClawBaseModelSelect");
+const openClawBaseModelField = document.getElementById("openClawBaseModelField");
+const openClawBaseModelSummary = document.getElementById("openClawBaseModelSummary");
+const openClawBaseModelChangeBtn = document.getElementById("openClawBaseModelChangeBtn");
 const openClawCatalogStatus = document.getElementById("openClawCatalogStatus");
 const openClawCatalogRefresh = document.getElementById("openClawCatalogRefresh");
 const openClawInstancesSettings = document.getElementById("openClawInstancesSettings");
@@ -5743,6 +5753,13 @@ const applySettingsBtn = document.getElementById("applySettingsBtn");
 const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const defaultModelSelect = document.getElementById("defaultModelSelect");
 const fallbackModelSelect = document.getElementById("fallbackModelSelect");
+const fallbackModelNote = document.getElementById("fallbackModelNote");
+const defaultSelectionKindSwitch = document.getElementById("defaultSelectionKindSwitch");
+const defaultModelField = document.getElementById("defaultModelField");
+const defaultAgentFields = document.getElementById("defaultAgentFields");
+const defaultInstanceSelect = document.getElementById("defaultInstanceSelect");
+const defaultAgentSelect = document.getElementById("defaultAgentSelect");
+const defaultBaseModelSelect = document.getElementById("defaultBaseModelSelect");
 const autoArchiveDaysSelect = document.getElementById("autoArchiveDaysSelect");
 const rememberLastModelCheck = document.getElementById("rememberLastModelCheck");
 const fallbackEnabledCheck = document.getElementById("fallbackEnabledCheck");
@@ -5776,9 +5793,21 @@ let modelCategories = [];
 let modelOptions = [];
 let classicModelOptions = [];
 let modernModelOptions = [];
-let activeModelMode = "classic";
+// Classic mode is gone: activeModelMode stays "modern" and activeNewModeTarget mirrors chatSelection.kind
+// so the existing OpenClaw routing helpers keep working unchanged.
+let activeModelMode = "modern";
 let settingsModelSelectBaseline = null;
 let activeNewModeTarget = "model";
+let modelCatalogReady = false;
+let chatSelection = { kind:"model", modelId:"", instanceId:"", agentId:"", baseModelId:"" };
+let chatSelectionConfirmed = true;
+let chatSelectionConversationId = null;
+let chatSelectionAutoAgent = false;
+let openClawBasePickerOpen = false;
+let recentChatModelId = "";
+let recentChatAgentSelection = null;
+let settingsDefaultDraft = null;
+let settingsDefaultBaseline = null;
 let seattleOpenClawCatalog = null;
 let seattleOpenClawCatalogState = "unconfigured";
 let hillsboroOpenClawCatalog = null;
@@ -5810,6 +5839,8 @@ const OPENCLAW_INSTANCE_TARGETS = Object.freeze({
 });
 const OPENCLAW_INSTANCE_CONFIG_VERSION = 3;
 const OPENCLAW_ROUTE_PREFERENCES_KEY = "wa_openclaw_route_v1";
+const CONVERSATION_SELECTION_KEY = "wa_conversation_selection_v1";
+const CONVERSATION_SELECTION_LIMIT = 500;
 let openClawRoutePreferences = {};
 try { openClawRoutePreferences = JSON.parse(localStorage.getItem(OPENCLAW_ROUTE_PREFERENCES_KEY) || "{}"); }
 catch(err) { openClawRoutePreferences = {}; }
@@ -6015,9 +6046,6 @@ function clearModelForm(){
 function refreshDraftSettings(message){
   modelSettingsState.providers = modelProviders;
   renderModelOptions();
-  if(modelSelect.value && !hasModel(modelSelect.value)){
-    selectInitialModel();
-  }
   refreshSettingsControls();
   if(message){
     settingsSyncStatus.textContent = message;
@@ -6555,21 +6583,18 @@ function saveSettingsFromUi(closeAfter){
       ? [...new Set([fallbackModelSelect.value, ...storedFallbacks.slice(1)].filter(Boolean))]
       : [];
   }
-  const nextDefault = modelSettingsState.defaultModel || "";
-  modelSettingsState.rememberLastModel = rememberLastModelCheck.checked;
+  if(settingsDefaultDraft && !sameNewChatDefault(settingsDefaultDraft, settingsDefaultBaseline)){
+    const { kind, instanceId, agentId, baseModelId } = settingsDefaultDraft;
+    modelSettingsState.newChatDefault = { kind, instanceId, agentId, baseModelId };
+    // Mirror into the legacy fields so older clients open new chats with the same default.
+    modelSettingsState.selectionMode = "modern";
+    modelSettingsState.newModeTarget = kind === "agent" ? "openclaw" : "model";
+    if(kind === "agent") modelSettingsState.openClawSelection = { instanceId, agentId, baseModelId };
+  }
   modelSettingsState.fallbackEnabled = fallbackEnabledCheck.checked;
   modelSettingsState.showPerMessageModelInfo = showPerMessageModelInfoCheck.checked;
   modelSettingsState.autoArchiveDays = normalizeAutoArchiveDays(autoArchiveDaysSelect.value);
   modelSettingsState.conversationAttachmentLimits = readConversationAttachmentLimitInputs();
-  if(nextDefault && (activeModelMode === "classic" ? hasClassicModel(nextDefault) : hasModernModel(nextDefault))){
-    modelSelect.value = nextDefault;
-  }
-  modelSettingsState.selectionMode = activeModelMode;
-  modelSettingsState.newModeTarget = activeNewModeTarget;
-  if(activeModelMode === "classic") modelSettingsState.classicSelectedModel = modelSelect.value || "";
-  else modelSettingsState.modernSelectedModel = modelSelect.value || "";
-  modelSettingsState.openClawSelection = currentOpenClawSelection();
-  modelSettingsState.lastModel = modelSettingsState.rememberLastModel && nextDefault ? nextDefault : "";
   persistSettings(closeAfter ? "Saved" : "Applied", Boolean(closeAfter));
 }
 
@@ -7394,6 +7419,7 @@ function normalizeModelSettings(settings, fallbackProviders){
       normalizedInstances,
       base.openClawInstanceConfigVersion
     ),
+    ...(base.newChatDefault && typeof base.newChatDefault === "object" ? { newChatDefault:base.newChatDefault } : {}),
     openClawInstanceConfigVersion:OPENCLAW_INSTANCE_CONFIG_VERSION,
     updatedAt:Number(base.updatedAt || base.version || 0) || 0,
     version:Number(base.version || base.updatedAt || 0) || 0
@@ -7450,6 +7476,7 @@ function renderModelOptions(){
   if(visibleModels.some(model => model.id === previousSelection)){
     modelSelect.value = previousSelection;
   }
+  syncChatModelSelect();
 }
 
 function hasClassicModel(modelId){
@@ -7460,17 +7487,76 @@ function hasModernModel(modelId){
   return Boolean(modernModelOptions.find(model => model.id === modelId));
 }
 
+function renderSettingsDefaultControls(){
+  const draft = settingsDefaultDraft;
+  if(!draft || !defaultSelectionKindSwitch) return;
+  defaultSelectionKindSwitch.querySelectorAll("[data-default-kind]").forEach(button => {
+    button.classList.toggle("active", button.dataset.defaultKind === draft.kind);
+  });
+  defaultModelField.hidden = draft.kind !== "model";
+  defaultAgentFields.hidden = draft.kind !== "agent";
+  if(draft.kind !== "agent") return;
+  const instances = openClawInstances();
+  fillSelectionSelect(defaultInstanceSelect, instances.map(item => ({ id:item.id, name:item.label || item.id })),
+    draft.instanceId, { emptyLabel:draft.instanceId ? "" : "请选择实例" });
+  const instance = openClawInstance(draft.instanceId);
+  const { catalog, agents, ready } = openClawAgentsForInstance(instance);
+  if(instance && draft.autoAgent && agents.length
+    && (!draft.agentId || (ready && !agents.some(agent => agent.id === draft.agentId)))){
+    draft.agentId = defaultOpenClawAgentId(instance, agents);
+  }
+  if(instance && ready) draft.autoAgent = false;
+  // Show the canonical agent alias without rewriting an untouched stored value.
+  const agentId = canonicalOpenClawAgentId(instance, draft.agentId);
+  const missingPrefix = !instance || ready ? "不可用：" : "待验证：";
+  fillSelectionSelect(defaultAgentSelect, agents, agentId, {
+    emptyLabel:agentId ? "" : (agents.length ? "请选择 Agent" : "目录未就绪"),
+    missingPrefix
+  });
+  const selectedAgent = agents.find(agent => agent.id === agentId);
+  fillSelectionSelect(defaultBaseModelSelect, openClawSelectableModels(catalog, agentId), draft.baseModelId,
+    { emptyLabel:followAgentDefaultLabel(selectedAgent), missingPrefix });
+}
+
+function selectDefaultKind(kind){
+  if(!settingsDefaultDraft || (kind !== "model" && kind !== "agent")) return;
+  settingsDefaultDraft.kind = kind;
+  if(kind === "agent" && !settingsDefaultDraft.instanceId){
+    Object.assign(settingsDefaultDraft, { instanceId:openClawInstances()[0]?.id || "", agentId:"", baseModelId:"", autoAgent:true });
+    ensureOpenClawCatalogForInstance(openClawInstance(settingsDefaultDraft.instanceId));
+  }
+  renderSettingsDefaultControls();
+}
+
+function selectDefaultInstance(instanceId){
+  if(!settingsDefaultDraft) return;
+  Object.assign(settingsDefaultDraft, { instanceId, agentId:"", baseModelId:"", autoAgent:true });
+  ensureOpenClawCatalogForInstance(openClawInstance(instanceId));
+  renderSettingsDefaultControls();
+}
+
+function selectDefaultAgent(agentId){
+  if(!settingsDefaultDraft) return;
+  Object.assign(settingsDefaultDraft, { agentId, baseModelId:"", autoAgent:false });
+  renderSettingsDefaultControls();
+}
+
+function selectDefaultBaseModel(baseModelId){
+  if(settingsDefaultDraft) settingsDefaultDraft.baseModelId = baseModelId;
+}
+
 function refreshSettingsControls(){
   const settingsPanel = settingsModal.querySelector(".settingsPanel");
   const settingsScrollTop = settingsPanel?.scrollTop || 0;
   const settingsModels = modernModelOptions;
   const hasSettingsModel = modelId => settingsModels.some(model => model.id === modelId);
-  const fillSelect = (select, includeEmpty) => {
+  const missingPrefix = modelCatalogReady ? "不可用：" : "待验证：";
+  const fillSelect = (select, emptyLabel, storedId) => {
     select.innerHTML = "";
-    if(includeEmpty){
+    if(emptyLabel){
       const empty = document.createElement("option");
       empty.value = "";
-      empty.textContent = "None";
+      empty.textContent = emptyLabel;
       select.appendChild(empty);
     }
     settingsModels.forEach(model => {
@@ -7479,13 +7565,26 @@ function refreshSettingsControls(){
       option.textContent = categoryLabel(modelCategoryFromLegacy(model)) + " / " + (model.label || model.id);
       select.appendChild(option);
     });
+    // A stored value missing from the list stays visible (and is kept on save) instead of posing as another choice.
+    if(storedId && !hasSettingsModel(storedId)){
+      const option = document.createElement("option");
+      option.value = storedId;
+      option.textContent = missingPrefix + storedId;
+      option.dataset.unavailable = "true";
+      select.appendChild(option);
+    }
   };
-  fillSelect(defaultModelSelect, false);
-  fillSelect(fallbackModelSelect, true);
-  defaultModelSelect.value = hasSettingsModel(modelSettingsState?.defaultModel) ? modelSettingsState.defaultModel : (settingsModels[0]?.id || "");
-  fallbackModelSelect.value = hasSettingsModel(modelSettingsState?.fallbackModels?.[0]) ? modelSettingsState.fallbackModels[0] : "";
+  const storedDefault = modelSettingsState?.defaultModel || "";
+  const storedFallback = modelSettingsState?.fallbackModels?.[0] || "";
+  fillSelect(defaultModelSelect, "", storedDefault);
+  fillSelect(fallbackModelSelect, "None（不使用 fallback）", storedFallback);
+  defaultModelSelect.value = storedDefault || (settingsModels[0]?.id || "");
+  fallbackModelSelect.value = storedFallback;
   settingsModelSelectBaseline = { defaultModel:defaultModelSelect.value, fallbackModel:fallbackModelSelect.value };
-  rememberLastModelCheck.checked = Boolean(modelSettingsState?.rememberLastModel);
+  if(fallbackModelNote) fallbackModelNote.textContent = fallbackModelNoteText(modelSettingsState, chatSelectionContext());
+  settingsDefaultDraft = newChatDefaultSelection(modelSettingsState);
+  settingsDefaultBaseline = { ...settingsDefaultDraft };
+  renderSettingsDefaultControls();
   fallbackEnabledCheck.checked = Boolean(modelSettingsState?.fallbackEnabled);
   showPerMessageModelInfoCheck.checked = Boolean(modelSettingsState?.showPerMessageModelInfo);
   setConversationAttachmentLimitInputs(modelSettingsState?.conversationAttachmentLimits);
@@ -7520,6 +7619,7 @@ async function loadModels(){
     modelSettingsState = await loadSettingsFromServer(fallbackProviders);
     modelCategories = normalizeModelCategories(modelSettingsState.categories || modelSettingsState.modelCategories, modelSettingsState.providers || fallbackProviders);
     syncCatalogFromCategories();
+    modelCatalogReady = true;
     renderModelOptions();
     selectInitialModel();
     refreshSettingsControls();
@@ -7556,17 +7656,9 @@ function cancelSettings(){
     modelSettingsState = deepClone(settingsSnapshot.settings);
     modelCategories = deepClone(settingsSnapshot.categories || []);
     modelProviders = deepClone(settingsSnapshot.providers || categoriesToProviders(modelCategories));
-    activeModelMode = settingsSnapshot.selected?.selectionMode === "modern" ? "modern" : "classic";
-    activeNewModeTarget = settingsSnapshot.selected?.newModeTarget === "openclaw" ? "openclaw" : "model";
     renderModelOptions();
-    const restoredModel = activeModelMode === "classic"
-      ? settingsSnapshot.selected?.classicSelectedModel || settingsSnapshot.selected?.selectedModel
-      : settingsSnapshot.selected?.modernSelectedModel || settingsSnapshot.selected?.selectedModel;
-    modelSelect.value = (activeModelMode === "classic" ? hasClassicModel(restoredModel) : hasModernModel(restoredModel))
-      ? restoredModel
-      : ((activeModelMode === "classic" ? classicModelOptions : modernModelOptions)[0]?.id || "");
     refreshSettingsControls();
-    syncModelModeUi();
+    syncChatSelectionUi();
   }
   clearProviderForm();
   clearModelForm();
@@ -7577,10 +7669,8 @@ function persistSettings(message, closeAfter){
   syncCatalogFromCategories();
   writeSettingsCache(modelSettingsState);
   renderModelOptions();
-  if(modelSelect.value && !hasClassicModel(modelSelect.value)){
-    selectInitialModel();
-  }
   refreshSettingsControls();
+  syncChatSelectionUi();
   if(message){
     settingsSyncStatus.textContent = message;
   }
@@ -7600,9 +7690,7 @@ function pruneInvalidModelReferences(){
     modelSettingsState.lastModel = "";
   }
   modelSettingsState.fallbackModels = (modelSettingsState.fallbackModels || []).filter(hasModel);
-  if(modelSelect.value && !hasModel(modelSelect.value)){
-    modelSelect.value = modelSettingsState.defaultModel || modelOptions[0]?.id || "";
-  }
+  syncChatModelSelect();
 }
 
 function getCategory(type){
@@ -8612,9 +8700,7 @@ function modelProvidersForRequest(enableCloudflareDocumentAttachment){
 
 function getOpenClawRuntimeIdForRequest(modelId){
   if(typeof activeModelMode !== "undefined" && activeModelMode === "modern" && activeNewModeTarget === "openclaw"){
-    const selectedInstanceId = openClawProviderSelect?.value
-      || modelSettingsState?.openClawSelection?.instanceId
-      || "";
+    const selectedInstanceId = chatSelection.instanceId || "";
     return openClawInstances().find(instance => instance.id === selectedInstanceId)?.runtimeId || "";
   }
   const model = modelOptions.find(item => item.id === modelId);
@@ -8700,11 +8786,10 @@ function isOpenClawAgentMode(){
 }
 
 function currentOpenClawSelection(){
-  const instanceId = openClawProviderSelect.value || modelSettingsState?.openClawSelection?.instanceId || "";
   return {
-    instanceId,
-    agentId:openClawAgentSelect.value || "",
-    baseModelId:openClawBaseModelSelect.value || ""
+    instanceId:chatSelection.instanceId,
+    agentId:chatSelection.agentId,
+    baseModelId:chatSelection.baseModelId
   };
 }
 
@@ -8763,93 +8848,368 @@ function updateEffectiveModelResult(){
   if(!isOpenClawAgentMode()){
     const model = modelOptions.find(item => item.id === modelSelect.value);
     effectiveModelResult.textContent = model
-      ? "实际生效：" + (activeModelMode === "classic" ? "经典模式" : "新模式 / 普通模型")
-        + " / " + (model.providerLabel || model.provider || "") + " / " + (model.label || model.id)
-      : "实际生效：" + (activeModelMode === "classic" ? "经典模式" : "新模式 / 普通模型") + " / 未选择模型";
+      ? "实际生效：模型 / " + (model.providerLabel || model.provider || "") + " / " + (model.label || model.id)
+      : "实际生效：未选择可用模型";
+  }else{
+    const selection = currentOpenClawSelection();
+    const instance = openClawInstance(selection.instanceId);
+    const base = effectiveOpenClawBaseModel();
+    effectiveModelResult.textContent = selection.agentId
+      ? "实际生效：Agent / " + (instance?.label || selection.instanceId)
+        + " / openclaw/" + selection.agentId + " / "
+        + (base.id ? base.id + (base.inherited ? "（Agent 默认）" : "（显式指定）") : "默认模型未解析")
+      : "实际生效：Agent / " + (instance?.label || selection.instanceId || "未选择实例") + " / 尚未选择 Agent";
+  }
+  refreshChatSelectionNotice();
+}
+
+// Chat selection = what the current conversation uses: a plain model, or OpenClaw instance -> Agent ->
+// optional base model. It never writes the global "new chat default" kept in the settings center.
+function normalizeChatSelection(value){
+  const source = value && typeof value === "object" ? value : {};
+  if(source.kind === "agent"){
+    return {
+      kind:"agent",
+      modelId:"",
+      instanceId:String(source.instanceId || ""),
+      agentId:String(source.agentId || ""),
+      baseModelId:String(source.baseModelId || "")
+    };
+  }
+  return { kind:"model", modelId:String(source.modelId || ""), instanceId:"", agentId:"", baseModelId:"" };
+}
+
+// The new-chat default: kind and Agent fields come from newChatDefault (or the legacy fields when it
+// was never saved); the model always comes from defaultModel so renames/deletes keep applying to it.
+function newChatDefaultSelection(settings){
+  const stored = settings?.newChatDefault && typeof settings.newChatDefault === "object" ? settings.newChatDefault : null;
+  const legacy = settings?.openClawSelection && typeof settings.openClawSelection === "object" ? settings.openClawSelection : {};
+  const source = stored || legacy;
+  const agentKind = stored ? stored.kind === "agent" : settings?.selectionMode === "modern" && settings?.newModeTarget === "openclaw";
+  return {
+    kind:agentKind ? "agent" : "model",
+    modelId:String(settings?.defaultModel || ""),
+    instanceId:String(source.instanceId || ""),
+    agentId:String(source.agentId || ""),
+    baseModelId:String(source.baseModelId || "")
+  };
+}
+
+function sameNewChatDefault(a, b){
+  return ["kind", "instanceId", "agentId", "baseModelId"].every(key => (a?.[key] || "") === (b?.[key] || ""));
+}
+
+function openClawAgentsForInstance(instance){
+  const provider = modelProviders.find(item => item.id === instance?.connectionId);
+  const fallbackAgents = (provider?.models || []).map(model => {
+    const route = String(model.modelName || model.upstreamModelName || "");
+    const id = route.startsWith("openclaw/") ? route.slice("openclaw/".length) : "";
+    return id ? { id, name:model.label || id } : null;
+  }).filter(Boolean);
+  const catalog = openClawCatalogForInstance(instance);
+  const catalogAgents = Array.isArray(catalog?.agents) && catalog.agents.length ? catalog.agents : null;
+  return {
+    catalog,
+    agents:catalogAgents || fallbackAgents,
+    // Agents are only verifiable once the catalog loaded; instances without a catalog rely on their configured routes.
+    ready:Boolean(instance) && (Boolean(catalogAgents) || !instance.catalogId)
+  };
+}
+
+function canonicalOpenClawAgentId(instance, agentId){
+  return instance?.catalogId === "hillsboro" ? normalizeHillsboroAgentId(agentId) : String(agentId || "");
+}
+
+function defaultOpenClawAgentId(instance, agents){
+  const ids = (agents || []).map(agent => agent.id);
+  const binding = typeof projectOpenClawRuntimes !== "undefined" && Array.isArray(projectOpenClawRuntimes)
+    ? projectOpenClawRuntimes.find(item => item?.runtime_id && item.runtime_id === instance?.runtimeId)
+    : null;
+  const preferred = canonicalOpenClawAgentId(instance, binding?.default_agent_id || "");
+  if(preferred && ids.includes(preferred)) return preferred;
+  return ids.includes("main") ? "main" : (ids[0] || "");
+}
+
+function openClawSelectableModels(catalog, agentId){
+  return openClawModelsForAgent(catalog, agentId).filter(item => item.available !== false);
+}
+
+function followAgentDefaultLabel(agent){
+  return "跟随 Agent 默认" + (agent?.defaultModel ? " · " + agent.defaultModel : "（默认模型未解析）");
+}
+
+// state: ok | pending (cannot verify yet) | incomplete (nothing chosen) | invalid (confirmed gone)
+function validateChatSelection(selection, context){
+  const value = normalizeChatSelection(selection);
+  const result = (state, message = "") => ({ state, message });
+  if(value.kind === "model"){
+    if(!value.modelId) return context.modelsReady ? result("incomplete", "未选择模型") : result("pending", "模型列表未就绪");
+    if(context.hasModel(value.modelId)) return result("ok");
+    return context.modelsReady
+      ? result("invalid", "模型 " + value.modelId + " 已不可用")
+      : result("pending", "模型列表未就绪，暂无法验证模型 " + value.modelId);
+  }
+  if(!value.instanceId) return result("incomplete", "未选择 OpenClaw 实例");
+  const instance = context.instance(value.instanceId);
+  if(!instance) return result("invalid", "实例 " + value.instanceId + " 已不存在");
+  const label = instance.label || instance.id;
+  const agentId = canonicalOpenClawAgentId(instance, value.agentId);
+  if(!agentId) return result("incomplete", "未选择 Agent");
+  const { catalog, agents, ready } = context.agentsForInstance(instance);
+  if(!ready) return result("pending", label + " 目录未就绪，暂无法验证 Agent " + agentId);
+  if(!agents.some(agent => agent.id === agentId)) return result("invalid", "Agent " + agentId + " 在 " + label + " 中已不可用");
+  if(value.baseModelId && !openClawSelectableModels(catalog, agentId).some(model => model.id === value.baseModelId)){
+    return result("invalid", "基础模型 " + value.baseModelId + " 不在该 Agent 的可选目录中");
+  }
+  return result("ok");
+}
+
+function chatSelectionContext(){
+  return {
+    modelsReady:modelCatalogReady,
+    hasModel:hasModernModel,
+    instance:openClawInstance,
+    agentsForInstance:openClawAgentsForInstance
+  };
+}
+
+function chatSelectionBlockReason(){
+  if(!chatSelectionConfirmed) return "此对话未记录原模型选择，请重新选择模型或 Agent";
+  const result = validateChatSelection(chatSelection, chatSelectionContext());
+  if(result.state === "invalid") return "原模型或配置已不可用，请重新选择（" + result.message + "）";
+  if(result.state === "incomplete") return "请先选择模型或 Agent（" + result.message + "）";
+  return "";
+}
+
+// Runtime still only uses the first fallback; drop it only after the model list loaded and confirmed it is gone.
+function fallbackModelForRequest(settings, context){
+  const modelId = String(settings?.fallbackModels?.[0] || "");
+  if(!modelId) return "";
+  return context.modelsReady && !context.hasModel(modelId) ? "" : modelId;
+}
+
+function fallbackModelNoteText(settings, context){
+  const fallbacks = Array.isArray(settings?.fallbackModels) ? settings.fallbackModels.filter(Boolean) : [];
+  const notes = [];
+  if(fallbacks[0] && !context.hasModel(fallbacks[0])){
+    notes.push(context.modelsReady
+      ? "已保存的 fallback " + fallbacks[0] + " 不可用，运行时不会使用；可改选其他模型，或选择 None 清除。"
+      : "模型列表未就绪，暂未验证 fallback " + fallbacks[0] + "，保留原设置。");
+  }
+  if(fallbacks.length > 1) notes.push("已保存 " + fallbacks.length + " 个 fallback，运行时仅使用第一项。");
+  return notes.join(" ");
+}
+
+function readConversationSelections(){
+  try{
+    const value = JSON.parse(localStorage.getItem(CONVERSATION_SELECTION_KEY) || "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  }catch(err){
+    return {};
+  }
+}
+
+function readConversationSelection(conversationId){
+  const record = conversationId ? readConversationSelections()[conversationId] : null;
+  return record && typeof record === "object" ? normalizeChatSelection(record) : null;
+}
+
+// Stores only the selection per conversation id; messages are never touched.
+function writeConversationSelection(conversationId, selection){
+  if(!conversationId) return;
+  const records = readConversationSelections();
+  records[conversationId] = { ...normalizeChatSelection(selection), updatedAt:Date.now() };
+  Object.keys(records)
+    .sort((a, b) => (Number(records[b]?.updatedAt) || 0) - (Number(records[a]?.updatedAt) || 0))
+    .slice(CONVERSATION_SELECTION_LIMIT)
+    .forEach(id => { delete records[id]; });
+  try{
+    localStorage.setItem(CONVERSATION_SELECTION_KEY, JSON.stringify(records));
+  }catch(err){
+    console.warn("save conversation selection failed", err);
+  }
+}
+
+function newChatSelection(){
+  const value = newChatDefaultSelection(modelSettingsState);
+  if(value.kind === "model" && !value.modelId) value.modelId = modernModelOptions[0]?.id || "";
+  if(value.kind === "agent" && !value.instanceId) value.instanceId = openClawInstances()[0]?.id || "";
+  return value;
+}
+
+function syncChatModelSelect(){
+  modelSelect.querySelectorAll("option[data-unavailable]").forEach(option => option.remove());
+  if(chatSelection.kind !== "model") return;
+  const modelId = chatSelection.modelId;
+  if(modelId && !hasModernModel(modelId)){
+    const option = document.createElement("option");
+    option.value = modelId;
+    option.textContent = (modelCatalogReady ? "不可用：" : "待验证：") + modelId;
+    option.dataset.unavailable = "true";
+    modelSelect.appendChild(option);
+  }
+  modelSelect.value = modelId;
+}
+
+function syncChatSelectionUi(){
+  activeModelMode = "modern";
+  activeNewModeTarget = chatSelection.kind === "agent" ? "openclaw" : "model";
+  syncChatModelSelect();
+  syncModelModeUi();
+  syncOpenClawTaskVisibility();
+}
+
+function applyChatSelection(selection, { confirmed = true, conversationId = null, autoAgent = false } = {}){
+  chatSelection = normalizeChatSelection(selection);
+  chatSelectionConfirmed = confirmed;
+  chatSelectionConversationId = conversationId || null;
+  chatSelectionAutoAgent = autoAgent && chatSelection.kind === "agent";
+  openClawBasePickerOpen = false;
+  syncChatSelectionUi();
+}
+
+function applyNewChatSelection(){
+  if(!modelSettingsState) return;
+  applyChatSelection(newChatSelection(), { autoAgent:true });
+}
+
+function restoreConversationSelection(conversationId, hasHistory){
+  if(conversationId && chatSelectionConversationId === conversationId){
+    syncChatSelectionUi();
     return;
   }
-  const selection = currentOpenClawSelection();
-  const instance = openClawInstance(selection.instanceId);
-  const base = effectiveOpenClawBaseModel();
-  effectiveModelResult.textContent = selection.agentId
-    ? "实际生效：新模式 / " + (instance?.label || selection.instanceId)
-      + " / openclaw/" + selection.agentId + " / "
-      + (base.id ? base.id + (base.inherited ? "（Agent 默认）" : "（显式覆盖）") : "默认模型未解析")
-    : "实际生效：新模式 / OpenClaw 实例 / 尚未选择 Agent";
+  const record = readConversationSelection(conversationId);
+  if(record){
+    applyChatSelection(record, { conversationId });
+    return;
+  }
+  // No local record: show the new-chat default only as a suggestion; old chats need explicit confirmation.
+  applyChatSelection(newChatSelection(), { conversationId, confirmed:!hasHistory, autoAgent:true });
+}
+
+function bindChatSelectionToConversation(conversationId, selection){
+  if(!conversationId) return;
+  chatSelectionConversationId = conversationId;
+  writeConversationSelection(conversationId, selection);
+}
+
+function rememberRecentChatSelection(selection){
+  if(validateChatSelection(selection, chatSelectionContext()).state !== "ok") return;
+  if(selection.kind === "model") recentChatModelId = selection.modelId;
+  else recentChatAgentSelection = { instanceId:selection.instanceId, agentId:selection.agentId };
+}
+
+// An explicit user choice: confirms the selection and records it for the current conversation.
+function commitChatSelection(selection){
+  chatSelection = normalizeChatSelection(selection);
+  chatSelectionConfirmed = true;
+  syncChatSelectionUi();
+  rememberRecentChatSelection(chatSelection);
+  if(currentConversationId){
+    bindChatSelectionToConversation(currentConversationId, chatSelection);
+  }
+}
+
+function setChatSelectionKind(kind){
+  if((kind !== "model" && kind !== "agent") || kind === chatSelection.kind) return;
+  rememberRecentChatSelection(chatSelection);
+  const defaults = newChatDefaultSelection(modelSettingsState);
+  openClawBasePickerOpen = false;
+  if(kind === "model"){
+    const modelId = [recentChatModelId, defaults.modelId].find(id => id && hasModernModel(id))
+      || modernModelOptions[0]?.id || "";
+    chatSelectionAutoAgent = false;
+    commitChatSelection({ kind:"model", modelId });
+    return;
+  }
+  const target = [recentChatAgentSelection, defaults.kind === "agent" ? defaults : null]
+    .find(item => item && openClawInstance(item.instanceId))
+    || { instanceId:openClawInstances()[0]?.id || "", agentId:"" };
+  const instance = openClawInstance(target.instanceId);
+  const { agents, ready } = openClawAgentsForInstance(instance);
+  const agentId = canonicalOpenClawAgentId(instance, target.agentId);
+  const keepAgent = Boolean(agentId) && (!ready || agents.some(agent => agent.id === agentId));
+  chatSelectionAutoAgent = !keepAgent;
+  commitChatSelection({ kind:"agent", instanceId:target.instanceId, agentId:keepAgent ? agentId : "", baseModelId:"" });
+}
+
+function selectChatModel(modelId){
+  commitChatSelection({ kind:"model", modelId });
+}
+
+function selectChatInstance(instanceId){
+  chatSelectionAutoAgent = true;
+  openClawBasePickerOpen = false;
+  commitChatSelection({ kind:"agent", instanceId, agentId:"", baseModelId:"" });
+  ensureOpenClawCatalogForInstance(openClawInstance(instanceId));
+}
+
+function selectChatAgent(agentId){
+  openClawBasePickerOpen = false;
+  commitChatSelection({ ...chatSelection, agentId, baseModelId:"" });
+}
+
+// "" means follow the Agent default, so no base_model_id is sent.
+function selectChatBaseModel(baseModelId){
+  openClawBasePickerOpen = false;
+  commitChatSelection({ ...chatSelection, baseModelId });
+}
+
+function toggleOpenClawBasePicker(){
+  openClawBasePickerOpen = !openClawBasePickerOpen;
+  syncOpenClawRouteControls();
+}
+
+function confirmChatSelection(){
+  if(["invalid", "incomplete"].includes(validateChatSelection(chatSelection, chatSelectionContext()).state)) return;
+  commitChatSelection(chatSelection);
+}
+
+function refreshChatSelectionNotice(){
+  if(typeof chatSelectionNotice === "undefined" || !chatSelectionNotice) return;
+  const result = validateChatSelection(chatSelection, chatSelectionContext());
+  let text = "";
+  if(!chatSelectionConfirmed){
+    text = "此对话未记录原模型选择，请重新选择模型或 Agent。"
+      + (["invalid", "incomplete"].includes(result.state) ? "" : "当前显示的是“新对话默认”，确认后才能继续发送。");
+  }else if(result.state === "invalid"){
+    text = "原模型或配置已不可用，请重新选择（" + result.message + "）";
+  }else if(result.state !== "ok"){
+    text = result.message;
+  }
+  chatSelectionNotice.hidden = !text;
+  chatSelectionNotice.dataset.state = chatSelectionConfirmed ? result.state : "unrecorded";
+  chatSelectionNoticeText.textContent = text;
+  chatSelectionConfirmBtn.hidden = chatSelectionConfirmed || ["invalid", "incomplete"].includes(result.state);
 }
 
 function syncModelModeUi(){
-  modelModeSwitch?.querySelectorAll("[data-model-mode]").forEach(button => {
-    button.classList.toggle("active", button.dataset.modelMode === activeModelMode);
+  selectionKindSwitch?.querySelectorAll("[data-selection-kind]").forEach(button => {
+    button.classList.toggle("active", button.dataset.selectionKind === chatSelection.kind);
   });
-  newModeTargetSwitch.hidden = activeModelMode !== "modern";
-  newModeTargetSwitch?.querySelectorAll("[data-new-mode-target]").forEach(button => {
-    button.classList.toggle("active", button.dataset.newModeTarget === activeNewModeTarget);
-  });
-  modelSelect.hidden = isOpenClawAgentMode();
-  openClawRouteControls.hidden = !isOpenClawAgentMode();
+  const agentMode = isOpenClawAgentMode();
+  if(modelSelectField) modelSelectField.hidden = agentMode;
+  openClawRouteControls.hidden = !agentMode;
   syncOpenClawRouteControls();
   updateEffectiveModelResult();
 }
 
-function setModelSelectionMode(mode, { persist = true } = {}){
-  if(modelSettingsState){
-    if(activeModelMode === "classic") modelSettingsState.classicSelectedModel = modelSelect.value || "";
-    else modelSettingsState.modernSelectedModel = modelSelect.value || "";
-  }
-  activeModelMode = mode === "modern" ? "modern" : "classic";
-  if(modelSettingsState){
-    modelSettingsState.selectionMode = activeModelMode;
-    modelSettingsState.newModeTarget = activeNewModeTarget;
-  }
-  renderModelOptions();
-  const preferredModel = activeModelMode === "classic"
-    ? modelSettingsState?.classicSelectedModel
-    : modelSettingsState?.modernSelectedModel;
-  const visibleModels = activeModelMode === "classic" ? classicModelOptions : modernModelOptions;
-  modelSelect.value = visibleModels.some(model => model.id === preferredModel)
-    ? preferredModel
-    : (visibleModels[0]?.id || "");
-  syncModelModeUi();
-  syncOpenClawTaskVisibility();
-  if(persist && modelSettingsState){
-    writeSettingsCache(modelSettingsState);
-    syncSettingsToServer(modelSettingsState);
+function fillSelectionSelect(select, entries, selectedId, { emptyLabel = "", missingPrefix = "不可用：" } = {}){
+  fillOpenClawSelect(select, entries, selectedId, emptyLabel);
+  if(selectedId && select.value !== selectedId){
+    const option = document.createElement("option");
+    option.value = selectedId;
+    option.textContent = missingPrefix + selectedId;
+    option.dataset.unavailable = "true";
+    select.appendChild(option);
+    select.value = selectedId;
   }
 }
 
-function setNewModeTarget(target, { persist = true } = {}){
-  if(activeModelMode !== "modern") return;
-  if(activeNewModeTarget === "model"){
-    modelSettingsState.modernSelectedModel = modelSelect.value || modelSettingsState.modernSelectedModel || "";
-  }
-  activeNewModeTarget = target === "openclaw" ? "openclaw" : "model";
-  modelSettingsState.newModeTarget = activeNewModeTarget;
-  if(activeNewModeTarget === "model"){
-    const preferred = modelSettingsState.modernSelectedModel;
-    modelSelect.value = hasModernModel(preferred) ? preferred : (modernModelOptions[0]?.id || "");
-  }
-  syncModelModeUi();
-  syncOpenClawTaskVisibility();
-  if(persist){
-    writeSettingsCache(modelSettingsState);
-    syncSettingsToServer(modelSettingsState);
-  }
-}
-
-function saveOpenClawRoutePreference(){
-  const providerId = openClawProviderSelect.value;
-  if(!providerId || !isOpenClawAgentMode()) return;
-  openClawRoutePreferences[providerId] = {
-    agentId:openClawAgentSelect.value,
-    baseModelId:openClawBaseModelSelect.value
-  };
-  modelSettingsState.openClawSelection = currentOpenClawSelection();
-  localStorage.setItem(OPENCLAW_ROUTE_PREFERENCES_KEY, JSON.stringify(openClawRoutePreferences));
-  writeSettingsCache(modelSettingsState);
-  syncSettingsToServer(modelSettingsState);
-  updateEffectiveModelResult();
-  refreshCodexRunControls();
+function ensureOpenClawCatalogForInstance(instance){
+  if(instance?.catalogId === "hillsboro" && !hillsboroOpenClawCatalog) loadOpenClawCatalog(false, "hillsboro");
+  if(instance?.catalogId === "seattle" && !seattleOpenClawCatalog) loadOpenClawCatalog(false, "seattle");
+  if(instance?.catalogId === "oracle" && !oracleOpenClawCatalog) loadOpenClawCatalog(false, "oracle");
 }
 
 function fillOpenClawSelect(select, entries, selected, emptyLabel){
@@ -8887,38 +9247,32 @@ function syncOpenClawRouteControls(){
   const visible = isOpenClawAgentMode();
   openClawRouteControls.hidden = !visible;
   if(!visible){ updateEffectiveModelResult(); return; }
-  const providers = openClawInstances();
-  const requestedProviderId = openClawProviderSelect.value
-    || modelSettingsState?.openClawSelection?.instanceId || providers[0]?.id || "";
-  fillOpenClawSelect(openClawProviderSelect, providers.map(provider => ({
-    id:provider.id, name:provider.label || provider.id
-  })), requestedProviderId);
-  const providerId = openClawProviderSelect.value;
-  const saved = openClawRoutePreferences[providerId] || {};
-  const instance = providers.find(item => item.id === providerId);
-  const provider = modelProviders.find(item => item.id === instance?.connectionId);
-  const fallbackAgents = (provider?.models || []).map(model => {
-    const route = String(model.modelName || model.upstreamModelName || "");
-    const id = route.startsWith("openclaw/") ? route.slice("openclaw/".length) : "";
-    return id ? { id, name:model.label || id } : null;
-  }).filter(Boolean);
-  const catalog = openClawCatalogForInstance(instance);
-  const agents = catalog?.agents?.length ? catalog.agents : fallbackAgents;
-  const stored = modelSettingsState?.openClawSelection || {};
-  const storedAgentId = saved.agentId || stored.agentId || agents[0]?.id || "";
-  const selectedAgentId = instance?.catalogId === "hillsboro"
-    ? normalizeHillsboroAgentId(storedAgentId)
-    : storedAgentId;
-  fillOpenClawSelect(openClawAgentSelect, agents, selectedAgentId);
-  const selectedAgent = agents.find(agent => agent.id === openClawAgentSelect.value);
-  const agentModels = openClawModelsForAgent(catalog, selectedAgent?.id || "");
-  const defaultModelLabel = selectedAgent?.defaultModel
-    ? "Agent 默认模型（" + selectedAgent.defaultModel + "）"
-    : "Agent 默认模型（未解析）";
-  fillOpenClawSelect(openClawBaseModelSelect,
-    agentModels.filter(item => item.available !== false),
-    saved.baseModelId || stored.baseModelId || "", defaultModelLabel);
-  openClawBaseModelSelect.disabled = !agentModels.length;
+  const instances = openClawInstances();
+  const instance = openClawInstance(chatSelection.instanceId);
+  fillSelectionSelect(openClawProviderSelect, instances.map(item => ({ id:item.id, name:item.label || item.id })),
+    chatSelection.instanceId, { emptyLabel:chatSelection.instanceId ? "" : "请选择实例" });
+  const { catalog, agents, ready } = openClawAgentsForInstance(instance);
+  if(instance && chatSelection.agentId) chatSelection.agentId = canonicalOpenClawAgentId(instance, chatSelection.agentId);
+  if(instance && chatSelectionAutoAgent && agents.length
+    && (!chatSelection.agentId || (ready && !agents.some(agent => agent.id === chatSelection.agentId)))){
+    chatSelection.agentId = defaultOpenClawAgentId(instance, agents);
+  }
+  if(ready) chatSelectionAutoAgent = false;
+  const missingPrefix = !instance || ready ? "不可用：" : "待验证：";
+  fillSelectionSelect(openClawAgentSelect, agents, chatSelection.agentId, {
+    emptyLabel:chatSelection.agentId ? "" : (agents.length ? "请选择 Agent" : "目录未就绪"),
+    missingPrefix
+  });
+  const selectedAgent = agents.find(agent => agent.id === chatSelection.agentId);
+  const agentModels = openClawSelectableModels(catalog, chatSelection.agentId);
+  const followLabel = followAgentDefaultLabel(selectedAgent);
+  fillSelectionSelect(openClawBaseModelSelect, agentModels, chatSelection.baseModelId, { emptyLabel:followLabel, missingPrefix });
+  const canChangeBase = agentModels.length > 0 || Boolean(chatSelection.baseModelId);
+  openClawBaseModelSelect.disabled = !canChangeBase;
+  openClawBaseModelSummary.textContent = chatSelection.baseModelId ? "显式指定 · " + chatSelection.baseModelId : followLabel;
+  openClawBaseModelField.hidden = !openClawBasePickerOpen;
+  openClawBaseModelChangeBtn.textContent = openClawBasePickerOpen ? "收起" : "更改";
+  openClawBaseModelChangeBtn.disabled = !canChangeBase;
   openClawCatalogRefresh.hidden = !instance?.catalogId;
   const instanceName = instance?.catalogId === "hillsboro" ? "Hillsboro"
     : instance?.catalogId === "oracle" ? "Oracle / Phoenix" : "Seattle";
@@ -8930,8 +9284,7 @@ function syncOpenClawRouteControls(){
 }
 
 async function loadOpenClawCatalog(force = false, requestedCatalogId = ""){
-  const selectedInstance = openClawInstance(openClawProviderSelect?.value
-    || modelSettingsState?.openClawSelection?.instanceId || "");
+  const selectedInstance = openClawInstance(chatSelection.instanceId || "");
   const catalogId = requestedCatalogId || selectedInstance?.catalogId || "seattle";
   if(!["seattle", "hillsboro", "oracle"].includes(catalogId)) return;
   openClawCatalogRefresh.disabled = true;
@@ -8959,6 +9312,7 @@ async function loadOpenClawCatalog(force = false, requestedCatalogId = ""){
   }finally{
     openClawCatalogRefresh.disabled = false;
     syncOpenClawRouteControls();
+    renderSettingsDefaultControls();
   }
 }
 
@@ -9071,8 +9425,6 @@ function removeOpenClawInstanceConnection(instanceId){
   if(modelSettingsState?.openClawSelection?.instanceId === instanceId){
     modelSettingsState.openClawSelection = {};
   }
-  if(!openClawInstances().length) activeNewModeTarget = "model";
-  modelSettingsState.newModeTarget = activeNewModeTarget;
   persistSettings("已删除 OpenClaw 连接；远端 Gateway 未改动", false);
   renderOpenClawInstancesList();
   syncModelModeUi();
@@ -10385,6 +10737,7 @@ function enterBlankChat(){
   resetTransientContext();
   setSummaryStatus(false);
   setActiveConversation();
+  applyNewChatSelection();
 }
 
 function activeProject(){
@@ -11754,6 +12107,7 @@ async function loadConversationMessages(conversationId){
     });
 
     setActiveConversation();
+    restoreConversationSelection(conversationId, (data.messages || []).length > 0);
     setContextStatus(getCurrentContextStatus());
     await loadOpenClawTasksForConversation(currentConversationId);
     await loadSummaryStatus();
@@ -11905,40 +12259,16 @@ chat.addEventListener("click", event => {
   }
   handleCopyClick(event);
 });
-modelSelect.addEventListener("change", () => {
-  if(activeModelMode === "classic") modelSettingsState.classicSelectedModel = modelSelect.value;
-  else modelSettingsState.modernSelectedModel = modelSelect.value;
-  syncOpenClawTaskVisibility();
-  if(modelSettingsState?.rememberLastModel && modelSelect.value){
-    modelSettingsState.lastModel = modelSelect.value;
-    writeSettingsCache(modelSettingsState);
-    syncSettingsToServer(modelSettingsState);
-  }
-  syncFileModeSelector();
-  updateEffectiveModelResult();
+modelSelect.addEventListener("change", () => selectChatModel(modelSelect.value));
+selectionKindSwitch.addEventListener("click", event => {
+  const kind = event.target?.dataset?.selectionKind;
+  if(kind) setChatSelectionKind(kind);
 });
-modelModeSwitch.addEventListener("click", event => {
-  const mode = event.target?.dataset?.modelMode;
-  if(mode) setModelSelectionMode(mode);
-});
-newModeTargetSwitch.addEventListener("click", event => {
-  const target = event.target?.dataset?.newModeTarget;
-  if(target) setNewModeTarget(target);
-});
-openClawProviderSelect.addEventListener("change", () => {
-  syncOpenClawRouteControls();
-  saveOpenClawRoutePreference();
-  const instance = openClawInstance(openClawProviderSelect.value);
-  if(instance?.catalogId === "hillsboro" && !hillsboroOpenClawCatalog) loadOpenClawCatalog(false, "hillsboro");
-  if(instance?.catalogId === "seattle" && !seattleOpenClawCatalog) loadOpenClawCatalog(false, "seattle");
-  if(instance?.catalogId === "oracle" && !oracleOpenClawCatalog) loadOpenClawCatalog(false, "oracle");
-});
-openClawAgentSelect.addEventListener("change", () => {
-  openClawBaseModelSelect.value = "";
-  saveOpenClawRoutePreference();
-  syncOpenClawRouteControls();
-});
-openClawBaseModelSelect.addEventListener("change", saveOpenClawRoutePreference);
+openClawProviderSelect.addEventListener("change", () => selectChatInstance(openClawProviderSelect.value));
+openClawAgentSelect.addEventListener("change", () => selectChatAgent(openClawAgentSelect.value));
+openClawBaseModelSelect.addEventListener("change", () => selectChatBaseModel(openClawBaseModelSelect.value));
+openClawBaseModelChangeBtn.addEventListener("click", toggleOpenClawBasePicker);
+chatSelectionConfirmBtn.addEventListener("click", confirmChatSelection);
 openClawCatalogRefresh.addEventListener("click", () => {
   const instance = openClawInstance(openClawProviderSelect.value);
   loadOpenClawCatalog(true, instance?.catalogId || "seattle");
@@ -11957,6 +12287,10 @@ closeSettingsBtn.addEventListener("click", closeSettings);
 cancelSettingsBtn.addEventListener("click", cancelSettings);
 applySettingsBtn.addEventListener("click", () => saveSettingsFromUi(false));
 saveSettingsBtn.addEventListener("click", () => saveSettingsFromUi(true));
+defaultSelectionKindSwitch.addEventListener("click", event => selectDefaultKind(event.target?.dataset?.defaultKind));
+defaultInstanceSelect.addEventListener("change", () => selectDefaultInstance(defaultInstanceSelect.value));
+defaultAgentSelect.addEventListener("change", () => selectDefaultAgent(defaultAgentSelect.value));
+defaultBaseModelSelect.addEventListener("change", () => selectDefaultBaseModel(defaultBaseModelSelect.value));
 addProviderBtn.addEventListener("click", addProvider);
 cancelProviderEditBtn.addEventListener("click", clearProviderForm);
 addProviderModelBtn.addEventListener("click", addProviderModel);
@@ -13161,6 +13495,12 @@ async function sendMessage(){
   if(activeChatAbortController){
     return;
   }
+  const selectionBlockReason = chatSelectionBlockReason();
+  if(selectionBlockReason){
+    setContextStatus(selectionBlockReason);
+    refreshChatSelectionNotice();
+    return;
+  }
 
   const message = input.value.trim();
   if(!allowOpenClawRepeatOnce && shouldInterceptOpenClawProgressMessage(message)){
@@ -13288,6 +13628,7 @@ async function sendMessage(){
   resetInputHeight();
 
   const requestSelection = currentRequestSelection();
+  const sentChatSelection = normalizeChatSelection(chatSelection);
   const isOpenClawRequest = requestSelection.mode === "openclaw-agent"
     || isSelectedOpenClawRequest(requestSelection.modelId);
   if(openClawRepeatAllowed){
@@ -13338,7 +13679,7 @@ async function sendMessage(){
   let openClawAsyncHandled = false;
 
   try{
-    const fallbackModel = modelSettingsState?.fallbackModels?.[0] || "";
+    const fallbackModel = fallbackModelForRequest(modelSettingsState, chatSelectionContext());
     let selectedModelConfig = getModelConfigForRequest(requestSelection.modelId);
     if(conversationAttachmentIdsToSend.length && selectedModelConfig){
       selectedModelConfig = {
@@ -13422,6 +13763,7 @@ async function sendMessage(){
       currentConversationId = responseConversationId;
       setActiveConversation();
     }
+    bindChatSelectionToConversation(currentConversationId, sentChatSelection);
 
     const responseContentType = res.headers.get("Content-Type") || "";
     if(isOpenClawRequest && responseContentType.includes("application/json")){
@@ -13434,6 +13776,7 @@ async function sendMessage(){
         if(data.conversationId){
           currentConversationId = data.conversationId;
           setActiveConversation();
+          bindChatSelectionToConversation(currentConversationId, sentChatSelection);
         }
         if(data.task){
           mergeOpenClawTask(data.task);

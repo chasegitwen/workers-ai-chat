@@ -250,10 +250,10 @@ describe("Seattle OpenClaw catalog", () => {
 
   it("renders separate provider, agent, and base model controls", () => {
     const page = htmlPage();
-    expect(page).toContain('data-model-mode="classic"');
-    expect(page).toContain('data-model-mode="modern"');
-    expect(page).toContain('data-new-mode-target="model"');
-    expect(page).toContain('data-new-mode-target="openclaw"');
+    expect(page).toContain('data-selection-kind="model"');
+    expect(page).toContain('data-selection-kind="agent"');
+    expect(page).not.toContain("data-model-mode");
+    expect(page).not.toContain("data-new-mode-target");
     expect(page).toContain('id="effectiveModelResult"');
     expect(page).toContain('id="openClawInstancesList"');
     expect(page).toContain('id="addOpenClawInstanceBtn"');
@@ -313,7 +313,7 @@ describe("Seattle OpenClaw catalog", () => {
       "zai/glm-5.0-turbo", "zai/glm-5", "zai/glm-5.1", "zai/glm-5.2"
     ]);
     expect(modelsForAgent(hillsboroCatalog, "kimi").map(model => model.id)).toEqual(["kimi/kimi-for-coding"]);
-    expect(page).toContain('openClawBaseModelSelect.value = "";');
+    expect(page).toContain('commitChatSelection({ ...chatSelection, agentId, baseModelId:"" });');
     expect(() => new Function(page.match(/<script>([\s\S]*)<\/script>/)?.[1] || "")).not.toThrow();
   });
 

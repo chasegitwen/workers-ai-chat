@@ -1,192 +1,162 @@
 import { describe, expect, it } from "vitest";
 import { htmlPage } from "../src/frontend/page.js";
+import { createHarness, MODELS } from "./helpers/selectionHarness.js";
 
-function pageScript(){
-  return htmlPage().match(/<script>([\s\S]*)<\/script>/)?.[1] || "";
+const models = [...MODELS, { id: "openclaw-legacy/x", provider: "openclaw-legacy", providerType: "openai-compatible" }];
+const modern = MODELS;
+
+function settingsHarness(settings, options = {}){
+  const h = createHarness({ settings, ...options });
+  h.set({ modelOptions: models, classicModelOptions: models, modernModelOptions: modern });
+  h.api.applyNewChatSelection();
+  h.api.refreshSettingsControls();
+  return h;
 }
 
-function lastDeclaration(script, name){
-  const matches = [...script.matchAll(new RegExp("\\nfunction " + name + "\\([\\s\\S]*?\\n\\}", "g"))];
-  return matches.at(-1)?.[0] || "";
-}
-
-function fakeSelect(){
-  return {
-    options: [],
-    value: "",
-    set innerHTML(_value){ this.options = []; },
-    appendChild(option){ this.options.push(option); }
-  };
-}
-
-// Runs the effective refreshSettingsControls/saveSettingsFromUi from the page script against stubs.
-function settingsHarness({ activeModelMode, settings, models }){
-  const script = pageScript();
-  const source = [
-    "let settingsModelSelectBaseline = null;",
-    lastDeclaration(script, "hasClassicModel"),
-    lastDeclaration(script, "hasModernModel"),
-    lastDeclaration(script, "refreshSettingsControls"),
-    lastDeclaration(script, "saveSettingsFromUi"),
-    "return { refreshSettingsControls, saveSettingsFromUi };"
-  ].join("\n");
-  const isOpenClaw = model => String(model?.id || model?.provider || "").startsWith("openclaw-");
-  const scope = {
-    settingsModal: { querySelector: () => ({ scrollTop: 0 }) },
-    defaultModelSelect: fakeSelect(),
-    fallbackModelSelect: fakeSelect(),
-    modelProviderSelect: fakeSelect(),
-    rememberLastModelCheck: {},
-    fallbackEnabledCheck: {},
-    showPerMessageModelInfoCheck: {},
-    autoArchiveDaysSelect: { value: "never" },
-    normalizeAutoArchiveDays: value => value,
-    readConversationAttachmentLimitInputs: () => settings.conversationAttachmentLimits,
-    modelSelect: { value: "" },
-    activeNewModeTarget: "model",
-    currentOpenClawSelection: () => settings.openClawSelection,
-    persistSettings: () => {},
-    document: { createElement: () => ({ dataset: {} }) },
-    categoryLabel: value => value,
-    modelCategoryFromLegacy: model => model.providerType,
-    setConversationAttachmentLimitInputs: () => {},
-    WORKERS_MODEL_PROVIDER_SELECT: "__workers__",
-    modelProviders: [
-      { id: "claude", providerType: "claude-compatible" },
-      { id: "openclaw-legacy", providerType: "openai-compatible" }
-    ],
-    isOpenClawModelTarget: isOpenClaw,
-    renderProvidersList: () => {},
-    renderOpenClawInstancesList: () => {},
-    syncOpenClawTaskVisibility: () => {},
-    activeModelMode,
-    modelSettingsState: settings,
-    classicModelOptions: models,
-    modernModelOptions: models.filter(model => !isOpenClaw(model))
-  };
-  const names = Object.keys(scope);
-  const fns = new Function(...names, source)(...names.map(name => scope[name]));
-  fns.refreshSettingsControls();
-  return { scope, save: fns.saveSettingsFromUi };
-}
-
-const models = [
-  { id: "claude-a", providerType: "claude-compatible" },
-  { id: "gpt-b", providerType: "openai-compatible" },
-  { id: "openclaw-legacy/x", providerType: "openai-compatible" }
-];
-
-describe("model settings center mode switch removal", () => {
-  it("no longer renders the classic/modern switch in the settings center", () => {
+describe("model settings center", () => {
+  it("has no classic/modern switch and no 记住上次选择 option", () => {
     const page = htmlPage();
     const settingsMarkup = page.slice(page.indexOf('<div id="settingsModal"'), page.indexOf('id="settingsSyncStatus"'));
     expect(settingsMarkup).toContain("模型设置中心");
-    expect(page).not.toContain("data-settings-mode");
-    expect(page).not.toContain("模型设置模式");
-    expect(settingsMarkup).not.toContain("经典模式");
-    expect(settingsMarkup).not.toContain("新模式");
-    expect(page).not.toContain('.settingsModal:not([data-mode="modern"])');
-    expect(page).not.toContain("settingsModal.dataset.mode");
-    // The chat-page model picker switch is out of scope for this phase and must stay.
-    expect(page).toContain('data-model-mode="classic"');
-    expect(page).toContain('data-model-mode="modern"');
+    expect(settingsMarkup).toContain("新对话默认");
+    expect(settingsMarkup).toContain('data-default-kind="model">模型</button>');
+    expect(settingsMarkup).toContain('data-default-kind="agent">Agent</button>');
+    for(const removed of ["data-settings-mode", "模型设置模式", "经典模式", "新模式", 'id="rememberLastModelCheck"', "记住上次选择"]){
+      expect(page).not.toContain(removed);
+    }
   });
 
-  it("keeps every modern settings control", () => {
+  it("keeps every other settings control", () => {
     const page = htmlPage();
     for(const id of [
-      "defaultModelSelect", "fallbackModelSelect", "autoArchiveDaysSelect", "rememberLastModelCheck",
-      "fallbackEnabledCheck", "showPerMessageModelInfoCheck", "modelHealthBtn", "providersList",
-      "openClawInstancesSettings", "openClawInstancesList", "addOpenClawInstanceBtn",
-      "applySettingsBtn", "saveSettingsBtn", "closeSettingsBtn"
+      "defaultModelSelect", "defaultInstanceSelect", "defaultAgentSelect", "defaultBaseModelSelect",
+      "fallbackModelSelect", "fallbackModelNote", "autoArchiveDaysSelect", "fallbackEnabledCheck",
+      "showPerMessageModelInfoCheck", "modelHealthBtn", "providersList", "openClawInstancesSettings",
+      "openClawInstancesList", "addOpenClawInstanceBtn", "applySettingsBtn", "saveSettingsBtn", "closeSettingsBtn"
     ]){
       expect(page).toContain('id="' + id + '"');
     }
   });
 
-  it("initializes the modern settings view even when stored settings are classic", () => {
-    const { scope } = settingsHarness({
-      activeModelMode: "classic",
-      settings: { selectionMode: "classic", defaultModel: "gpt-b", fallbackModels: ["claude-a"] },
-      models
-    });
-    expect(scope.defaultModelSelect.options.map(option => option.value)).toEqual(["claude-a", "gpt-b"]);
-    expect(scope.defaultModelSelect.value).toBe("gpt-b");
-    expect(scope.fallbackModelSelect.value).toBe("claude-a");
-    expect(scope.modelProviderSelect.options.map(option => option.value)).toEqual(["__workers__", "claude"]);
-    expect(scope.activeModelMode).toBe("classic");
+  it("initializes from legacy classic settings and lists only plain models", () => {
+    const h = settingsHarness({ selectionMode: "classic", defaultModel: "claude", fallbackModels: ["sol"] });
+    expect(h.dom.defaultModelSelect.values).toEqual(["sol", "claude"]);
+    expect(h.dom.defaultModelSelect.value).toBe("claude");
+    expect(h.dom.fallbackModelSelect.values).toEqual(["", "sol", "claude"]);
+    expect(h.dom.fallbackModelSelect.labels[0]).toBe("None（不使用 fallback）");
+    expect(h.dom.modelProviderSelect.values).toEqual(["__workers__", "openai", "anthropic"]);
+    expect(h.dom.defaultModelField.hidden).toBe(false);
+    expect(h.dom.defaultAgentFields.hidden).toBe(true);
   });
 
-  it("does not list classic-only models in the settings selects", () => {
-    const { scope } = settingsHarness({
-      activeModelMode: "classic",
-      settings: { defaultModel: "openclaw-legacy/x", fallbackModels: ["openclaw-legacy/x"] },
-      models
+  it("derives an Agent default from legacy agent settings", () => {
+    const h = settingsHarness({
+      selectionMode: "modern", newModeTarget: "openclaw",
+      openClawSelection: { instanceId: "openclaw-hillsboro", agentId: "glm", baseModelId: "" }
     });
-    expect(scope.defaultModelSelect.options.map(option => option.value)).toEqual(["claude-a", "gpt-b"]);
-    expect(scope.fallbackModelSelect.options.map(option => option.value)).toEqual(["", "claude-a", "gpt-b"]);
+    expect(h.dom.defaultAgentFields.hidden).toBe(false);
+    expect(h.dom.defaultInstanceSelect.value).toBe("openclaw-hillsboro");
+    expect(h.dom.defaultAgentSelect.value).toBe("glm");
+    expect(h.dom.defaultBaseModelSelect.labels[0]).toBe("跟随 Agent 默认 · zai/glm-5.2");
+    expect(h.dom.defaultBaseModelSelect.values).toEqual(["", "zai/glm-5.2"]);
   });
+});
 
+describe("saving the new-chat default", () => {
   for(const closeAfter of [false, true]){
-    it("keeps stored default and all fallbacks when saving untouched selects (" + (closeAfter ? "save" : "apply") + ")", () => {
+    it("leaves untouched values alone on " + (closeAfter ? "save" : "apply"), () => {
       const settings = {
         defaultModel: "openclaw-legacy/x",
-        fallbackModels: ["openclaw-legacy/x", "gpt-b", "claude-a"],
-        rememberLastModel: true
+        fallbackModels: ["openclaw-legacy/x", "sol", "claude"],
+        rememberLastModel: true,
+        lastModel: "claude",
+        selectionMode: "classic"
       };
-      const { scope, save } = settingsHarness({ activeModelMode: "modern", settings, models });
-      expect(scope.defaultModelSelect.value).toBe("claude-a");
-      save(closeAfter);
-      expect(settings.defaultModel).toBe("openclaw-legacy/x");
-      expect(settings.fallbackModels).toEqual(["openclaw-legacy/x", "gpt-b", "claude-a"]);
-      expect(settings.lastModel).toBe("openclaw-legacy/x");
+      const h = settingsHarness(settings);
+      expect(h.dom.defaultModelSelect.value).toBe("openclaw-legacy/x");
+      expect(h.dom.defaultModelSelect.labels).toContain("不可用：openclaw-legacy/x");
+      expect(h.dom.fallbackModelSelect.value).toBe("openclaw-legacy/x");
+      expect(h.dom.fallbackModelSelect.labels).toContain("不可用：openclaw-legacy/x");
+      expect(h.dom.fallbackModelNote.textContent).toContain("不可用，运行时不会使用");
+      expect(h.dom.fallbackModelNote.textContent).toContain("已保存 3 个 fallback，运行时仅使用第一项。");
+      h.api.saveSettingsFromUi(closeAfter);
+      const saved = h.settings();
+      expect(saved.defaultModel).toBe("openclaw-legacy/x");
+      expect(saved.fallbackModels).toEqual(["openclaw-legacy/x", "sol", "claude"]);
+      expect(saved).not.toHaveProperty("newChatDefault");
+      expect(saved.selectionMode).toBe("classic");
+      expect(saved.rememberLastModel).toBe(true);
+      expect(saved.lastModel).toBe("claude");
+      expect(h.calls.closeSettings).toBe(closeAfter ? 1 : 0);
     });
   }
 
-  it("keeps extra fallbacks when the visible ones are untouched", () => {
-    const settings = { defaultModel: "claude-a", fallbackModels: ["gpt-b", "claude-a"] };
-    const { save } = settingsHarness({ activeModelMode: "modern", settings, models });
-    save(false);
-    expect(settings.defaultModel).toBe("claude-a");
-    expect(settings.fallbackModels).toEqual(["gpt-b", "claude-a"]);
+  it("marks an unverified fallback as pending instead of unavailable", () => {
+    const h = createHarness({ settings: { fallbackModels: ["sol"] }, modelsReady: false, models: [] });
+    h.api.refreshSettingsControls();
+    expect(h.dom.fallbackModelSelect.labels).toContain("待验证：sol");
+    expect(h.dom.fallbackModelNote.textContent).toContain("暂未验证 fallback sol，保留原设置");
   });
 
-  it("writes the default and first fallback only when the user changes them", () => {
-    const settings = { defaultModel: "openclaw-legacy/x", fallbackModels: ["openclaw-legacy/x", "claude-a"] };
-    const { scope, save } = settingsHarness({ activeModelMode: "modern", settings, models });
-    scope.defaultModelSelect.value = "gpt-b";
-    scope.fallbackModelSelect.value = "claude-a";
-    save(true);
-    expect(settings.defaultModel).toBe("gpt-b");
-    expect(settings.fallbackModels).toEqual(["claude-a"]);
-    expect(scope.modelSelect.value).toBe("gpt-b");
+  it("clears every fallback with None and replaces only the first entry otherwise", () => {
+    const none = settingsHarness({ fallbackModels: ["openclaw-legacy/x", "sol", "claude"] });
+    none.dom.fallbackModelSelect.value = "";
+    none.api.saveSettingsFromUi(false);
+    expect(none.settings().fallbackModels).toEqual([]);
+    const replace = settingsHarness({ fallbackModels: ["openclaw-legacy/x", "sol", "claude"] });
+    replace.dom.fallbackModelSelect.value = "claude";
+    replace.api.saveSettingsFromUi(true);
+    expect(replace.settings().fallbackModels).toEqual(["claude", "sol"]);
   });
 
-  it("replaces only the first fallback and drops duplicates when the user picks another model", () => {
-    const settings = { defaultModel: "claude-a", fallbackModels: ["gpt-b", "claude-a", "openclaw-legacy/x"] };
-    const { scope, save } = settingsHarness({ activeModelMode: "modern", settings, models });
-    expect(scope.fallbackModelSelect.value).toBe("gpt-b");
-    scope.fallbackModelSelect.value = "claude-a";
-    save(false);
-    expect(settings.fallbackModels).toEqual(["claude-a", "openclaw-legacy/x"]);
+  it("saves an Agent default with the instance default Agent and mirrors the legacy fields", () => {
+    const h = settingsHarness({ defaultModel: "sol" }, { projectRuntimes: [{ runtime_id: "seattle-openclaw", default_agent_id: "ops" }] });
+    const chatBefore = JSON.stringify(h.state().chatSelection);
+    h.api.selectDefaultKind("agent");
+    expect(h.state().settingsDefaultDraft).toMatchObject({ kind: "agent", instanceId: "openclaw-hillsboro", agentId: "main" });
+    h.api.selectDefaultInstance("openclaw-seattle");
+    expect(h.dom.defaultAgentSelect.value).toBe("ops");
+    expect(h.dom.defaultBaseModelSelect.values).toEqual(["", "a/ops"]);
+    h.api.selectDefaultBaseModel("a/ops");
+    h.api.saveSettingsFromUi(true);
+    const saved = h.settings();
+    expect(saved.newChatDefault).toEqual({ kind: "agent", instanceId: "openclaw-seattle", agentId: "ops", baseModelId: "a/ops" });
+    expect(saved.selectionMode).toBe("modern");
+    expect(saved.newModeTarget).toBe("openclaw");
+    expect(saved.openClawSelection).toEqual({ instanceId: "openclaw-seattle", agentId: "ops", baseModelId: "a/ops" });
+    expect(saved.defaultModel).toBe("sol");
+    expect(JSON.stringify(h.state().chatSelection)).toBe(chatBefore);
+    h.api.applyNewChatSelection();
+    expect(h.api.currentRequestSelection()).toMatchObject({ mode: "openclaw-agent", instanceId: "openclaw-seattle", agentId: "ops", baseModelId: "a/ops" });
   });
 
-  for(const closeAfter of [false, true]){
-    it("clears every fallback when the user explicitly selects None (" + (closeAfter ? "save" : "apply") + ")", () => {
-      const settings = {
-        defaultModel: "claude-a",
-        fallbackEnabled: true,
-        fallbackModels: ["gpt-b", "claude-a", "openclaw-legacy/x"]
-      };
-      const { scope, save } = settingsHarness({ activeModelMode: "modern", settings, models });
-      scope.fallbackEnabledCheck.checked = true;
-      expect(scope.fallbackModelSelect.value).toBe("gpt-b");
-      scope.fallbackModelSelect.value = "";
-      save(closeAfter);
-      expect(settings.fallbackModels).toEqual([]);
-      expect(settings.defaultModel).toBe("claude-a");
-      // None does not touch the automatic fallback checkbox.
-      expect(settings.fallbackEnabled).toBe(true);
-    });
-  }
+  it("resets the base model to follow the Agent when the default Agent changes", () => {
+    const h = settingsHarness({ newChatDefault: { kind: "agent", instanceId: "openclaw-hillsboro", agentId: "main", baseModelId: "openai/gpt-5.6-sol" } });
+    expect(h.dom.defaultBaseModelSelect.value).toBe("openai/gpt-5.6-sol");
+    h.api.selectDefaultAgent("glm");
+    expect(h.state().settingsDefaultDraft.baseModelId).toBe("");
+    expect(h.dom.defaultBaseModelSelect.value).toBe("");
+  });
+
+  it("switches the default back to a model and writes the changed default model", () => {
+    const h = settingsHarness({ newChatDefault: { kind: "agent", instanceId: "openclaw-hillsboro", agentId: "main", baseModelId: "" }, defaultModel: "sol" });
+    h.api.selectDefaultKind("model");
+    h.dom.defaultModelSelect.value = "claude";
+    h.api.saveSettingsFromUi(false);
+    expect(h.settings().newChatDefault).toEqual({ kind: "model", instanceId: "openclaw-hillsboro", agentId: "main", baseModelId: "" });
+    expect(h.settings().newModeTarget).toBe("model");
+    expect(h.settings().defaultModel).toBe("claude");
+  });
+
+  it("discards draft changes on cancel without touching the chat selection", () => {
+    const h = settingsHarness({ defaultModel: "sol" });
+    h.set({ settingsSnapshot: { settings: JSON.parse(JSON.stringify(h.settings())), providers: h.state().modelProviders, categories: [] } });
+    h.api.selectChatModel("claude");
+    h.api.selectDefaultKind("agent");
+    h.api.cancelSettings();
+    expect(h.settings()).not.toHaveProperty("newChatDefault");
+    expect(h.state().settingsDefaultDraft.kind).toBe("model");
+    expect(h.state().chatSelection).toMatchObject({ kind: "model", modelId: "claude" });
+    expect(h.calls.closeSettings).toBe(1);
+  });
 });

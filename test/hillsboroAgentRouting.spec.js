@@ -207,6 +207,9 @@ describe("Hillsboro Agent routing", () => {
     expect(normalize("glm5-2")).toBe("glm");
     expect(normalize("kimi-for-coding")).toBe("kimi");
     expect(script).toContain('instance?.catalogId === "hillsboro"');
-    expect(script).toContain(': storedAgentId;');
+    const canonicalDeclaration = script.match(/function canonicalOpenClawAgentId\([\s\S]*?\n\}/)?.[0] || "";
+    const canonical = new Function(declaration + canonicalDeclaration + "; return canonicalOpenClawAgentId;")();
+    expect(canonical({ catalogId: "hillsboro" }, "glm51")).toBe("glm");
+    expect(canonical({ catalogId: "seattle" }, "glm51")).toBe("glm51");
   });
 });

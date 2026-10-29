@@ -5835,6 +5835,15 @@ export async function handleChat(request, env, ctx) {
     debugTools = false,
     codexControls = null
   } = await request.json();
+  // Hermes is its own runtime (/api/hermes/runs); it must never be served as a normal or
+  // OpenAI-compatible model or reach the OpenClaw paths below.
+  if (selectionMode === "hermes" || selectionMode === "hermes-agent") {
+    return jsonResponse({
+      ok: false,
+      error: "Hermes requests must use /api/hermes/runs",
+      code: "hermes_wrong_endpoint"
+    }, 400);
+  }
   let imageAttachments = [];
   let allImageAttachments = [];
 

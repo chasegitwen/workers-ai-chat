@@ -2511,6 +2511,14 @@ body.dark .toolErrorNotice{
 .modelModeSwitch{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
 .modelModeSwitch button{border:1px solid var(--border);border-radius:10px;padding:8px;background:transparent;color:var(--text);cursor:pointer}
 .modelModeSwitch button.active{background:var(--primary);border-color:var(--primary);color:white}
+.modelModeSwitch.hasHermes{grid-template-columns:1fr 1fr 1fr}
+.modelModeSwitch button[hidden]{display:none}
+.hermesRunStatus{display:grid;gap:6px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;color:var(--text);overflow-wrap:anywhere}
+.hermesRunStatus[hidden]{display:none}
+.hermesRunStatus[data-tone="warn"]{border-color:#d97706}
+.hermesRunStatus[data-tone="error"]{border-color:#dc2626}
+.hermesRunActions{display:flex;flex-wrap:wrap;gap:6px}
+.hermesRunActions button{border:1px solid var(--border);border-radius:8px;padding:4px 10px;background:transparent;color:var(--text);cursor:pointer}
 .selectionField{display:grid;gap:4px;font-size:12px;color:var(--muted)}
 .selectionField[hidden]{display:none}
 .openClawBaseModelLine{display:flex;align-items:center;flex-wrap:wrap;gap:6px;color:var(--muted)}
@@ -3345,6 +3353,7 @@ body.dark .toolErrorNotice{
       <div id="selectionKindSwitch" class="modelModeSwitch" aria-label="当前使用">
         <button type="button" data-selection-kind="model">模型</button>
         <button type="button" data-selection-kind="agent">Agent</button>
+        <button type="button" id="hermesKindBtn" data-selection-kind="hermes" hidden>Hermes</button>
       </div>
       <label id="modelSelectField" class="selectionField">
       模型
@@ -3368,6 +3377,17 @@ body.dark .toolErrorNotice{
         <div class="openClawBaseModelLine">基础模型：<span id="openClawBaseModelSummary"></span><button id="openClawBaseModelChangeBtn" type="button">更改</button></div>
         <label id="openClawBaseModelField" hidden>基础模型 <select id="openClawBaseModelSelect" aria-label="OpenClaw 基础模型"></select></label>
         <div class="openClawCatalogLine"><span id="openClawCatalogStatus"></span><button id="openClawCatalogRefresh" type="button">刷新目录</button></div>
+      </div>
+      <div id="hermesRouteControls" class="openClawRouteControls" hidden>
+        <label>实例 <select id="hermesInstanceSelect" aria-label="Hermes 实例"></select></label>
+        <label>Agent <select id="hermesAgentSelect" aria-label="Hermes Agent"></select></label>
+        <label>Provider <select id="hermesProviderSelect" aria-label="Hermes Provider"></select></label>
+        <label id="hermesModelField" hidden>基础模型 <select id="hermesModelSelect" aria-label="Hermes 基础模型"></select></label>
+        <div class="openClawCatalogLine"><span id="hermesCatalogStatus"></span><button id="hermesCatalogRefresh" type="button">刷新目录</button></div>
+        <div id="hermesRunStatus" class="hermesRunStatus" hidden>
+          <span id="hermesRunStatusText"></span>
+          <div id="hermesRunActions" class="hermesRunActions"></div>
+        </div>
       </div>
       <div id="chatSelectionNotice" class="chatSelectionNotice" hidden>
         <span id="chatSelectionNoticeText"></span>
@@ -8741,6 +8761,7 @@ function isOpenClawAgentMode(){
   if(typeof activeModelMode === "undefined"){
     return isSelectedOpenClawRequest(modelSelect.value);
   }
+  if(typeof hermesSelectionActive !== "undefined" && hermesSelectionActive) return false;
   return activeModelMode === "modern" && activeNewModeTarget === "openclaw";
 }
 
@@ -9126,6 +9147,10 @@ function confirmChatSelection(){
 
 function refreshChatSelectionNotice(){
   if(typeof chatSelectionNotice === "undefined" || !chatSelectionNotice) return;
+  if(typeof hermesSelectionActive !== "undefined" && hermesSelectionActive){
+    chatSelectionNotice.hidden = true;
+    return;
+  }
   const result = validateChatSelection(chatSelection, chatSelectionContext());
   let text = "";
   if(!chatSelectionConfirmed){
@@ -9143,11 +9168,15 @@ function refreshChatSelectionNotice(){
 }
 
 function syncModelModeUi(){
+  const hermesMode = typeof hermesSelectionActive !== "undefined" && hermesSelectionActive;
   selectionKindSwitch?.querySelectorAll("[data-selection-kind]").forEach(button => {
-    button.classList.toggle("active", button.dataset.selectionKind === chatSelection.kind);
+    button.classList.toggle("active", hermesMode
+      ? button.dataset.selectionKind === "hermes"
+      : button.dataset.selectionKind === chatSelection.kind);
   });
+  if(typeof hermesRouteControls !== "undefined" && hermesRouteControls) hermesRouteControls.hidden = !hermesMode;
   const agentMode = isOpenClawAgentMode();
-  if(modelSelectField) modelSelectField.hidden = agentMode;
+  if(modelSelectField) modelSelectField.hidden = agentMode || hermesMode;
   openClawRouteControls.hidden = !agentMode;
   syncOpenClawRouteControls();
   updateEffectiveModelResult();
@@ -12068,6 +12097,7 @@ async function loadConversationMessages(conversationId){
     restoreConversationSelection(conversationId, (data.messages || []).length > 0);
     setContextStatus(getCurrentContextStatus());
     await loadOpenClawTasksForConversation(currentConversationId);
+    if(typeof restoreHermesRunForConversation === "function") restoreHermesRunForConversation(currentConversationId);
     await loadSummaryStatus();
     scrollBottom();
   }catch(err){
@@ -12220,7 +12250,14 @@ chat.addEventListener("click", event => {
 modelSelect.addEventListener("change", () => selectChatModel(modelSelect.value));
 selectionKindSwitch.addEventListener("click", event => {
   const kind = event.target?.dataset?.selectionKind;
-  if(kind) setChatSelectionKind(kind);
+  if(kind === "hermes"){
+    setHermesSelectionActive(true);
+    return;
+  }
+  if(kind){
+    setHermesSelectionActive(false);
+    setChatSelectionKind(kind);
+  }
 });
 openClawProviderSelect.addEventListener("change", () => selectChatInstance(openClawProviderSelect.value));
 openClawAgentSelect.addEventListener("change", () => selectChatAgent(openClawAgentSelect.value));
@@ -13445,8 +13482,611 @@ async function streamAIResponse(response, element, isOpenClawRequest = false){
   return state;
 }
 
+// ---------------------------------------------------------------------------------------
+// Hermes Agent runtime (separate from models and OpenClaw; uses /api/hermes/* only).
+// Top-level Hermes bindings use var on purpose: syncModelModeUi and other early callers guard
+// them with typeof, which is only safe for hoisted var bindings (a let would be in its TDZ).
+var HERMES_SELECTION_STORAGE_KEY = "wa_hermes_selection_v1";
+var HERMES_POLL_MS = 4000;
+var hermesSelectionActive = false;
+var hermesCatalogState = { loaded:false, loading:false, visible:false, executionEnabled:false, instances:[], catalog:null, stale:false, error:null };
+var hermesSelection = { instanceId:"oracle-hermes", agentId:"hermes-agent", providerId:"", modelId:"" };
+var hermesActiveRun = null;
+var hermesRunView = null;
+var hermesStreamText = "";
+var hermesEventSource = null;
+var hermesPollTimer = null;
+var hermesSubmitPending = null;
+var hermesKindBtn = document.getElementById("hermesKindBtn");
+var hermesRouteControls = document.getElementById("hermesRouteControls");
+var hermesInstanceSelect = document.getElementById("hermesInstanceSelect");
+var hermesAgentSelect = document.getElementById("hermesAgentSelect");
+var hermesProviderSelect = document.getElementById("hermesProviderSelect");
+var hermesModelField = document.getElementById("hermesModelField");
+var hermesModelSelect = document.getElementById("hermesModelSelect");
+var hermesCatalogStatus = document.getElementById("hermesCatalogStatus");
+var hermesCatalogRefresh = document.getElementById("hermesCatalogRefresh");
+var hermesRunStatus = document.getElementById("hermesRunStatus");
+var hermesRunStatusText = document.getElementById("hermesRunStatusText");
+var hermesRunActions = document.getElementById("hermesRunActions");
+
+var HERMES_STATUS_LABELS = {
+  reserving:"提交中",
+  submitting:"提交中",
+  submission_unknown:"提交结果不明",
+  queued:"排队中",
+  running:"执行中",
+  waiting_for_approval:"等待审批（网页端暂不支持审批，可取消）",
+  stopping:"正在停止",
+  cancel_requested:"已请求取消，等待确认",
+  unknown:"状态未知",
+  completed:"已完成",
+  failed:"失败",
+  cancelled:"已取消",
+  interrupted:"已中断（未自动重试）",
+  rejected:"提交被拒绝",
+  abandoned:"已放弃"
+};
+
+var HERMES_ACTION_LABELS = {
+  refresh:"刷新状态",
+  cancel:"取消任务",
+  reconcile:"核对提交",
+  resolve_unknown:"结算未知状态",
+  dismiss:"停止查看",
+  resubmit:"按原请求重试"
+};
+
+var HERMES_ERROR_TEXT = {
+  hermes_disabled:"Hermes 未启用",
+  hermes_execution_disabled:"Hermes 执行功能未开启",
+  hermes_busy:"另一个 Hermes 任务正在执行（不排队），请等待完成或取消",
+  hermes_conversation_forbidden:"该会话属于其他用户或项目，不能用于 Hermes",
+  hermes_conversation_not_found:"会话不存在",
+  hermes_capability_missing:"Hermes 未提供所需的任务能力",
+  hermes_not_configured:"Hermes 实例尚未配置",
+  hermes_upstream_not_allowed:"Hermes 上游地址不在白名单内",
+  hermes_unknown_model:"所选模型不属于该 Provider",
+  hermes_unknown_provider:"所选 Provider 不在 Hermes 目录中",
+  hermes_provider_unavailable:"所选 Provider 当前不可用",
+  hermes_idempotency_conflict:"请求 ID 冲突，请重新发送",
+  hermes_attachments_unsupported:"Hermes 第一阶段仅支持纯文本消息",
+  hermes_upstream_auth:"Hermes 上游认证失败",
+  hermes_idempotency_not_durable:"Hermes 幂等存储不是持久化的，不能安全核对",
+  hermes_idempotency_window_expired:"已超出 Hermes 幂等保留期，不能安全核对"
+};
+
+function hermesErrorText(error){
+  if(!error) return "未知错误";
+  return HERMES_ERROR_TEXT[error.code] || error.message || error.code || "未知错误";
+}
+
+function readHermesSelection(){
+  try{
+    const stored = JSON.parse(localStorage.getItem(HERMES_SELECTION_STORAGE_KEY) || "null");
+    return stored && typeof stored === "object" ? stored : null;
+  }catch(err){
+    return null;
+  }
+}
+
+function writeHermesSelection(){
+  try{
+    localStorage.setItem(HERMES_SELECTION_STORAGE_KEY, JSON.stringify({ ...hermesSelection, active:hermesSelectionActive }));
+  }catch(err){}
+}
+
+function hermesProviders(){
+  return hermesCatalogState.catalog?.providers || [];
+}
+
+function hermesProvider(providerId){
+  return hermesProviders().find(provider => provider.id === providerId) || null;
+}
+
+function syncHermesKindButton(){
+  if(!hermesKindBtn) return;
+  hermesKindBtn.hidden = !hermesCatalogState.visible;
+  selectionKindSwitch?.classList?.toggle("hasHermes", hermesCatalogState.visible);
+}
+
+function setHermesSelectionActive(active){
+  const next = Boolean(active) && hermesCatalogState.visible;
+  if(active && !hermesCatalogState.visible) setContextStatus("Hermes 未启用");
+  if(next === hermesSelectionActive && !active) return;
+  hermesSelectionActive = next;
+  writeHermesSelection();
+  syncModelModeUi();
+  syncHermesRouteControls();
+  refreshChatSelectionNotice();
+  if(next && !hermesCatalogState.catalog && !hermesCatalogState.loading) loadHermesCatalog(false);
+}
+
+async function loadHermesCatalog(force){
+  hermesCatalogState.loading = true;
+  syncHermesRouteControls();
+  try{
+    const res = await fetch("/api/hermes/catalog" + (force ? "?refresh=1" : ""));
+    if(res.status === 404 || res.status === 401){
+      hermesCatalogState = { ...hermesCatalogState, loaded:true, visible:false, catalog:null };
+      if(hermesSelectionActive) setHermesSelectionActive(false);
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    hermesCatalogState = {
+      ...hermesCatalogState,
+      loaded:true,
+      visible:Boolean(data.visible),
+      executionEnabled:Boolean(data.executionEnabled),
+      instances:Array.isArray(data.instances) ? data.instances : [],
+      catalog:data.catalog || hermesCatalogState.catalog,
+      stale:Boolean(data.stale),
+      error:data.catalogError || null
+    };
+  }catch(err){
+    hermesCatalogState = { ...hermesCatalogState, loaded:true, error:{ code:"network", message:err.message } };
+  }finally{
+    hermesCatalogState.loading = false;
+    syncHermesKindButton();
+    syncHermesRouteControls();
+  }
+}
+
+function syncHermesRouteControls(){
+  if(!hermesRouteControls) return;
+  hermesRouteControls.hidden = !hermesSelectionActive;
+  if(!hermesSelectionActive) return;
+  const instances = hermesCatalogState.instances.length
+    ? hermesCatalogState.instances
+    : [{ id:"oracle-hermes", label:"Oracle Hermes", agents:[{ id:"hermes-agent", name:"Hermes Agent" }] }];
+  fillOpenClawSelect(hermesInstanceSelect, instances.map(item => ({ id:item.id, name:item.label || item.id })), hermesSelection.instanceId, "");
+  const instance = instances.find(item => item.id === hermesSelection.instanceId) || instances[0];
+  fillOpenClawSelect(hermesAgentSelect, instance?.agents || [], hermesSelection.agentId, "");
+
+  const catalog = hermesCatalogState.catalog;
+  const agent = catalog?.agents?.find(item => item.id === hermesSelection.agentId);
+  const defaultText = agent?.defaultModel
+    ? "Agent 默认模型（" + (agent.defaultProvider ? agent.defaultProvider + " / " : "") + agent.defaultModel + "）"
+    : "Agent 默认模型";
+  hermesProviderSelect.innerHTML = "";
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = defaultText;
+  hermesProviderSelect.appendChild(defaultOption);
+  hermesProviders().forEach(provider => {
+    const option = document.createElement("option");
+    option.value = provider.id;
+    option.textContent = (provider.name || provider.id) + (provider.selectable ? "" : "（不可用）");
+    option.disabled = !provider.selectable;
+    hermesProviderSelect.appendChild(option);
+  });
+  if(hermesSelection.providerId && !hermesProvider(hermesSelection.providerId)){
+    const option = document.createElement("option");
+    option.value = hermesSelection.providerId;
+    option.textContent = (catalog ? "不可用：" : "待验证：") + hermesSelection.providerId;
+    hermesProviderSelect.appendChild(option);
+  }
+  hermesProviderSelect.value = hermesSelection.providerId || "";
+
+  const provider = hermesProvider(hermesSelection.providerId);
+  hermesModelField.hidden = !hermesSelection.providerId;
+  fillSelectionSelect(hermesModelSelect, provider?.models || [], hermesSelection.modelId,
+    { emptyLabel:hermesSelection.modelId ? "" : "请选择模型", missingPrefix:catalog ? "不可用：" : "待验证：" });
+
+  let status = "";
+  if(hermesCatalogState.loading) status = "Hermes 目录加载中...";
+  else if(hermesCatalogState.error && !catalog) status = "Hermes 目录不可用：" + hermesErrorText(hermesCatalogState.error);
+  else if(catalog) status = "Hermes 目录" + (hermesCatalogState.stale ? "（缓存，可能过期）" : "") + " · " + new Date(catalog.syncedAt).toLocaleString();
+  if(!hermesCatalogState.executionEnabled) status += (status ? " · " : "") + "执行功能未开启（仅目录可见）";
+  hermesCatalogStatus.textContent = status;
+  renderHermesRunStatus();
+}
+
+function selectHermesProvider(providerId){
+  hermesSelection.providerId = providerId || "";
+  const provider = hermesProvider(hermesSelection.providerId);
+  hermesSelection.modelId = provider?.models?.[0]?.id || "";
+  writeHermesSelection();
+  syncHermesRouteControls();
+}
+
+function selectHermesModel(modelId){
+  hermesSelection.modelId = modelId || "";
+  writeHermesSelection();
+  syncHermesRouteControls();
+}
+
+function hermesSelectionBlockReason(){
+  if(!hermesCatalogState.visible) return "Hermes 未启用";
+  if(!hermesCatalogState.executionEnabled) return "Hermes 执行功能未开启";
+  const catalog = hermesCatalogState.catalog;
+  if(!catalog) return "Hermes 目录未就绪，请刷新目录";
+  if(!catalog.capabilities?.executionReady) return "Hermes 未提供所需的任务能力";
+  if(hermesSelection.providerId){
+    const provider = hermesProvider(hermesSelection.providerId);
+    if(!provider || !provider.selectable) return "所选 Provider 不可用，请重新选择";
+    if(!provider.models.some(model => model.id === hermesSelection.modelId)) return "所选模型不可用，请重新选择";
+  }
+  if(hermesActiveRun && !hermesActiveRun.terminal) return "已有 Hermes 任务在执行，请等待完成或取消";
+  if(hermesSubmitPending) return "上一次 Hermes 提交状态不明，请先“按原请求重试”";
+  return "";
+}
+
+function hermesHasPendingAttachments(){
+  return Boolean(selectedImage || pastedImageAttachments.length || selectedFile
+    || pendingConversationAttachments.length || selectedFileIds.length || selectedWebPage);
+}
+
+function newHermesClientRequestId(){
+  if(typeof crypto !== "undefined" && crypto.randomUUID) return "wa" + crypto.randomUUID().replace(/-/g, "");
+  return "wa" + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+}
+
+async function sendHermesMessage(){
+  const reason = hermesSelectionBlockReason();
+  if(reason){
+    setContextStatus(reason);
+    return;
+  }
+  const message = input.value.trim();
+  if(!message) return;
+  if(hermesHasPendingAttachments()){
+    setContextStatus("Hermes 第一阶段仅支持纯文本消息，请先移除附件、图片、文件或网页");
+    return;
+  }
+  const body = {
+    project_id:activeProjectId || DEFAULT_PROJECT_ID,
+    conversation_id:currentConversationId || "",
+    instance_id:hermesSelection.instanceId,
+    agent_id:hermesSelection.agentId,
+    provider:hermesSelection.providerId || "",
+    model:hermesSelection.providerId ? hermesSelection.modelId : "",
+    input:message,
+    client_request_id:newHermesClientRequestId()
+  };
+  addUserMessage(message, null, null, []);
+  conversation.push({ role:"user", content:message });
+  input.value = "";
+  resetInputHeight();
+  const aiDiv = addAIMessage();
+  aiDiv.innerHTML = "<span class='loading'>Hermes 任务提交中...</span>";
+  await submitHermesBody(body, aiDiv);
+}
+
+async function submitHermesBody(body, aiDiv){
+  sendBtn.disabled = true;
+  let res;
+  let data = {};
+  try{
+    res = await fetch("/api/hermes/runs", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json; charset=utf-8" },
+      body:JSON.stringify(body)
+    });
+    data = await res.json().catch(() => ({}));
+  }catch(err){
+    // The Worker may or may not have recorded the run; resubmitting the same client_request_id is idempotent.
+    hermesSubmitPending = { body, aiDiv };
+    renderAssistantMarkdown(aiDiv, "Hermes 提交请求未得到响应，任务状态不明。可在 Hermes 面板点击“按原请求重试”（使用相同请求 ID，不会重复创建）。");
+    setContextStatus("Hermes 提交状态不明");
+    renderHermesRunStatus();
+    return;
+  }finally{
+    sendBtn.disabled = false;
+  }
+  hermesSubmitPending = null;
+  if(!res.ok || !data.ok){
+    renderAssistantMarkdown(aiDiv, "Hermes 任务未提交：" + hermesErrorText(data.error));
+    setContextStatus("Hermes 任务未提交");
+    if(data.activeRunId && body.conversation_id) restoreHermesRunForConversation(body.conversation_id);
+    renderHermesRunStatus();
+    return;
+  }
+  const run = data.run;
+  if(run.conversationId && run.conversationId !== currentConversationId){
+    currentConversationId = run.conversationId;
+    setActiveConversation();
+  }
+  trackHermesRun(run, aiDiv);
+  try{
+    await loadConversations({ clearMissingCurrent:false });
+  }catch(err){}
+}
+
+function hermesRunQuery(run){
+  return "?project_id=" + encodeURIComponent(run.projectId || activeProjectId || DEFAULT_PROJECT_ID);
+}
+
+function stopHermesTracking(){
+  if(hermesEventSource){
+    hermesEventSource.close();
+    hermesEventSource = null;
+  }
+  if(hermesPollTimer){
+    clearInterval(hermesPollTimer);
+    hermesPollTimer = null;
+  }
+}
+
+function trackHermesRun(run, view){
+  stopHermesTracking();
+  hermesActiveRun = run;
+  hermesRunView = view || null;
+  hermesStreamText = "";
+  renderHermesRunStatus();
+  if(run.terminal){
+    handleHermesTerminal(run);
+    return;
+  }
+  if(hermesRunView) hermesRunView.innerHTML = "<span class='loading'>Hermes " + (HERMES_STATUS_LABELS[run.status] || run.status) + "...</span>";
+  startHermesEventStream(run);
+  hermesPollTimer = setInterval(pollHermesRun, HERMES_POLL_MS);
+}
+
+function startHermesEventStream(run){
+  if(typeof EventSource === "undefined" || !run.upstreamRunId) return;
+  // The stream is display-only and is not reopened or replayed: on close or error it is shut and the
+  // state is re-read once via GET; the periodic GET poll stays the source of truth.
+  const source = new EventSource("/api/hermes/runs/" + encodeURIComponent(run.id) + "/events" + hermesRunQuery(run));
+  hermesEventSource = source;
+  source.onmessage = event => {
+    let data = null;
+    try{
+      data = JSON.parse(event.data);
+    }catch(err){
+      return;
+    }
+    handleHermesStreamEvent(data, source);
+  };
+  source.onerror = () => closeHermesEventStream(source, true);
+}
+
+function closeHermesEventStream(source, refresh){
+  source?.close();
+  if(hermesEventSource === source) hermesEventSource = null;
+  if(refresh) pollHermesRun();
+}
+
+function handleHermesStreamEvent(data, source){
+  if(!hermesActiveRun || !data) return;
+  if(data.event === "message.delta"){
+    hermesStreamText += data.delta || "";
+    if(hermesRunView) renderAssistantMarkdown(hermesRunView, hermesStreamText);
+    return;
+  }
+  if(data.event === "tool.started"){
+    setContextStatus("Hermes 正在调用工具：" + (data.tool || "tool"));
+    return;
+  }
+  if(data.event === "approval.request"){
+    hermesActiveRun = { ...hermesActiveRun, status:"waiting_for_approval", approval:data.approval || { required:true } };
+    renderHermesRunStatus();
+    return;
+  }
+  if(data.event === "replay.truncated"){
+    setContextStatus("Hermes 事件流部分记录已过期，以最终结果为准");
+    return;
+  }
+  if(data.event === "hermes.snapshot"){
+    closeHermesEventStream(source, false);
+    applyHermesRunUpdate(data.run);
+    return;
+  }
+  if(data.event === "hermes.stream_closed" || data.event === "hermes.stream_unavailable"){
+    closeHermesEventStream(source, true);
+  }
+}
+
+function applyHermesRunUpdate(run){
+  if(!run || !hermesActiveRun || run.id !== hermesActiveRun.id) return;
+  const wasTerminal = hermesActiveRun.terminal;
+  hermesActiveRun = run;
+  renderHermesRunStatus();
+  if(run.terminal && !wasTerminal) handleHermesTerminal(run);
+  if(!run.terminal && !hermesPollTimer) trackHermesRun(run, hermesRunView);
+}
+
+async function pollHermesRun(){
+  const run = hermesActiveRun;
+  if(!run || run.terminal) return;
+  try{
+    const res = await fetch("/api/hermes/runs/" + encodeURIComponent(run.id) + hermesRunQuery(run));
+    const data = await res.json().catch(() => ({}));
+    if(res.status === 404){
+      stopHermesTracking();
+      return;
+    }
+    if(data.ok) applyHermesRunUpdate(data.run);
+    if(data.syncError) setContextStatus("Hermes 状态暂时无法刷新：" + hermesErrorText(data.syncError));
+  }catch(err){
+    setContextStatus("Hermes 状态暂时无法刷新");
+  }
+}
+
+function hermesTerminalText(run){
+  if(run.status === "failed") return "Hermes 任务失败：" + (run.error?.message || "未知错误");
+  if(run.status === "cancelled"){
+    return run.statusDetail === "cancelled_upstream_without_request"
+      ? "Hermes 报告任务已取消（并非由你发起，可能是服务中断），未自动重试。"
+      : "Hermes 任务已取消。";
+  }
+  if(run.status === "interrupted") return "Hermes 任务被中断，未自动重试。如需继续请重新发送。";
+  if(run.status === "rejected") return "Hermes 拒绝了提交：" + hermesErrorText(run.error);
+  if(run.status === "abandoned") return "管理员已在 Hermes 侧确认并释放此任务的执行槽，结果不会写入会话。";
+  if(run.status === "completed" && !run.assistantMessageId) return "Hermes 未返回内容。";
+  return "";
+}
+
+async function handleHermesTerminal(run){
+  stopHermesTracking();
+  hermesActiveRun = run;
+  renderHermesRunStatus();
+  setContextStatus("Hermes 任务" + (HERMES_STATUS_LABELS[run.status] || run.status));
+  if(run.status === "completed" && run.assistantMessageId && currentConversationId === run.conversationId){
+    await loadConversationMessages(run.conversationId);
+  }else{
+    const text = hermesTerminalText(run);
+    if(text && hermesRunView) renderAssistantMarkdown(hermesRunView, text);
+  }
+  hermesRunView = null;
+  try{
+    await loadConversations({ clearMissingCurrent:false });
+  }catch(err){}
+}
+
+function hermesRunModelText(run){
+  if(run.actualModel) return (run.actualProvider ? run.actualProvider + " / " : "") + run.actualModel;
+  if(run.requestedModel) return (run.requestedProvider ? run.requestedProvider + " / " : "") + run.requestedModel + "（请求）";
+  return "Agent 默认模型";
+}
+
+function renderHermesRunStatus(){
+  if(!hermesRunStatus) return;
+  const run = hermesActiveRun;
+  if(!run && !hermesSubmitPending){
+    hermesRunStatus.hidden = true;
+    return;
+  }
+  hermesRunStatus.hidden = false;
+  hermesRunActions.innerHTML = "";
+  const actions = [];
+  if(hermesSubmitPending){
+    hermesRunStatus.dataset.tone = "warn";
+    hermesRunStatusText.textContent = "Hermes 提交状态不明（未收到服务器响应）";
+    actions.push("resubmit");
+  }else{
+    const parts = ["Hermes 任务 · " + (HERMES_STATUS_LABELS[run.status] || run.status), "模型：" + hermesRunModelText(run)];
+    if(run.error) parts.push(hermesErrorText(run.error));
+    hermesRunStatusText.textContent = parts.join(" · ");
+    hermesRunStatus.dataset.tone = ["failed", "rejected", "interrupted"].includes(run.status) ? "error"
+      : (["submission_unknown", "unknown", "waiting_for_approval", "cancel_requested"].includes(run.status) ? "warn" : "");
+    (run.actions || []).forEach(name => actions.push(name));
+    if(!run.terminal) actions.push("dismiss");
+  }
+  actions.forEach(name => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = HERMES_ACTION_LABELS[name] || name;
+    button.addEventListener("click", () => hermesRunAction(name));
+    hermesRunActions.appendChild(button);
+  });
+}
+
+var HERMES_ACTION_CONFIRM = {
+  reconcile:"将以相同幂等键向 Hermes 重新提交原请求：若原任务已创建，只会关联到原任务；若未创建，则会在此时创建。继续？",
+  dismiss:"停止查看只关闭本页面的跟踪，不会取消任务，也不会释放 Hermes 执行槽。继续？",
+  resolve_unknown:"请求 Hermes 结算这个状态未知的任务（通常结算为中断），不会重新执行。继续？",
+  cancel:"确定取消这个 Hermes 任务？"
+};
+
+async function hermesRunAction(name){
+  if(HERMES_ACTION_CONFIRM[name] && !confirm(HERMES_ACTION_CONFIRM[name])) return;
+  if(name === "resubmit"){
+    const pending = hermesSubmitPending;
+    if(pending) await submitHermesBody(pending.body, pending.aiDiv);
+    return;
+  }
+  const run = hermesActiveRun;
+  if(!run) return;
+  if(name === "refresh"){
+    await pollHermesRun();
+    return;
+  }
+  if(name === "dismiss"){
+    // Local only: no API call; the server keeps the run and its execution slot unchanged.
+    stopHermesTracking();
+    hermesActiveRun = null;
+    hermesRunView = null;
+    renderHermesRunStatus();
+    setContextStatus("已停止查看 Hermes 任务；任务与执行槽保持不变");
+    return;
+  }
+  const path = { cancel:"cancel", reconcile:"reconcile", resolve_unknown:"resolve-unknown" }[name];
+  if(!path) return;
+  try{
+    const res = await fetch("/api/hermes/runs/" + encodeURIComponent(run.id) + "/" + path, {
+      method:"POST",
+      headers:{ "Content-Type":"application/json; charset=utf-8" },
+      body:JSON.stringify({ project_id:run.projectId })
+    });
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok || !data.ok){
+      setContextStatus("Hermes 操作失败：" + hermesErrorText(data.error));
+      return;
+    }
+    if(data.cancelError) setContextStatus("Hermes 停止请求未确认：" + hermesErrorText(data.cancelError));
+    applyHermesRunUpdate(data.run);
+  }catch(err){
+    setContextStatus("Hermes 操作失败：" + err.message);
+  }
+}
+
+async function restoreHermesRunForConversation(conversationId){
+  if(!hermesCatalogState.visible || !conversationId) return;
+  if(hermesActiveRun && hermesActiveRun.conversationId !== conversationId){
+    stopHermesTracking();
+    hermesActiveRun = null;
+    hermesRunView = null;
+    renderHermesRunStatus();
+  }
+  try{
+    const query = "?project_id=" + encodeURIComponent(activeProjectId || DEFAULT_PROJECT_ID)
+      + "&conversation_id=" + encodeURIComponent(conversationId);
+    const res = await fetch("/api/hermes/runs" + query);
+    if(!res.ok) return;
+    const data = await res.json().catch(() => ({}));
+    const latest = (data.runs || [])[0];
+    if(!latest || currentConversationId !== conversationId) return;
+    if(hermesActiveRun?.id === latest.id && (hermesPollTimer || latest.terminal)) return;
+    if(latest.terminal){
+      hermesActiveRun = latest;
+      renderHermesRunStatus();
+      return;
+    }
+    const view = addAIMessage();
+    trackHermesRun(latest, view);
+  }catch(err){}
+}
+
+function initHermesUi(){
+  const stored = readHermesSelection();
+  if(stored){
+    hermesSelection = {
+      instanceId:String(stored.instanceId || "oracle-hermes"),
+      agentId:String(stored.agentId || "hermes-agent"),
+      providerId:String(stored.providerId || ""),
+      modelId:String(stored.modelId || "")
+    };
+  }
+  if(!hermesKindBtn) return;
+  hermesInstanceSelect.addEventListener("change", () => {
+    hermesSelection.instanceId = hermesInstanceSelect.value;
+    writeHermesSelection();
+    syncHermesRouteControls();
+  });
+  hermesAgentSelect.addEventListener("change", () => {
+    hermesSelection.agentId = hermesAgentSelect.value;
+    writeHermesSelection();
+    syncHermesRouteControls();
+  });
+  hermesProviderSelect.addEventListener("change", () => selectHermesProvider(hermesProviderSelect.value));
+  hermesModelSelect.addEventListener("change", () => selectHermesModel(hermesModelSelect.value));
+  hermesCatalogRefresh.addEventListener("click", () => loadHermesCatalog(true));
+  loadHermesCatalog(false).then(() => {
+    if(stored?.active && hermesCatalogState.visible) setHermesSelectionActive(true);
+    if(hermesCatalogState.visible && currentConversationId) restoreHermesRunForConversation(currentConversationId);
+  });
+}
+
+initHermesUi();
+
 async function sendMessage(){
   if(activeChatAbortController){
+    return;
+  }
+  // Hermes has its own submit path (/api/hermes/runs) and never reaches the model/OpenClaw request below.
+  if(typeof hermesSelectionActive !== "undefined" && hermesSelectionActive){
+    await sendHermesMessage();
     return;
   }
   const selectionBlockReason = chatSelectionBlockReason();

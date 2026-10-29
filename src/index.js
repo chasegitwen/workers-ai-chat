@@ -14,6 +14,7 @@ import { handleSearchAndFetch } from "./api/searchAndFetch.js";
 import { handleSearchWeb } from "./api/searchWeb.js";
 import { handleSettings } from "./api/settings.js";
 import { handleOpenClawBridgeEventStream } from "./api/openclawBridgeEvents.js";
+import { handleHermes } from "./hermes/routes.js";
 import { htmlPage } from "./frontend/page.js";
 import { requireAuth } from "./lib/auth.js";
 import { getEnabledModels } from "./providers/config.js";
@@ -83,6 +84,10 @@ export default {
       if (!auth.ok) {
         return auth.response;
       }
+    }
+
+    if (url.pathname === "/api/hermes" || url.pathname.startsWith("/api/hermes/")) {
+      return handleHermes(request, env, url, ctx);
     }
 
     if (request.method === "GET" && url.pathname === "/api/models") {

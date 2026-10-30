@@ -32,6 +32,9 @@
 		}
 	],
 	"vars": {
+		"HERMES_CATALOG_VISIBLE": "1",
+		"HERMES_EXECUTION_ENABLED": "1",
+		"HERMES_ORACLE_BASE_URL": "https://oracle-hermes.hnsnowground.cfd",
 		"OPENCLAW_SEATTLE_GATEWAY_WS_URL": "https://act.hnsnowground.cfd/gateway-ws/catalog",
 		"OPENCLAW_SEATTLE_DISABLED_MODEL_PROVIDERS": "openai"
 	}

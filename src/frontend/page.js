@@ -2517,8 +2517,15 @@ body.dark .toolErrorNotice{
 .hermesRunStatus[hidden]{display:none}
 .hermesRunStatus[data-tone="warn"]{border-color:#d97706}
 .hermesRunStatus[data-tone="error"]{border-color:#dc2626}
+.hermesApprovalPanel{display:grid;gap:5px;padding:8px;border-radius:8px;background:rgba(217,119,6,.08);font-size:12px;line-height:1.45}
+.hermesApprovalPanel[hidden]{display:none}
+.hermesApprovalPanel strong{font-size:13px}
+.hermesApprovalField{display:grid;grid-template-columns:auto 1fr;gap:6px}
+.hermesApprovalField span:first-child{color:var(--muted)}
+.hermesApprovalCommand{white-space:pre-wrap;overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
 .hermesRunActions{display:flex;flex-wrap:wrap;gap:6px}
 .hermesRunActions button{border:1px solid var(--border);border-radius:8px;padding:4px 10px;background:transparent;color:var(--text);cursor:pointer}
+.hermesRunActions button:disabled{opacity:.55;cursor:wait}
 .selectionField{display:grid;gap:4px;font-size:12px;color:var(--muted)}
 .selectionField[hidden]{display:none}
 .openClawBaseModelLine{display:flex;align-items:center;flex-wrap:wrap;gap:6px;color:var(--muted)}
@@ -3386,6 +3393,13 @@ body.dark .toolErrorNotice{
         <div class="openClawCatalogLine"><span id="hermesCatalogStatus"></span><button id="hermesCatalogRefresh" type="button">刷新目录</button></div>
         <div id="hermesRunStatus" class="hermesRunStatus" hidden>
           <span id="hermesRunStatusText"></span>
+          <div id="hermesApprovalPanel" class="hermesApprovalPanel" hidden>
+            <strong>待审批操作</strong>
+            <div class="hermesApprovalField"><span>工具</span><span id="hermesApprovalTool"></span></div>
+            <div class="hermesApprovalField"><span>命令</span><span id="hermesApprovalCommand" class="hermesApprovalCommand"></span></div>
+            <div class="hermesApprovalField"><span>目标</span><span id="hermesApprovalTarget"></span></div>
+            <div class="hermesApprovalField"><span>风险</span><span id="hermesApprovalRisk"></span></div>
+          </div>
           <div id="hermesRunActions" class="hermesRunActions"></div>
         </div>
       </div>
@@ -13497,6 +13511,7 @@ var hermesStreamText = "";
 var hermesEventSource = null;
 var hermesPollTimer = null;
 var hermesSubmitPending = null;
+var hermesActionPending = false;
 var hermesKindBtn = document.getElementById("hermesKindBtn");
 var hermesRouteControls = document.getElementById("hermesRouteControls");
 var hermesInstanceSelect = document.getElementById("hermesInstanceSelect");
@@ -13508,6 +13523,11 @@ var hermesCatalogStatus = document.getElementById("hermesCatalogStatus");
 var hermesCatalogRefresh = document.getElementById("hermesCatalogRefresh");
 var hermesRunStatus = document.getElementById("hermesRunStatus");
 var hermesRunStatusText = document.getElementById("hermesRunStatusText");
+var hermesApprovalPanel = document.getElementById("hermesApprovalPanel");
+var hermesApprovalTool = document.getElementById("hermesApprovalTool");
+var hermesApprovalCommand = document.getElementById("hermesApprovalCommand");
+var hermesApprovalTarget = document.getElementById("hermesApprovalTarget");
+var hermesApprovalRisk = document.getElementById("hermesApprovalRisk");
 var hermesRunActions = document.getElementById("hermesRunActions");
 
 var HERMES_STATUS_LABELS = {
@@ -13516,7 +13536,7 @@ var HERMES_STATUS_LABELS = {
   submission_unknown:"提交结果不明",
   queued:"排队中",
   running:"执行中",
-  waiting_for_approval:"等待审批（网页端暂不支持审批，可取消）",
+  waiting_for_approval:"等待审批",
   stopping:"正在停止",
   cancel_requested:"已请求取消，等待确认",
   unknown:"状态未知",
@@ -13533,6 +13553,8 @@ var HERMES_ACTION_LABELS = {
   cancel:"取消任务",
   reconcile:"核对提交",
   resolve_unknown:"结算未知状态",
+  approve_once:"仅本次批准",
+  deny:"拒绝",
   dismiss:"停止查看",
   resubmit:"按原请求重试"
 };
@@ -13552,6 +13574,12 @@ var HERMES_ERROR_TEXT = {
   hermes_idempotency_conflict:"请求 ID 冲突，请重新发送",
   hermes_attachments_unsupported:"Hermes 第一阶段仅支持纯文本消息",
   hermes_upstream_auth:"Hermes 上游认证失败",
+  hermes_approval_stale:"审批已过期或已被处理，请刷新状态",
+  hermes_approval_in_progress:"审批请求正在处理中，请勿重复点击",
+  hermes_approval_unavailable:"当前没有可响应的审批，请刷新状态",
+  hermes_approval_status_unavailable:"暂时无法确认当前审批，请稍后重试",
+  hermes_invalid_approval_identity:"审批标识无效，请刷新状态",
+  hermes_stale_generation:"审批执行代次已过期，请刷新状态",
   hermes_idempotency_not_durable:"Hermes 幂等存储不是持久化的，不能安全核对",
   hermes_idempotency_window_expired:"已超出 Hermes 幂等保留期，不能安全核对"
 };
@@ -13940,6 +13968,17 @@ function hermesRunModelText(run){
   return "Agent 默认模型";
 }
 
+function renderHermesApproval(run){
+  if(!hermesApprovalPanel) return;
+  const approval = run?.status === "waiting_for_approval" ? run.approval : null;
+  hermesApprovalPanel.hidden = !approval;
+  if(!approval) return;
+  hermesApprovalTool.textContent = approval.tool || "Hermes 工具";
+  hermesApprovalCommand.textContent = approval.command || approval.description || "审批内容正在同步，请刷新状态";
+  hermesApprovalTarget.textContent = approval.target || "未单独提供（请核对命令）";
+  hermesApprovalRisk.textContent = approval.risk || approval.description || "该操作被 Hermes 安全策略拦截，执行前需要明确确认";
+}
+
 function renderHermesRunStatus(){
   if(!hermesRunStatus) return;
   const run = hermesActiveRun;
@@ -13949,6 +13988,7 @@ function renderHermesRunStatus(){
   }
   hermesRunStatus.hidden = false;
   hermesRunActions.innerHTML = "";
+  renderHermesApproval(hermesSubmitPending ? null : run);
   const actions = [];
   if(hermesSubmitPending){
     hermesRunStatus.dataset.tone = "warn";
@@ -13961,12 +14001,17 @@ function renderHermesRunStatus(){
     hermesRunStatus.dataset.tone = ["failed", "rejected", "interrupted"].includes(run.status) ? "error"
       : (["submission_unknown", "unknown", "waiting_for_approval", "cancel_requested"].includes(run.status) ? "warn" : "");
     (run.actions || []).forEach(name => actions.push(name));
+    if(run.status === "waiting_for_approval" && run.approval?.respondable && !run.approval?.responding){
+      if(!actions.includes("approve_once")) actions.unshift("approve_once");
+      if(!actions.includes("deny")) actions.splice(actions.indexOf("approve_once") + 1, 0, "deny");
+    }
     if(!run.terminal) actions.push("dismiss");
   }
   actions.forEach(name => {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = HERMES_ACTION_LABELS[name] || name;
+    button.disabled = hermesActionPending || Boolean(run?.approval?.responding);
     button.addEventListener("click", () => hermesRunAction(name));
     hermesRunActions.appendChild(button);
   });
@@ -13976,6 +14021,8 @@ var HERMES_ACTION_CONFIRM = {
   reconcile:"将以相同幂等键向 Hermes 重新提交原请求：若原任务已创建，只会关联到原任务；若未创建，则会在此时创建。继续？",
   dismiss:"停止查看只关闭本页面的跟踪，不会取消任务，也不会释放 Hermes 执行槽。继续？",
   resolve_unknown:"请求 Hermes 结算这个状态未知的任务（通常结算为中断），不会重新执行。继续？",
+  approve_once:"仅批准当前显示的这一项操作？审批 ID 或执行代次变化时请求会被拒绝。",
+  deny:"拒绝当前显示的这一项操作？Hermes 将收到明确拒绝，不会执行该操作。",
   cancel:"确定取消这个 Hermes 任务？"
 };
 
@@ -14001,23 +14048,45 @@ async function hermesRunAction(name){
     setContextStatus("已停止查看 Hermes 任务；任务与执行槽保持不变");
     return;
   }
-  const path = { cancel:"cancel", reconcile:"reconcile", resolve_unknown:"resolve-unknown" }[name];
+  const path = { cancel:"cancel", approve_once:"approval", deny:"approval", reconcile:"reconcile", resolve_unknown:"resolve-unknown" }[name];
   if(!path) return;
+  if(hermesActionPending) return;
+  const isApproval = path === "approval";
+  const approval = run.approval;
+  if(isApproval && (!approval?.respondable || !approval.requestId || !Number.isInteger(approval.executionGeneration))){
+    setContextStatus("当前审批内容已过期或尚未同步，请刷新状态");
+    await pollHermesRun();
+    return;
+  }
+  hermesActionPending = true;
+  renderHermesRunStatus();
   try{
     const res = await fetch("/api/hermes/runs/" + encodeURIComponent(run.id) + "/" + path, {
       method:"POST",
       headers:{ "Content-Type":"application/json; charset=utf-8" },
-      body:JSON.stringify({ project_id:run.projectId })
+      body:JSON.stringify({
+        project_id:run.projectId,
+        ...(isApproval ? {
+          request_id:approval.requestId,
+          execution_generation:approval.executionGeneration,
+          choice:name === "approve_once" ? "once" : "deny"
+        } : {})
+      })
     });
     const data = await res.json().catch(() => ({}));
     if(!res.ok || !data.ok){
       setContextStatus("Hermes 操作失败：" + hermesErrorText(data.error));
+      if(res.status === 409 || isApproval) await pollHermesRun();
       return;
     }
     if(data.cancelError) setContextStatus("Hermes 停止请求未确认：" + hermesErrorText(data.cancelError));
     applyHermesRunUpdate(data.run);
   }catch(err){
     setContextStatus("Hermes 操作失败：" + err.message);
+    if(isApproval) await pollHermesRun();
+  }finally{
+    hermesActionPending = false;
+    renderHermesRunStatus();
   }
 }
 

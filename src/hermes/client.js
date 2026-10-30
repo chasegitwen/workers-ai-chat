@@ -120,6 +120,13 @@ export function createHermesClient(env, instanceId, { fetchImpl } = {}) {
     },
     getRun: runId => request("GET", runPath(runId), { timeoutMs: HERMES_TIMEOUTS_MS.status }),
     stopRun: runId => request("POST", runPath(runId, "/stop"), { timeoutMs: HERMES_TIMEOUTS_MS.stop, mutating: true }),
+    respondApproval: (runId, requestId, executionGeneration, choice) => request(
+      "POST", runPath(runId, "/approval"), {
+        body: { request_id: requestId, execution_generation: executionGeneration, choice },
+        timeoutMs: HERMES_TIMEOUTS_MS.approval,
+        mutating: true
+      }
+    ),
     resolveUnknown: (runId, admissionId, executionGeneration) => request("POST", runPath(runId, "/resolve-unknown"), {
       body: { admission_id: admissionId, execution_generation: executionGeneration },
       timeoutMs: HERMES_TIMEOUTS_MS.resolveUnknown,

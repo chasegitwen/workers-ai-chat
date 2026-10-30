@@ -8,7 +8,7 @@ const HERMES_FUNCTIONS = [
   "hermesErrorText", "hermesProviders", "hermesProvider", "hermesSelectionBlockReason", "hermesHasPendingAttachments",
   "newHermesClientRequestId", "sendHermesMessage", "submitHermesBody", "hermesRunQuery", "stopHermesTracking",
   "trackHermesRun", "applyHermesRunUpdate", "hermesTerminalText", "handleHermesTerminal", "hermesRunModelText",
-  "renderHermesRunStatus", "setHermesSelectionActive", "syncModelModeUi", "isOpenClawAgentMode", "selectHermesProvider"
+  "renderHermesApproval", "renderHermesRunStatus", "setHermesSelectionActive", "syncModelModeUi", "isOpenClawAgentMode", "selectHermesProvider"
 ];
 
 function catalog() {
@@ -34,6 +34,11 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
     hermesRouteControls: element({ hidden: true }),
     hermesRunStatus: element({ hidden: true }),
     hermesRunStatusText: element(),
+    hermesApprovalPanel: element({ hidden: true }),
+    hermesApprovalTool: element(),
+    hermesApprovalCommand: element(),
+    hermesApprovalTarget: element(),
+    hermesApprovalRisk: element(),
     hermesRunActions: element({ innerHTML: "", appendChild(child) { this.children.push(child); } }),
     modelSelectField: element(),
     openClawRouteControls: element({ hidden: true }),
@@ -68,7 +73,9 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
     setInterval: () => 1,
     clearInterval() {},
     HERMES_STATUS_LABELS: { queued: "排队中", running: "执行中", completed: "已完成" },
-    HERMES_ACTION_LABELS: { cancel: "取消任务", refresh: "刷新状态", dismiss: "停止查看" },
+    HERMES_ACTION_LABELS: {
+      approve_once: "仅本次批准", deny: "拒绝", cancel: "取消任务", refresh: "刷新状态", dismiss: "停止查看"
+    },
     HERMES_ACTION_CONFIRM: {},
     HERMES_ERROR_TEXT: { hermes_busy: "busy" },
     HERMES_POLL_MS: 4000,
@@ -86,7 +93,7 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
     hermesCatalogState: { visible: true, executionEnabled, catalog: catalog(), instances: [], loading: false },
     hermesSelection: { instanceId: "oracle-hermes", agentId: "hermes-agent", providerId: "", modelId: "" },
     hermesActiveRun: null, hermesRunView: null, hermesStreamText: "", hermesEventSource: null, hermesPollTimer: null,
-    hermesSubmitPending: null, chatSelection: { kind: "agent" }, activeModelMode: "modern", activeNewModeTarget: "openclaw",
+    hermesSubmitPending: null, hermesActionPending: false, chatSelection: { kind: "agent" }, activeModelMode: "modern", activeNewModeTarget: "openclaw",
     activeProjectId: "proj-a", currentConversationId: null, conversation: [],
     selectedImage: null, pastedImageAttachments: attachments ? [{}] : [], selectedFile: null,
     pendingConversationAttachments: [], selectedFileIds: [], selectedWebPage: null
@@ -192,6 +199,44 @@ describe("Hermes frontend", () => {
     api.renderHermesRunStatus();
     expect(dom.hermesRunStatusText.textContent).toContain("Agent 默认模型");
     expect(dom.hermesRunActions.children.map(button => button.textContent)).toEqual(["刷新状态", "取消任务", "停止查看"]);
+  });
+
+  it("renders the exact pending operation and only once/deny approval actions", () => {
+    const { api, dom } = sandbox();
+    api.__set({ hermesActiveRun: {
+      id: "r", status: "waiting_for_approval", terminal: false,
+      actions: ["approve_once", "deny", "refresh", "cancel"],
+      approval: {
+        requestId: "prompt-7", executionGeneration: 3, respondable: true,
+        tool: "terminal", command: "ssh audit@hillsboro uptime", target: "hillsboro",
+        risk: "Runs a remote command through the terminal tool"
+      }
+    } });
+    api.renderHermesRunStatus();
+    expect(dom.hermesApprovalPanel.hidden).toBe(false);
+    expect(dom.hermesApprovalCommand.textContent).toBe("ssh audit@hillsboro uptime");
+    expect(dom.hermesApprovalTarget.textContent).toBe("hillsboro");
+    expect(dom.hermesApprovalRisk.textContent).toContain("remote command");
+    expect(dom.hermesRunActions.children.map(button => button.textContent)).toEqual([
+      "仅本次批准", "拒绝", "刷新状态", "取消任务", "停止查看"
+    ]);
+    expect(dom.hermesRunActions.children.map(button => button.textContent)).not.toContain("始终批准");
+  });
+
+  it("forwards the displayed approval identity and only the explicit once choice", async () => {
+    const { api, fetches } = sandbox({ extra: ["hermesRunAction"] });
+    api.__set({ hermesActiveRun: {
+      id: "hrun_" + "3".repeat(32), projectId: "proj-a", status: "waiting_for_approval", terminal: false,
+      approval: { requestId: "prompt-exact", executionGeneration: 9, respondable: true },
+      actions: ["approve_once", "deny"]
+    } });
+    await api.hermesRunAction("approve_once");
+    expect(fetches).toHaveLength(1);
+    expect(fetches[0].url).toContain("/approval");
+    expect(fetches[0].body).toEqual({
+      project_id: "proj-a", request_id: "prompt-exact", execution_generation: 9, choice: "once"
+    });
+    expect(api.__get().hermesActionPending).toBe(false);
   });
 
   it("has no abandon/slot-release action in the page", () => {

@@ -92,6 +92,9 @@ export function errorFromUpstream(status, body, { mutating = false, secrets = []
       run_not_active: "hermes_run_not_active",
       unknown_execution: "hermes_unknown_execution",
       stale_generation: "hermes_stale_generation",
+      approval_not_active: "hermes_approval_stale",
+      approval_not_pending: "hermes_approval_stale",
+      not_found: "hermes_approval_stale",
       admission_conflict: "hermes_idempotency_conflict",
       queue_full: "hermes_upstream_busy"
     };

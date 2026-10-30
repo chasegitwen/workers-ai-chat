@@ -18,6 +18,7 @@ import { ensureConversation } from "../api/history.js";
 import { readProject } from "../api/projects.js";
 import { createHermesClient, isHermesRunId } from "./client.js";
 import {
+  HERMES_APPROVAL_CLAIM_STALE_MS,
   HERMES_AGENT_ID,
   HERMES_MAX_INPUT_CHARS,
   HERMES_STALE_SUBMIT_MS,
@@ -27,7 +28,12 @@ import {
 } from "./config.js";
 import { getHermesCatalog, validateHermesModelSelection } from "./catalog.js";
 import { HermesError, publicError, safeCode, safeMessage } from "./errors.js";
-import { sanitizeHermesApprovalPrompt } from "./permissions.js";
+import {
+  HERMES_APPROVAL_CHOICES,
+  HERMES_APPROVAL_POLICY,
+  canRespondToHermesApproval,
+  sanitizeHermesApprovalPrompt
+} from "./permissions.js";
 import {
   HERMES_ACTIVE_STATUSES,
   HERMES_TERMINAL_STATUSES,
@@ -46,7 +52,8 @@ const RUN_COLUMNS = `id, owner_username, project_id, conversation_id, instance_i
   admission_id, execution_generation, model_mode, requested_provider, requested_model, actual_provider,
   actual_model, route_source, status, upstream_status, status_detail, error_code, error_message, holds_slot,
   last_event_seq, user_message_id, assistant_message_id, usage_json, cancel_requested_at, submitted_at,
-  completed_at, created_at, updated_at`;
+  completed_at, approval_request_id, approval_generation, approval_json, approval_response_pending,
+  approval_response_started_at, created_at, updated_at`;
 
 function log(event, detail) {
   console.log("[hermes] " + event, detail);
@@ -95,6 +102,29 @@ function whitelistRuntime(runtime) {
   return provider || model || routeSource ? { provider, model, routeSource } : null;
 }
 
+function parseStoredApproval(row) {
+  if (!row?.approval_json) return null;
+  try {
+    const approval = JSON.parse(row.approval_json);
+    return approval && typeof approval === "object" ? approval : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function approvalFromSnapshot(snapshot, fallbackGeneration = null) {
+  const controls = Array.isArray(snapshot?.pending_controls) ? snapshot.pending_controls : [];
+  const prompt = controls.find(control => {
+    const kind = String(control?.kind || control?.type || control?.control_type || "").toLowerCase();
+    return kind === "approval" || (!kind && Boolean(control?.prompt_id || control?.request_id));
+  }) || (snapshot?.approval && typeof snapshot.approval === "object" ? snapshot.approval : null);
+  return sanitizeHermesApprovalPrompt(prompt, {
+    executionGeneration: Number.isInteger(snapshot?.execution_generation)
+      ? snapshot.execution_generation
+      : fallbackGeneration
+  });
+}
+
 export function publicHermesRun(row, { capabilities = null } = {}) {
   if (!row) return null;
   let usage = null;
@@ -104,6 +134,18 @@ export function publicHermesRun(row, { capabilities = null } = {}) {
     usage = null;
   }
   const terminal = isHermesTerminal(row.status);
+  const storedApproval = row.status === "waiting_for_approval" ? parseStoredApproval(row) : null;
+  const approvalRespondable = canRespondToHermesApproval({ capabilities, run: row, prompt: storedApproval });
+  const approval = storedApproval ? sanitizeHermesApprovalPrompt(storedApproval, {
+    executionGeneration: row.approval_generation,
+    respondable: approvalRespondable && !row.approval_response_pending,
+    responding: Boolean(row.approval_response_pending)
+  }) : (row.status === "waiting_for_approval" ? {
+    required: true,
+    respondable: false,
+    responding: Boolean(row.approval_response_pending),
+    policy: HERMES_APPROVAL_POLICY
+  } : null);
   return {
     id: row.id,
     runtimeType: "hermes",
@@ -127,7 +169,7 @@ export function publicHermesRun(row, { capabilities = null } = {}) {
     lastEventSeq: Number.isInteger(row.last_event_seq) ? row.last_event_seq : -1,
     assistantMessageId: row.assistant_message_id || null,
     usage,
-    approval: row.status === "waiting_for_approval" ? { required: true, respondable: false } : null,
+    approval,
     cancelRequested: Boolean(row.cancel_requested_at),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -142,6 +184,11 @@ export function hermesRunActions(row, { capabilities = null, now = Date.now() } 
   if (row.upstream_run_id) actions.push("refresh");
   if (row.upstream_run_id && ["queued", "running", "waiting_for_approval", "stopping", "cancel_requested"].includes(row.status)) {
     actions.push("cancel");
+  }
+  const approval = parseStoredApproval(row);
+  if (!row.approval_response_pending
+    && canRespondToHermesApproval({ capabilities, run: row, prompt: approval })) {
+    actions.unshift("approve_once", "deny");
   }
   // No user action releases the slot while the remote outcome is unknown: submission_unknown
   // and unknown keep holds_slot=1 until an authoritative terminal status is observed or an
@@ -463,9 +510,11 @@ async function finalizeCompleted(env, row, snapshot) {
     statements.push(db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").bind(timestamp, row.conversation_id));
   }
   statements.push(db.prepare(
-    `UPDATE hermes_runs SET status = 'completed', upstream_status = ?, status_detail = ?, holds_slot = NULL,
+     `UPDATE hermes_runs SET status = 'completed', upstream_status = ?, status_detail = ?, holds_slot = NULL,
        assistant_message_id = COALESCE(assistant_message_id, ?), actual_provider = ?, actual_model = ?, route_source = ?,
-       usage_json = ?, error_code = NULL, error_message = NULL, completed_at = COALESCE(completed_at, ?), updated_at = ?
+       usage_json = ?, error_code = NULL, error_message = NULL, approval_request_id = NULL,
+       approval_generation = NULL, approval_json = NULL, approval_response_pending = 0,
+       approval_response_started_at = NULL, completed_at = COALESCE(completed_at, ?), updated_at = ?
      WHERE id = ? AND status NOT IN (` + TERMINAL_SQL + `)`
   ).bind(
     safeCode(snapshot.status) || "completed",
@@ -490,10 +539,25 @@ async function applySnapshot(env, row, snapshot) {
   const admissionId = cleanText(snapshot?.admission_id, 160) || null;
   const generation = Number.isInteger(snapshot?.execution_generation) ? snapshot.execution_generation : null;
   const runtime = whitelistRuntime(snapshot?.runtime);
+  const snapshotApproval = mapped === "waiting_for_approval"
+    ? approvalFromSnapshot(snapshot, generation ?? row.execution_generation)
+    : null;
+  const sameClaim = Boolean(
+    snapshotApproval?.requestId
+    && row.approval_response_pending
+    && row.approval_request_id === snapshotApproval.requestId
+    && row.approval_generation === snapshotApproval.executionGeneration
+    && Date.now() - Number(row.approval_response_started_at || 0) < HERMES_APPROVAL_CLAIM_STALE_MS
+  );
   const common = {
     upstream_status: upstreamStatus || null,
     admission_id: admissionId || row.admission_id || null,
-    execution_generation: generation ?? row.execution_generation ?? null
+    execution_generation: generation ?? row.execution_generation ?? null,
+    approval_request_id: snapshotApproval?.requestId || null,
+    approval_generation: snapshotApproval?.executionGeneration ?? null,
+    approval_json: snapshotApproval ? JSON.stringify(snapshotApproval) : null,
+    approval_response_pending: sameClaim ? 1 : 0,
+    approval_response_started_at: sameClaim ? row.approval_response_started_at : null
   };
   if (!mapped) {
     await updateActiveRun(db, row.id, { ...common, status_detail: "unrecognized_upstream_status" });
@@ -624,6 +688,87 @@ export async function cancelHermesRun(env, row, { fetchImpl } = {}) {
     }
   }
   return { run: await readRunById(db, row.id), cancelError };
+}
+
+export async function respondToHermesApproval(env, row, body, { fetchImpl } = {}) {
+  const choice = String(body?.choice || "").trim().toLowerCase();
+  if (!HERMES_APPROVAL_CHOICES.includes(choice)) {
+    throw new HermesError("hermes_invalid_approval_choice",
+      "Hermes approvals from the web allow only once or deny", { httpStatus: 400 });
+  }
+  const requestId = String(body?.request_id || body?.requestId || "").trim();
+  const generation = body?.execution_generation ?? body?.executionGeneration;
+  if (!requestId || requestId.length > 256 || !Number.isInteger(generation) || generation < 0) {
+    throw new HermesError("hermes_invalid_approval_identity",
+      "The current approval request_id and execution_generation are required", { httpStatus: 400 });
+  }
+
+  // Re-read Hermes immediately before the mutation. The browser's approval card may have been
+  // open while Hermes timed out or advanced to another prompt, so cached D1 state is not enough.
+  const synced = await syncHermesRun(env, row, { fetchImpl });
+  if (synced.syncError) {
+    throw new HermesError("hermes_approval_status_unavailable",
+      "Could not verify the current Hermes approval; refresh and try again", { httpStatus: 503 });
+  }
+  row = synced.run;
+  const capabilities = await hermesCapabilities(env, row.instance_id, { refresh: true, fetchImpl });
+  const approval = parseStoredApproval(row);
+  if (!canRespondToHermesApproval({ capabilities, run: row, prompt: approval, choice })) {
+    throw new HermesError("hermes_approval_unavailable",
+      "Hermes does not have a respondable approval for this run", { httpStatus: 409 });
+  }
+  if (approval.requestId !== requestId || approval.executionGeneration !== generation
+    || row.approval_request_id !== requestId || row.approval_generation !== generation) {
+    throw new HermesError("hermes_approval_stale",
+      "The approval changed or expired; refresh before responding", { httpStatus: 409 });
+  }
+
+  const claimStartedAt = Date.now();
+  const claim = await env.DB.prepare(
+    `UPDATE hermes_runs
+        SET approval_response_pending = 1, approval_response_started_at = ?, updated_at = ?
+      WHERE id = ? AND status = 'waiting_for_approval'
+        AND approval_request_id = ? AND approval_generation = ?
+        AND approval_response_pending = 0`
+  ).bind(claimStartedAt, claimStartedAt, row.id, requestId, generation).run();
+  if (!(claim?.meta?.changes > 0)) {
+    throw new HermesError("hermes_approval_in_progress",
+      "This approval is already being answered or has changed", { httpStatus: 409 });
+  }
+
+  try {
+    const client = createHermesClient(env, row.instance_id, { fetchImpl });
+    const response = await client.respondApproval(row.upstream_run_id, requestId, generation, choice);
+    const timestamp = Date.now();
+    await env.DB.prepare(
+      `UPDATE hermes_runs
+          SET status = 'running', upstream_status = 'running', status_detail = ?,
+              approval_request_id = NULL, approval_generation = NULL, approval_json = NULL,
+              approval_response_pending = 0, approval_response_started_at = NULL, updated_at = ?
+        WHERE id = ? AND status = 'waiting_for_approval'
+          AND approval_request_id = ? AND approval_generation = ?`
+    ).bind("approval_" + choice, timestamp, row.id, requestId, generation).run();
+    log("approval_responded", { run_id: row.id, choice, execution_generation: generation });
+    return {
+      run: await readRunById(env.DB, row.id),
+      approvalResponse: {
+        choice,
+        requestId,
+        executionGeneration: generation,
+        resolved: Number.isFinite(response.body?.resolved) ? response.body.resolved : null
+      }
+    };
+  } catch (err) {
+    // A timeout is outcome-ambiguous. Release only the local click claim; the next attempt
+    // must re-read the authoritative pending control and Hermes' own CAS prevents a duplicate.
+    await env.DB.prepare(
+      `UPDATE hermes_runs
+          SET approval_response_pending = 0, approval_response_started_at = NULL, updated_at = ?
+        WHERE id = ? AND approval_request_id = ? AND approval_generation = ?`
+    ).bind(Date.now(), row.id, requestId, generation).run();
+    log("approval_failed", { run_id: row.id, code: err?.code || "error", execution_generation: generation });
+    throw err;
+  }
 }
 
 export async function reconcileHermesRun(env, row, { fetchImpl } = {}) {

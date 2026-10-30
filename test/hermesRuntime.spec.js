@@ -85,8 +85,8 @@ function getRun(id, { project = "default", user = "admin" } = {}) {
   return call("GET", "/api/hermes/runs/" + id + "?project_id=" + project, { user });
 }
 
-function action(id, name, { project = "default", user = "admin" } = {}) {
-  return call("POST", "/api/hermes/runs/" + id + "/" + name, { body: { project_id: project }, user });
+function action(id, name, { project = "default", user = "admin", body = {} } = {}) {
+  return call("POST", "/api/hermes/runs/" + id + "/" + name, { body: { project_id: project, ...body }, user });
 }
 
 async function messages(conversationId) {
@@ -161,7 +161,7 @@ describe("Hermes catalog and provider selection", () => {
   it("serves the catalog through the API without credentials and caches it", async () => {
     const first = await call("GET", "/api/hermes/catalog");
     expect(first.status).toBe(200);
-    expect(first.json).toMatchObject({ ok: true, visible: true, executionEnabled: true, approvalPolicy: "observe_only" });
+    expect(first.json).toMatchObject({ ok: true, visible: true, executionEnabled: true, approvalPolicy: "once_or_deny" });
     expect(first.json.instances).toEqual([{ id: "oracle-hermes", label: "Oracle Hermes", configured: true, agents: [{ id: "hermes-agent", name: "Hermes Agent" }] }]);
     expect(first.json.catalog.agents[0]).toMatchObject({ id: "hermes-agent", defaultModel: "gpt-5.6-luna", defaultProvider: "openai-codex" });
     expectNoSecrets(first.text);
@@ -476,6 +476,160 @@ describe("Hermes cancellation", () => {
     mock.complete(upstreamRunId(run), "finished before stop");
     expect((await getRun(run.id)).json.run.status).toBe("completed");
     expect((await messages(run.conversationId)).filter(row => row.role === "assistant")).toHaveLength(1);
+  });
+});
+
+describe("Hermes run approvals", () => {
+  it("restores a sanitized pending operation and approves only the exact current prompt once", async () => {
+    const run = (await submit()).json.run;
+    const prompt = mock.requestApproval(upstreamRunId(run), {
+      prompt_id: "prompt-current",
+      execution_generation: 4,
+      command: "ssh audit@hillsboro 'uptime'\necho Bearer sk-secret123456",
+      target: "Hillsboro VPS",
+      risk: "Executes the displayed read-only command on a remote VPS"
+    });
+
+    const waiting = (await getRun(run.id)).json.run;
+    expect(waiting).toMatchObject({
+      status: "waiting_for_approval",
+      approval: {
+        requestId: prompt.prompt_id,
+        executionGeneration: 4,
+        tool: "terminal",
+        target: "Hillsboro VPS",
+        respondable: true,
+        choices: ["once", "deny"]
+      }
+    });
+    expect(waiting.approval.command).toContain("ssh audit@hillsboro");
+    expect(waiting.approval.command).toContain("\n");
+    expect(waiting.approval.command).not.toContain("sk-secret123456");
+    expect(waiting.actions).toEqual(["approve_once", "deny", "refresh", "cancel"]);
+
+    // A fresh page restores both the card and its safe actions from the scoped run list.
+    const restored = await call("GET", "/api/hermes/runs?project_id=default&conversation_id=" + run.conversationId);
+    expect(restored.json.runs[0].approval).toMatchObject({ requestId: prompt.prompt_id, respondable: true });
+
+    const approved = await action(run.id, "approval", { body: {
+      request_id: prompt.prompt_id,
+      execution_generation: 4,
+      choice: "once"
+    } });
+    expect(approved.status).toBe(200);
+    expect(approved.json.run).toMatchObject({ status: "running", approval: null });
+    expect(approved.json.approvalResponse).toMatchObject({ choice: "once", requestId: prompt.prompt_id, resolved: 1 });
+    const upstream = mock.calls.filter(item => item.method === "POST" && item.path.endsWith("/approval"));
+    expect(upstream).toHaveLength(1);
+    expect(upstream[0].body).toEqual({
+      request_id: prompt.prompt_id,
+      execution_generation: 4,
+      choice: "once"
+    });
+    const stored = await env.DB.prepare(
+      "SELECT approval_request_id, approval_json, approval_response_pending FROM hermes_runs WHERE id = ?"
+    ).bind(run.id).first();
+    expect(stored).toEqual({ approval_request_id: null, approval_json: null, approval_response_pending: 0 });
+  });
+
+  it("forwards an explicit denial without offering session or permanent grants", async () => {
+    const run = (await submit()).json.run;
+    const prompt = mock.requestApproval(upstreamRunId(run), { prompt_id: "prompt-deny" });
+    const waiting = (await getRun(run.id)).json.run;
+    expect(waiting.approval.choices).toEqual(["once", "deny"]);
+    expect(JSON.stringify(waiting)).not.toMatch(/session|always/);
+
+    const denied = await action(run.id, "approval", { body: {
+      request_id: prompt.prompt_id,
+      execution_generation: prompt.execution_generation,
+      choice: "deny"
+    } });
+    expect(denied.status).toBe(200);
+    expect(mock.calls.find(item => item.path.endsWith("/approval")).body.choice).toBe("deny");
+  });
+
+  it("fails closed when Hermes does not advertise both approval capabilities", async () => {
+    mock.capabilities = mock.defaultCapabilities();
+    mock.capabilities.features.run_approval_response = false;
+    const run = (await submit()).json.run;
+    const prompt = mock.requestApproval(upstreamRunId(run), { prompt_id: "prompt-no-capability" });
+    const waiting = (await getRun(run.id)).json.run;
+    expect(waiting.approval.respondable).toBe(false);
+    expect(waiting.actions).not.toContain("approve_once");
+    const response = await action(run.id, "approval", { body: {
+      request_id: prompt.prompt_id,
+      execution_generation: prompt.execution_generation,
+      choice: "once"
+    } });
+    expect(response.status).toBe(409);
+    expect(response.json.error.code).toBe("hermes_approval_unavailable");
+    expect(mock.calls.filter(item => item.path.endsWith("/approval"))).toHaveLength(0);
+  });
+
+  it("rejects cross-user, stale-id and stale-generation responses before forwarding", async () => {
+    const run = (await submit({}, { user: "alice" })).json.run;
+    const prompt = mock.requestApproval(upstreamRunId(run), {
+      prompt_id: "prompt-a",
+      execution_generation: 2
+    });
+    await getRun(run.id, { user: "alice" });
+    const body = { request_id: prompt.prompt_id, execution_generation: 2, choice: "once" };
+
+    expect((await action(run.id, "approval", { user: "bob", body })).status).toBe(404);
+    expect((await action(run.id, "approval", { user: "alice", body: { ...body, request_id: "prompt-foreign" } })).status).toBe(409);
+    expect((await action(run.id, "approval", { user: "alice", body: { ...body, execution_generation: 1 } })).status).toBe(409);
+    expect(mock.calls.filter(item => item.path.endsWith("/approval"))).toHaveLength(0);
+
+    mock.requestApproval(upstreamRunId(run), { prompt_id: "prompt-b", execution_generation: 3 });
+    const expired = await action(run.id, "approval", { user: "alice", body });
+    expect(expired.status).toBe(409);
+    expect(expired.json.error.code).toBe("hermes_approval_stale");
+    expect(mock.calls.filter(item => item.path.endsWith("/approval"))).toHaveLength(0);
+  });
+
+  it("allows only one concurrent click and returns 409 for the duplicate", async () => {
+    const run = (await submit()).json.run;
+    const prompt = mock.requestApproval(upstreamRunId(run), { prompt_id: "prompt-race", execution_generation: 5 });
+    await getRun(run.id);
+    mock.onApproval = async () => {
+      await new Promise(resolve => setTimeout(resolve, 30));
+      return null;
+    };
+    const options = { body: {
+      request_id: prompt.prompt_id,
+      execution_generation: 5,
+      choice: "once"
+    } };
+    const responses = await Promise.all([
+      action(run.id, "approval", options),
+      action(run.id, "approval", options)
+    ]);
+    expect(responses.map(item => item.status).sort()).toEqual([200, 409]);
+    expect(mock.calls.filter(item => item.path.endsWith("/approval"))).toHaveLength(1);
+  });
+
+  it("recovers the approval card after a timeout and surfaces upstream 409 conflicts", async () => {
+    const run = (await submit()).json.run;
+    const prompt = mock.requestApproval(upstreamRunId(run), { prompt_id: "prompt-retry", execution_generation: 6 });
+    await getRun(run.id);
+    const body = { request_id: prompt.prompt_id, execution_generation: 6, choice: "once" };
+
+    mock.onApproval = () => { throw new Error("approval response lost"); };
+    const timedOut = await action(run.id, "approval", { body });
+    expect(timedOut.status).toBe(504);
+    const afterTimeout = (await getRun(run.id)).json.run;
+    expect(afterTimeout.approval).toMatchObject({ requestId: prompt.prompt_id, respondable: true, responding: false });
+
+    mock.onApproval = () => new Response(JSON.stringify({
+      error: { code: "approval_not_pending", type: "invalid_request_error", message: "already settled" }
+    }), { status: 409, headers: { "Content-Type": "application/json" } });
+    const conflict = await action(run.id, "approval", { body });
+    expect(conflict.status).toBe(409);
+    expect(conflict.json.error.code).toBe("hermes_approval_stale");
+    const row = await env.DB.prepare(
+      "SELECT approval_response_pending FROM hermes_runs WHERE id = ?"
+    ).bind(run.id).first();
+    expect(row.approval_response_pending).toBe(0);
   });
 });
 

@@ -25,6 +25,7 @@ import {
   reconcileHermesRun,
   recordHermesEventSeq,
   requireOwnedHermesRun,
+  respondToHermesApproval,
   resolveUnknownHermesRun,
   sanitizeHermesApprovalPrompt,
   submitHermesRun,
@@ -33,7 +34,7 @@ import {
 import { createSseParser, formatSseFrame } from "./sse.js";
 import { isHermesTerminal, mapHermesUpstreamStatus } from "./status.js";
 
-const RUN_ROUTE = /^\/api\/hermes\/runs\/(hrun_[a-f0-9]{32})(?:\/(events|cancel|reconcile|resolve-unknown))?$/;
+const RUN_ROUTE = /^\/api\/hermes\/runs\/(hrun_[a-f0-9]{32})(?:\/(events|cancel|approval|reconcile|resolve-unknown))?$/;
 const MAX_DELTA_CHARS = 8000;
 
 function errorResponse(err) {
@@ -112,7 +113,10 @@ function sanitizeEvent(frame) {
       out.duration = Number.isFinite(data.duration) ? data.duration : null;
       return out;
     case "approval.request":
-      out.approval = sanitizeHermesApprovalPrompt(data);
+      out.approval = sanitizeHermesApprovalPrompt(data, {
+        executionGeneration: data.execution_generation,
+        respondable: true
+      });
       return out;
     case "run.queued":
     case "run.steered":
@@ -252,7 +256,18 @@ export async function handleHermes(request, env, url, ctx, options = {}) {
       }
       await assertConversationAccess(env, { owner, projectId, conversationId });
       const rows = await listHermesRuns(env, { owner, projectId, conversationId });
-      return jsonResponse({ ok: true, runs: rows.map(row => publicHermesRun(row)) });
+      const capabilityByInstance = new Map();
+      for (const row of rows) {
+        if (!isHermesTerminal(row.status) && !capabilityByInstance.has(row.instance_id)) {
+          capabilityByInstance.set(row.instance_id, await hermesCapabilities(env, row.instance_id));
+        }
+      }
+      return jsonResponse({
+        ok: true,
+        runs: rows.map(row => publicHermesRun(row, {
+          capabilities: capabilityByInstance.get(row.instance_id) || null
+        }))
+      });
     }
 
     const match = url.pathname.match(RUN_ROUTE);
@@ -278,6 +293,13 @@ export async function handleHermes(request, env, url, ctx, options = {}) {
     if (action === "cancel") {
       const { run, cancelError } = await cancelHermesRun(env, row, routeOptions);
       return await runResponse(env, run, { cancelError });
+    }
+    if (action === "approval") {
+      if (!hermesExecutionEnabled(env)) {
+        throw new HermesError("hermes_execution_disabled", "Hermes execution is disabled", { httpStatus: 403 });
+      }
+      const { run, approvalResponse } = await respondToHermesApproval(env, row, body, routeOptions);
+      return await runResponse(env, run, { approvalResponse });
     }
     if (action === "reconcile") {
       if (!hermesExecutionEnabled(env)) {

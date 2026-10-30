@@ -30,8 +30,14 @@ export const HERMES_TIMEOUTS_MS = Object.freeze({
   submit: 20000,
   status: 10000,
   stop: 10000,
+  approval: 10000,
   resolveUnknown: 10000
 });
+
+// A D1 compare-and-set prevents concurrent approval clicks. If a Worker disappears after
+// claiming the response but before clearing it, a later authoritative status sync may recover
+// the claim after this window; Hermes still performs the final prompt/generation CAS.
+export const HERMES_APPROVAL_CLAIM_STALE_MS = 30 * 1000;
 
 // Initial global limit; enforced by the single-slot unique index in migration 0022.
 export const HERMES_GLOBAL_CONCURRENCY = 1;

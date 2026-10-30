@@ -41,6 +41,7 @@ export class MockHermes {
     this.onCreate = null;
     this.onGet = null;
     this.onStop = null;
+    this.onApproval = null;
     this.onEvents = null;
     this.capabilities = null;
     this.modelOptions = {
@@ -91,6 +92,30 @@ export class MockHermes {
     Object.assign(this.run(runId), { status: "completed", output, runtime, usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 } });
   }
 
+  requestApproval(runId, approval = {}) {
+    const run = this.run(runId);
+    const executionGeneration = Number.isInteger(approval.execution_generation)
+      ? approval.execution_generation
+      : run.execution_generation;
+    const control = {
+      kind: "approval",
+      prompt_id: approval.prompt_id || "prompt_" + crypto.randomUUID().replace(/-/g, ""),
+      execution_generation: executionGeneration,
+      tool: approval.tool || "terminal",
+      command: approval.command || "ssh audit@example uptime",
+      target: approval.target || "example",
+      description: approval.description || "Remote command execution requires confirmation",
+      risk: approval.risk || "The terminal tool will execute the displayed command",
+      choices: approval.choices || ["once", "session", "always", "deny"]
+    };
+    Object.assign(run, {
+      status: "waiting_for_approval",
+      execution_generation: executionGeneration,
+      pending_controls: [control]
+    });
+    return control;
+  }
+
   only(path) {
     return this.calls.filter(call => call.path === path || call.pathPrefix === path);
   }
@@ -132,7 +157,7 @@ export class MockHermes {
       return json({ run_id: run.run_id, status: "started", replayed: false }, 202);
     }
 
-    const match = url.pathname.match(/^\/v1\/runs\/([^/]+)(?:\/(events|stop|resolve-unknown))?$/);
+    const match = url.pathname.match(/^\/v1\/runs\/([^/]+)(?:\/(events|stop|approval|resolve-unknown))?$/);
     if (match) {
       const [, runId, action] = match;
       call.pathPrefix = "/v1/runs/" + (action || "");
@@ -158,6 +183,30 @@ export class MockHermes {
         }
         run.status = "stopping";
         return json({ run_id: runId, status: "stopping", admission_id: run.admission_id });
+      }
+      if (action === "approval" && method === "POST") {
+        if (this.onApproval) {
+          const override = await this.onApproval(call, run);
+          if (override) return override;
+        }
+        if (!run) return err(404, "run_not_found", "Run not found: " + runId);
+        const control = Array.isArray(run.pending_controls) ? run.pending_controls[0] : null;
+        if (run.status !== "waiting_for_approval" || !control) {
+          return err(409, "approval_not_pending", "Run has no pending approval");
+        }
+        if (call.body?.request_id !== control.prompt_id
+          || call.body?.execution_generation !== control.execution_generation) {
+          return err(409, "stale_generation", "Approval identity is stale");
+        }
+        if (!["once", "deny"].includes(call.body?.choice)) {
+          return err(400, "invalid_approval_choice", "Choice is not allowed");
+        }
+        run.status = "running";
+        run.pending_controls = [];
+        return json({
+          object: "hermes.run.approval_response", run_id: runId,
+          request_id: control.prompt_id, choice: call.body.choice, resolved: 1
+        });
       }
       if (action === "resolve-unknown" && method === "POST") {
         if (!run) return err(404, "run_not_found", "Run not found: " + runId);

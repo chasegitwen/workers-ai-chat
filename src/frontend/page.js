@@ -9474,6 +9474,7 @@ function handleModelCatalogKeydown(event){
   }
   if(event.key === "Escape" && open){
     event.preventDefault();
+    event.stopPropagation();
     closeModelCatalogPicker(true);
     return;
   }

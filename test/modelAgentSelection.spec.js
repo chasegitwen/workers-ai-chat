@@ -86,6 +86,26 @@ describe("chat page: 当前使用 with 模型 / Agent", () => {
     expect(events[0]).toMatchObject({ type: "change", bubbles: true });
   });
 
+  it("stops an open model picker Escape from reaching the sidebar handler", () => {
+    const source = lastDeclaration(pageScript(), "handleModelCatalogKeydown");
+    const calls = [];
+    const handleKeydown = new Function("modelCatalogPopup", "closeModelCatalogPicker", "modelCatalogVisibleOptions", "modelCatalogActiveIndex",
+      "openModelCatalogPicker", "setModelCatalogActive", "chooseModelCatalogValue",
+      source + "\nreturn handleModelCatalogKeydown;")(
+        { hidden: false }, restoreFocus => calls.push(["close", restoreFocus]), [], -1,
+        () => {}, () => {}, () => {}
+      );
+    const event = {
+      key: "Escape",
+      preventDefault: () => calls.push(["preventDefault"]),
+      stopPropagation: () => calls.push(["stopPropagation"])
+    };
+
+    handleKeydown(event);
+
+    expect(calls).toEqual([["preventDefault"], ["stopPropagation"], ["close", true]]);
+  });
+
   it("shows only the model picker for a plain model", () => {
     const h = createHarness({ settings: { defaultModel: "claude" } });
     h.api.applyNewChatSelection();

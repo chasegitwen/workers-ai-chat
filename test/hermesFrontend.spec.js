@@ -302,6 +302,11 @@ describe("Hermes frontend", () => {
     expect(html).toContain('id="sidebarRailSessions"');
     expect(html).toContain('.main.sidebarDrawerOpen .sidebar');
     expect(html).toContain('sidebarBackdrop?.addEventListener("click", () => setSidebarDrawerOpen(false))');
+    const openSidebarSection = html.match(/function openSidebarSection\(focusSearch\)\{([\s\S]*?)\n\}/)?.[1] || "";
+    expect(openSidebarSection).toContain('mainLayout.dataset.sidebarMode = "expanded"');
+    expect(openSidebarSection).not.toContain('setSidebarMode("expanded")');
+    expect(openSidebarSection).not.toContain("localStorage");
+    expect(html).toContain('chatSearchInput.addEventListener("blur", closeSidebarPeek)');
     expect(html).not.toContain('@media(max-width:800px){\n\n  .main{\n    grid-template-columns:1fr;\n    min-height:0;\n  }\n\n  .main.contextPanelOpen{\n    grid-template-columns:1fr;\n  }\n\n  .sidebar{\n    display:none;');
   });
 

@@ -3828,6 +3828,7 @@ function setSidebarDrawerOpen(open){
 
 function setSidebarMode(mode){
   sidebarMode = ["expanded", "rail", "hidden"].includes(mode) ? mode : "expanded";
+  mainLayout?.classList.remove("sidebarPeekOpen");
   if(mainLayout) mainLayout.dataset.sidebarMode = sidebarMode;
   try{
     localStorage.setItem(SIDEBAR_MODE_STORAGE_KEY, sidebarMode);
@@ -3847,8 +3848,21 @@ function toggleSidebar(){
   setSidebarMode(next);
 }
 
+function closeSidebarPeek(){
+  if(!mainLayout?.classList.contains("sidebarPeekOpen")) return;
+  mainLayout.classList.remove("sidebarPeekOpen");
+  mainLayout.dataset.sidebarMode = sidebarMode;
+  sidebarToggle?.setAttribute("aria-expanded", String(sidebarMode !== "hidden"));
+}
+
 function openSidebarSection(focusSearch){
-  setSidebarMode("expanded");
+  if(isNarrowSidebar()){
+    setSidebarDrawerOpen(true);
+  }else if(sidebarMode !== "expanded"){
+    mainLayout?.classList.add("sidebarPeekOpen");
+    if(mainLayout) mainLayout.dataset.sidebarMode = "expanded";
+    sidebarToggle?.setAttribute("aria-expanded", "true");
+  }
   if(focusSearch) chatSearchInput?.focus();
 }
 
@@ -12134,6 +12148,7 @@ function renderConversationRows(targetList, conversations, options = {}){
       ? (item.title || "New Chat") + "\\n" + item.last_message_preview
       : (item.title || "New Chat");
     btn.addEventListener("click", () => {
+      closeSidebarPeek();
       setSidebarDrawerOpen(false);
       loadConversationMessages(item.id);
     });
@@ -12458,10 +12473,14 @@ openClawTaskHistoryPanel.addEventListener("click", event => {
   }
   loadOpenClawTaskHistory(view);
 });
-newChatBtn.addEventListener("click", () => setSidebarDrawerOpen(false));
+newChatBtn.addEventListener("click", () => {
+  closeSidebarPeek();
+  setSidebarDrawerOpen(false);
+});
 newChatBtn.addEventListener("click", createNewConversation);
 createProjectBtn.addEventListener("click", createProject);
 chatSearchInput.addEventListener("input", applyChatSearchFilter);
+chatSearchInput.addEventListener("blur", closeSidebarPeek);
 archiveToggleBtn.addEventListener("click", event => {
   event.stopPropagation();
   setArchiveOpen(!archivePanel.classList.contains("open"));
@@ -12583,7 +12602,8 @@ toolMenuBtn.addEventListener("click", event => {
 });
 attachmentMenu.addEventListener("click", event => event.stopPropagation());
 toolMenu.addEventListener("click", event => event.stopPropagation());
-document.addEventListener("click", () => {
+document.addEventListener("click", event => {
+  if(!mainSidebar?.contains(event.target)) closeSidebarPeek();
   closeInputMenus();
   closeConversationMenus();
   closeModelActionMenus();
@@ -12598,6 +12618,7 @@ document.addEventListener("keydown", event => {
     closeProjectSettingsPopover();
     setContextPanelOpen(false);
     setSidebarDrawerOpen(false);
+    closeSidebarPeek();
   }
 });
 document.addEventListener("paste", event => {

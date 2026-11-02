@@ -33,6 +33,10 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
   const dom = {
     hermesKindBtn: element({ hidden: true }),
     hermesRouteControls: element({ hidden: true }),
+    hermesRunMount: element({ hidden: true, appendChild(child) {
+      this.children = this.children.filter(item => item !== child);
+      this.children.push(child);
+    } }),
     hermesRunStatus: element({ hidden: true }),
     hermesRunStatusText: element(),
     hermesRunCollapseBtn: element({ setAttribute(name, value) { this[name] = value; } }),
@@ -54,6 +58,10 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
     this.children = this.children.filter(item => item !== child);
     this.children.push(child);
   } });
+  Object.defineProperty(chat, "innerHTML", {
+    get() { return this.html || ""; },
+    set(value) { this.html = value; this.children = []; }
+  });
   const stubs = {
     ...dom,
     chat,
@@ -131,7 +139,8 @@ describe("Hermes frontend", () => {
     const html = htmlPage();
     expect(html).toContain('id="hermesKindBtn" data-selection-kind="hermes" hidden');
     expect(html).toContain('id="hermesRouteControls" class="openClawRouteControls" hidden');
-    expect(html.indexOf('id="hermesRunStatus"')).toBeGreaterThan(html.indexOf('id="chat"'));
+    expect(html.indexOf('id="hermesRunMount"')).toBeGreaterThan(html.indexOf('class="inputBar"'));
+    expect(html.indexOf('id="hermesRunMount"')).toBeLessThan(html.indexOf('id="openClawTaskBanner"'));
     expect(html).toContain('#hermesRouteControls select,#hermesRouteControls option,#hermesRouteControls optgroup{font-size:max(16px,1rem)}');
     const script = pageScript();
     expect(() => new Function(script)).not.toThrow();
@@ -217,6 +226,23 @@ describe("Hermes frontend", () => {
     expect(dom.hermesRunActions.children.map(button => button.textContent)).toEqual(["刷新状态", "取消任务", "停止查看"]);
   });
 
+  it("keeps a completed requested-model status mounted above the composer after the chat is wiped", () => {
+    const { api, dom, chat } = sandbox();
+    api.__set({ hermesActiveRun: {
+      id: "r", status: "completed", terminal: true,
+      requestedProvider: "zai", requestedModel: "glm-5.3", actions: []
+    } });
+    api.renderHermesRunStatus();
+    chat.innerHTML = "<div id='searchResults'></div>";
+    api.renderHermesRunStatus();
+    expect(chat.children).toEqual([]);
+    expect(dom.hermesRunMount.hidden).toBe(false);
+    expect(dom.hermesRunMount.children).toEqual([dom.hermesRunStatus, dom.hermesRunRestore]);
+    expect(dom.hermesRunStatus.hidden).toBe(false);
+    expect(dom.hermesRunStatusText.textContent).toContain("已完成");
+    expect(dom.hermesRunStatusText.textContent).toContain("zai / glm-5.3（请求）");
+  });
+
   it("renders the exact pending operation and only once/deny approval actions", () => {
     const { api, dom } = sandbox();
     api.__set({ hermesActiveRun: {
@@ -254,10 +280,10 @@ describe("Hermes frontend", () => {
   });
 
   it("persists expanded, collapsed and hidden run-card states with a visible restore affordance", () => {
-    const { api, dom, stored, chat } = sandbox();
+    const { api, dom, stored } = sandbox();
     api.__set({ hermesActiveRun: { id: "r", status: "running", terminal: false, actions: ["refresh"] } });
     api.renderHermesRunStatus();
-    expect(chat.children).toEqual([dom.hermesRunStatus, dom.hermesRunRestore]);
+    expect(dom.hermesRunMount.children).toEqual([dom.hermesRunStatus, dom.hermesRunRestore]);
     api.setHermesPanelState("collapsed");
     expect(dom.hermesRunStatus.dataset.panelState).toBe("collapsed");
     expect(dom.hermesRunStatus.hidden).toBe(false);

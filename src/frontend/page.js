@@ -2657,7 +2657,9 @@ body.dark .toolErrorNotice{
 .modelModeSwitch button.active{background:var(--primary);border-color:var(--primary);color:white}
 .modelModeSwitch.hasHermes{grid-template-columns:1fr 1fr 1fr}
 .modelModeSwitch button[hidden]{display:none}
-.hermesRunStatus{display:grid;gap:8px;width:min(760px,100%);min-width:0;align-self:center;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:var(--panel);color:var(--text);overflow:hidden;overflow-wrap:anywhere;box-shadow:0 8px 24px rgba(15,23,42,.1)}
+.hermesRunMount{display:grid;justify-items:center;width:100%;min-width:0}
+.hermesRunMount[hidden]{display:none}
+.hermesRunStatus{display:grid;gap:8px;width:min(760px,100%);min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:var(--panel);color:var(--text);overflow:hidden;overflow-wrap:anywhere;box-shadow:0 8px 24px rgba(15,23,42,.1)}
 .hermesRunStatus[hidden]{display:none}
 .hermesRunStatus[data-tone="warn"]{border-color:#d97706}
 .hermesRunStatus[data-tone="error"]{border-color:#dc2626}
@@ -2669,7 +2671,7 @@ body.dark .toolErrorNotice{
 .hermesRunStatus[data-panel-state="collapsed"] #hermesApprovalPanel,
 .hermesRunStatus[data-panel-state="collapsed"] #hermesRunActions{display:none}
 .hermesRunStatus[data-panel-state="collapsed"] #hermesRunStatusText{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.hermesRunRestore{position:sticky;bottom:0;z-index:2;align-self:center;max-width:100%;box-shadow:0 6px 18px rgba(15,23,42,.14)}
+.hermesRunRestore{max-width:100%;box-shadow:0 6px 18px rgba(15,23,42,.14)}
 .hermesRunRestore[hidden]{display:none}
 .hermesRunRestore[data-tone="warn"]{border-color:#d97706}
 .hermesApprovalPanel{display:grid;gap:5px;padding:8px;border-radius:8px;background:rgba(217,119,6,.08);font-size:12px;line-height:1.45}
@@ -3638,25 +3640,6 @@ body.dark .toolErrorNotice{
         </div>
         <div id="searchResults"></div>
 
-        <section id="hermesRunStatus" class="hermesRunStatus" aria-live="polite" hidden>
-          <div class="hermesRunHeader">
-            <span id="hermesRunStatusText"></span>
-            <div class="hermesRunPanelControls">
-              <button id="hermesRunCollapseBtn" type="button" aria-expanded="true">收起</button>
-              <button id="hermesRunHideBtn" type="button">隐藏</button>
-            </div>
-          </div>
-          <div id="hermesApprovalPanel" class="hermesApprovalPanel" hidden>
-            <strong>待审批操作</strong>
-            <div class="hermesApprovalField"><span>工具</span><span id="hermesApprovalTool"></span></div>
-            <div class="hermesApprovalField"><span>命令</span><span id="hermesApprovalCommand" class="hermesApprovalCommand"></span></div>
-            <div class="hermesApprovalField"><span>目标</span><span id="hermesApprovalTarget"></span></div>
-            <div class="hermesApprovalField"><span>风险</span><span id="hermesApprovalRisk"></span></div>
-          </div>
-          <div id="hermesRunActions" class="hermesRunActions"></div>
-        </section>
-        <button id="hermesRunRestore" class="hermesRunRestore" type="button" hidden>显示 Hermes 任务</button>
-
       </div>
 
       <div class="inputBar">
@@ -3672,6 +3655,27 @@ body.dark .toolErrorNotice{
   />
 
   <div id="contextStatus"></div>
+
+  <div id="hermesRunMount" class="hermesRunMount" hidden>
+    <section id="hermesRunStatus" class="hermesRunStatus" aria-live="polite" hidden>
+      <div class="hermesRunHeader">
+        <span id="hermesRunStatusText"></span>
+        <div class="hermesRunPanelControls">
+          <button id="hermesRunCollapseBtn" type="button" aria-expanded="true">收起</button>
+          <button id="hermesRunHideBtn" type="button">隐藏</button>
+        </div>
+      </div>
+      <div id="hermesApprovalPanel" class="hermesApprovalPanel" hidden>
+        <strong>待审批操作</strong>
+        <div class="hermesApprovalField"><span>工具</span><span id="hermesApprovalTool"></span></div>
+        <div class="hermesApprovalField"><span>命令</span><span id="hermesApprovalCommand" class="hermesApprovalCommand"></span></div>
+        <div class="hermesApprovalField"><span>目标</span><span id="hermesApprovalTarget"></span></div>
+        <div class="hermesApprovalField"><span>风险</span><span id="hermesApprovalRisk"></span></div>
+      </div>
+      <div id="hermesRunActions" class="hermesRunActions"></div>
+    </section>
+    <button id="hermesRunRestore" class="hermesRunRestore" type="button" hidden>显示 Hermes 任务</button>
+  </div>
 
   <div id="openClawTaskBanner" class="openClawTaskBanner" aria-live="polite"></div>
 
@@ -14045,6 +14049,7 @@ var hermesModelField = document.getElementById("hermesModelField");
 var hermesModelSelect = document.getElementById("hermesModelSelect");
 var hermesCatalogStatus = document.getElementById("hermesCatalogStatus");
 var hermesCatalogRefresh = document.getElementById("hermesCatalogRefresh");
+var hermesRunMount = document.getElementById("hermesRunMount");
 var hermesRunStatus = document.getElementById("hermesRunStatus");
 var hermesRunStatusText = document.getElementById("hermesRunStatusText");
 var hermesRunCollapseBtn = document.getElementById("hermesRunCollapseBtn");
@@ -14541,14 +14546,16 @@ function renderHermesRunStatus(){
   if(!hermesRunStatus) return;
   const run = hermesActiveRun;
   if(!run && !hermesSubmitPending){
+    if(hermesRunMount) hermesRunMount.hidden = true;
     hermesRunStatus.hidden = true;
     if(hermesRunRestore) hermesRunRestore.hidden = true;
     return;
   }
-  if(chat?.appendChild){
-    chat.appendChild(hermesRunStatus);
-    if(hermesRunRestore) chat.appendChild(hermesRunRestore);
+  if(hermesRunMount?.appendChild){
+    hermesRunMount.appendChild(hermesRunStatus);
+    if(hermesRunRestore) hermesRunMount.appendChild(hermesRunRestore);
   }
+  if(hermesRunMount) hermesRunMount.hidden = false;
   const effectivePanelState = hermesPanelStateOverride || hermesPanelState;
   const panelHidden = effectivePanelState === "hidden";
   hermesRunStatus.hidden = panelHidden;

@@ -22,6 +22,70 @@ describe("chat page: 当前使用 with 模型 / Agent", () => {
     expect(area).not.toContain("当前模型");
   });
 
+  it("collapses model details by default and persists independently from sidebar mode", () => {
+    const script = pageScript();
+    const source = ["readModelAreaCollapsed", "setModelAreaCollapsed"]
+      .map(name => lastDeclaration(script, name)).join("\n");
+    const storage = memoryStorage({ wa_sidebar_mode_v1: "rail" });
+    const classes = new Set();
+    const attrs = new Map();
+    const modelArea = { classList: { toggle: (name, on) => on ? classes.add(name) : classes.delete(name) } };
+    const modelAreaDetails = { hidden: false };
+    const modelAreaToggle = {
+      title: "",
+      setAttribute: (name, value) => attrs.set(name, String(value))
+    };
+    const api = new Function("localStorage", "MODEL_AREA_COLLAPSED_STORAGE_KEY", "modelArea", "modelAreaDetails", "modelAreaToggle",
+      source + "\nreturn { readModelAreaCollapsed, setModelAreaCollapsed };")(
+        storage, "wa_model_area_collapsed_v1", modelArea, modelAreaDetails, modelAreaToggle
+      );
+
+    expect(api.readModelAreaCollapsed()).toBe(true);
+    api.setModelAreaCollapsed(true);
+    expect(modelAreaDetails.hidden).toBe(true);
+    expect(attrs.get("aria-expanded")).toBe("false");
+    expect(storage.getItem("wa_model_area_collapsed_v1")).toBe("true");
+    api.setModelAreaCollapsed(false);
+    expect(modelAreaDetails.hidden).toBe(false);
+    expect(attrs.get("aria-expanded")).toBe("true");
+    expect(storage.getItem("wa_model_area_collapsed_v1")).toBe("false");
+    expect(api.readModelAreaCollapsed()).toBe(false);
+    expect(storage.getItem("wa_sidebar_mode_v1")).toBe("rail");
+  });
+
+  it("keeps the kind switch outside collapsed details and never clears its selection", () => {
+    const page = htmlPage();
+    expect(page).toMatch(/id="selectionKindSwitch"[\s\S]*?id="modelAreaToggle"[\s\S]*?id="modelAreaDetails"/);
+    expect(page).toContain('role="combobox" aria-label="模型"');
+    expect(page).toContain('id="modelCatalogList" class="modelCatalogList" role="listbox"');
+    expect(page).toContain('["ArrowDown", "ArrowUp", "Home", "End"]');
+    const h = createHarness({ settings: { defaultModel: "claude" } });
+    h.api.applyNewChatSelection();
+    const selectedBefore = h.dom.modelSelect.value;
+    h.api.setChatSelectionKind("agent");
+    h.api.setChatSelectionKind("model");
+    expect(h.dom.modelSelect.value).toBe(selectedBefore);
+    expect(h.state().chatSelection).toMatchObject({ kind: "model", modelId: "claude" });
+  });
+
+  it("custom model picker preserves the native select value and change event semantics", () => {
+    const source = lastDeclaration(pageScript(), "chooseModelCatalogValue");
+    const events = [];
+    const modelSelect = {
+      options: [{ value: "sol" }, { value: "provider/model-exact" }],
+      value: "sol",
+      dispatchEvent: event => events.push(event)
+    };
+    const api = new Function("modelSelect", "syncModelCatalogPicker", "closeModelCatalogPicker", "Event",
+      source + "\nreturn chooseModelCatalogValue;")(
+        modelSelect, () => {}, () => {}, class { constructor(type, init){ this.type = type; this.bubbles = init.bubbles; } }
+      );
+    api("provider/model-exact");
+    expect(modelSelect.value).toBe("provider/model-exact");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: "change", bubbles: true });
+  });
+
   it("shows only the model picker for a plain model", () => {
     const h = createHarness({ settings: { defaultModel: "claude" } });
     h.api.applyNewChatSelection();

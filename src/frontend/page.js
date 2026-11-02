@@ -631,10 +631,44 @@ body.authenticated .loginScreen{
   background:var(--panel);
 }
 
-.modelLabel{
+.modelModeRow{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 34px;
+  align-items:center;
+  gap:6px;
+}
+
+.modelAreaToggle{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:34px;
+  height:34px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:transparent;
   color:var(--muted);
-  font-size:12px;
-  margin-bottom:8px;
+  cursor:pointer;
+  font-size:19px;
+  line-height:1;
+}
+
+.modelAreaToggle:hover{
+  color:var(--text);
+  background:rgba(148,163,184,.12);
+}
+
+.modelAreaToggleChevron{
+  transform:rotate(90deg);
+  transition:transform .16s ease;
+}
+
+.modelArea.collapsed .modelAreaToggleChevron{
+  transform:rotate(-90deg);
+}
+
+.modelAreaDetails[hidden]{
+  display:none;
 }
 
 .modelSettingsBtn{
@@ -2596,15 +2630,29 @@ body.dark .toolErrorNotice{
   background:transparent;
   color:var(--text);
 }
+.modelSelectNative{display:none}
+.modelCatalogPicker{position:relative;min-width:0}
+.modelCatalogTrigger{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--border);border-radius:14px;background:transparent;color:var(--text);font:inherit;font-size:max(16px,1rem);text-align:left;cursor:pointer}
+.modelCatalogTrigger:focus-visible,.modelCatalogFilter:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.modelCatalogTriggerLabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.modelCatalogPopup{position:absolute;z-index:40;left:0;right:0;bottom:calc(100% + 5px);display:grid;gap:6px;padding:8px;border:1px solid var(--border);border-radius:12px;background:var(--panel);box-shadow:0 14px 34px rgba(15,23,42,.22)}
+.modelCatalogPopup[hidden]{display:none}
+.modelCatalogFilter{width:100%;min-height:40px;padding:8px 10px;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--text);font:inherit;font-size:max(16px,1rem)}
+.modelCatalogList{max-height:min(45vh,360px);overflow-y:auto;overscroll-behavior:contain}
+.modelCatalogGroupLabel{padding:8px 8px 4px;color:var(--muted);font-size:.875rem;font-weight:600}
+.modelCatalogOption{display:block;width:100%;border:0;border-radius:8px;padding:9px 8px;background:transparent;color:var(--text);font:inherit;font-size:max(16px,1rem);line-height:1.35;text-align:left;cursor:pointer}
+.modelCatalogOption:hover,.modelCatalogOption.active{background:rgba(148,163,184,.16)}
+.modelCatalogOption[aria-selected="true"]{color:var(--primary);font-weight:600}
+.modelCatalogEmpty{padding:10px 8px;color:var(--muted);font-size:max(16px,1rem)}
 .openClawRouteControls{display:grid;gap:8px;margin-top:10px;font-size:12px}
 .openClawRouteControls[hidden]{display:none}
 .openClawRouteControls label{display:grid;gap:4px}
-.openClawRouteControls select{width:100%;min-width:0;padding:8px;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--text);font-size:16px}
-.openClawRouteControls option{font-size:16px}
-#hermesRouteControls select,#hermesRouteControls option{font-size:16px}
+.openClawRouteControls select{width:100%;min-width:0;padding:8px;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--text);font-size:max(16px,1rem)}
+.openClawRouteControls option,.openClawRouteControls optgroup{font-size:max(16px,1rem)}
+#hermesRouteControls select,#hermesRouteControls option,#hermesRouteControls optgroup{font-size:max(16px,1rem)}
 .openClawCatalogLine{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--muted)}
 .openClawCatalogLine button{border:1px solid var(--border);border-radius:8px;padding:5px 8px;background:transparent;color:var(--text);cursor:pointer}
-.modelModeSwitch{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
+.modelModeSwitch{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:0}
 .modelModeSwitch button{border:1px solid var(--border);border-radius:10px;padding:8px;background:transparent;color:var(--text);cursor:pointer}
 .modelModeSwitch button.active{background:var(--primary);border-color:var(--primary);color:white}
 .modelModeSwitch.hasHermes{grid-template-columns:1fr 1fr 1fr}
@@ -3501,28 +3549,34 @@ body.dark .toolErrorNotice{
       </div>
 
       <div class="modelArea">
-        <div class="modelLabel">当前使用</div>
-      <div id="selectionKindSwitch" class="modelModeSwitch" aria-label="当前使用">
-        <button type="button" data-selection-kind="model">模型</button>
-        <button type="button" data-selection-kind="agent">Agent</button>
-        <button type="button" id="hermesKindBtn" data-selection-kind="hermes" hidden>Hermes</button>
+      <div class="modelModeRow">
+        <div id="selectionKindSwitch" class="modelModeSwitch" aria-label="当前使用">
+          <button type="button" data-selection-kind="model">模型</button>
+          <button type="button" data-selection-kind="agent">Agent</button>
+          <button type="button" id="hermesKindBtn" data-selection-kind="hermes" hidden>Hermes</button>
+        </div>
+        <button id="modelAreaToggle" class="modelAreaToggle" type="button" aria-expanded="false" aria-controls="modelAreaDetails" aria-label="展开模型设置" title="展开模型设置"><span class="modelAreaToggleChevron" aria-hidden="true">&#x203A;</span></button>
       </div>
-      <label id="modelSelectField" class="selectionField">
-      模型
+      <div id="modelAreaDetails" class="modelAreaDetails" hidden>
+      <div id="modelSelectField" class="selectionField">
+      <span>模型</span>
       <select
         id="modelSelect"
-        style="
-          width:100%;
-          padding:12px;
-          border:1px solid var(--border);
-          border-radius:14px;
-          background:transparent;
-          color:var(--text);
-          font-size:16px;
-        "
+        class="modelSelectNative"
+        aria-hidden="true"
+        tabindex="-1"
       >
       </select>
-      </label>
+      <div id="modelCatalogPicker" class="modelCatalogPicker">
+        <button id="modelCatalogTrigger" class="modelCatalogTrigger" type="button" role="combobox" aria-label="模型" aria-haspopup="listbox" aria-expanded="false" aria-controls="modelCatalogList">
+          <span id="modelCatalogTriggerLabel" class="modelCatalogTriggerLabel">选择模型</span><span aria-hidden="true">&#x2304;</span>
+        </button>
+        <div id="modelCatalogPopup" class="modelCatalogPopup" hidden>
+          <input id="modelCatalogFilter" class="modelCatalogFilter" type="search" autocomplete="off" aria-label="搜索模型" aria-controls="modelCatalogList" placeholder="搜索模型">
+          <div id="modelCatalogList" class="modelCatalogList" role="listbox" aria-label="模型目录"></div>
+        </div>
+      </div>
+      </div>
       <div id="openClawRouteControls" class="openClawRouteControls" hidden>
         <label>实例 <select id="openClawProviderSelect" aria-label="OpenClaw 实例"></select></label>
         <label>Agent <select id="openClawAgentSelect" aria-label="OpenClaw Agent"></select></label>
@@ -3543,7 +3597,7 @@ body.dark .toolErrorNotice{
       </div>
       <div id="effectiveModelResult" class="effectiveModelResult"></div>
       <button id="modelSettingsBtn" class="modelSettingsBtn" type="button">模型设置</button>
-
+      </div>
       </div>
 
     </aside>
@@ -5978,8 +6032,18 @@ fileInput.addEventListener("change", async () => {
 
 
 const modelSelect = document.getElementById("modelSelect");
+const modelArea = document.querySelector(".modelArea");
+const modelAreaToggle = document.getElementById("modelAreaToggle");
+const modelAreaDetails = document.getElementById("modelAreaDetails");
+const MODEL_AREA_COLLAPSED_STORAGE_KEY = "wa_model_area_collapsed_v1";
 const selectionKindSwitch = document.getElementById("selectionKindSwitch");
 const modelSelectField = document.getElementById("modelSelectField");
+const modelCatalogPicker = document.getElementById("modelCatalogPicker");
+const modelCatalogTrigger = document.getElementById("modelCatalogTrigger");
+const modelCatalogTriggerLabel = document.getElementById("modelCatalogTriggerLabel");
+const modelCatalogPopup = document.getElementById("modelCatalogPopup");
+const modelCatalogFilter = document.getElementById("modelCatalogFilter");
+const modelCatalogList = document.getElementById("modelCatalogList");
 const chatSelectionNotice = document.getElementById("chatSelectionNotice");
 const chatSelectionNoticeText = document.getElementById("chatSelectionNoticeText");
 const chatSelectionConfirmBtn = document.getElementById("chatSelectionConfirmBtn");
@@ -9274,18 +9338,210 @@ function rememberChatSelection(selection){
   syncSettingsToServer(modelSettingsState);
 }
 
+function readModelAreaCollapsed(){
+  try{
+    const stored = localStorage.getItem(MODEL_AREA_COLLAPSED_STORAGE_KEY);
+    return stored === null ? true : stored !== "false";
+  }catch(err){
+    return true;
+  }
+}
+
+function setModelAreaCollapsed(collapsed, persist = true){
+  const next = Boolean(collapsed);
+  modelArea?.classList.toggle("collapsed", next);
+  if(modelAreaDetails) modelAreaDetails.hidden = next;
+  modelAreaToggle?.setAttribute("aria-expanded", String(!next));
+  if(modelAreaToggle){
+    const action = next ? "展开模型设置" : "收起模型设置";
+    modelAreaToggle.setAttribute("aria-label", action);
+    modelAreaToggle.title = action;
+  }
+  if(next && typeof closeModelCatalogPicker === "function") closeModelCatalogPicker(false);
+  if(persist){
+    try{
+      localStorage.setItem(MODEL_AREA_COLLAPSED_STORAGE_KEY, String(next));
+    }catch(err){}
+  }
+}
+
+function initModelAreaCollapse(){
+  setModelAreaCollapsed(readModelAreaCollapsed(), false);
+  modelAreaToggle?.addEventListener("click", () => {
+    setModelAreaCollapsed(modelAreaToggle.getAttribute("aria-expanded") === "true");
+  });
+}
+
+let modelCatalogActiveIndex = -1;
+let modelCatalogVisibleOptions = [];
+
+function modelCatalogEntries(filterText = ""){
+  const query = String(filterText || "").trim().toLocaleLowerCase();
+  return [...modelSelect.options].map(option => {
+    const parent = option.parentElement;
+    const group = parent?.tagName === "OPTGROUP" ? parent.label : "Models";
+    return { value:option.value, label:option.textContent || option.value, group };
+  }).filter(entry => !query || (entry.group + " " + entry.label + " " + entry.value).toLocaleLowerCase().includes(query));
+}
+
+function setModelCatalogActive(index){
+  const options = [...modelCatalogList.querySelectorAll(".modelCatalogOption")];
+  if(!options.length){
+    modelCatalogActiveIndex = -1;
+    modelCatalogFilter?.removeAttribute("aria-activedescendant");
+    return;
+  }
+  modelCatalogActiveIndex = Math.max(0, Math.min(index, options.length - 1));
+  options.forEach((option, optionIndex) => option.classList.toggle("active", optionIndex === modelCatalogActiveIndex));
+  const active = options[modelCatalogActiveIndex];
+  modelCatalogFilter?.setAttribute("aria-activedescendant", active.id);
+  active.scrollIntoView({ block:"nearest" });
+}
+
+function renderModelCatalogPicker(filterText = ""){
+  if(!modelCatalogList) return;
+  modelCatalogVisibleOptions = modelCatalogEntries(filterText);
+  modelCatalogList.innerHTML = "";
+  if(!modelCatalogVisibleOptions.length){
+    const empty = document.createElement("div");
+    empty.className = "modelCatalogEmpty";
+    empty.textContent = "没有匹配的模型";
+    modelCatalogList.appendChild(empty);
+    setModelCatalogActive(-1);
+    return;
+  }
+  let previousGroup = null;
+  modelCatalogVisibleOptions.forEach((entry, index) => {
+    if(entry.group !== previousGroup){
+      const group = document.createElement("div");
+      group.className = "modelCatalogGroupLabel";
+      group.textContent = entry.group;
+      modelCatalogList.appendChild(group);
+      previousGroup = entry.group;
+    }
+    const option = document.createElement("button");
+    option.type = "button";
+    option.id = "modelCatalogOption-" + index;
+    option.className = "modelCatalogOption";
+    option.dataset.value = entry.value;
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", String(entry.value === modelSelect.value));
+    option.textContent = entry.label;
+    modelCatalogList.appendChild(option);
+  });
+  const selectedIndex = modelCatalogVisibleOptions.findIndex(entry => entry.value === modelSelect.value);
+  setModelCatalogActive(selectedIndex >= 0 ? selectedIndex : 0);
+}
+
+function syncModelCatalogPicker(){
+  if(!modelCatalogTriggerLabel) return;
+  const selected = [...modelSelect.options].find(option => option.value === modelSelect.value);
+  modelCatalogTriggerLabel.textContent = selected?.textContent || "选择模型";
+  modelCatalogTrigger.disabled = modelSelect.disabled;
+  if(modelCatalogPopup && !modelCatalogPopup.hidden) renderModelCatalogPicker(modelCatalogFilter?.value || "");
+}
+
+function openModelCatalogPicker(initialFilter = ""){
+  if(!modelCatalogPopup || modelCatalogTrigger?.disabled) return;
+  modelCatalogPopup.hidden = false;
+  modelCatalogTrigger.setAttribute("aria-expanded", "true");
+  modelCatalogFilter.value = initialFilter;
+  renderModelCatalogPicker(initialFilter);
+  modelCatalogFilter.focus();
+}
+
+function closeModelCatalogPicker(restoreFocus = true){
+  if(!modelCatalogPopup || modelCatalogPopup.hidden) return;
+  modelCatalogPopup.hidden = true;
+  modelCatalogTrigger?.setAttribute("aria-expanded", "false");
+  modelCatalogFilter?.removeAttribute("aria-activedescendant");
+  if(restoreFocus) modelCatalogTrigger?.focus();
+}
+
+function chooseModelCatalogValue(value){
+  if(![...modelSelect.options].some(option => option.value === value)) return;
+  modelSelect.value = value;
+  modelSelect.dispatchEvent(new Event("change", { bubbles:true }));
+  syncModelCatalogPicker();
+  closeModelCatalogPicker(true);
+}
+
+function handleModelCatalogKeydown(event){
+  const open = modelCatalogPopup && !modelCatalogPopup.hidden;
+  if(event.key === "Tab" && open){
+    closeModelCatalogPicker(false);
+    return;
+  }
+  if(event.key === "Escape" && open){
+    event.preventDefault();
+    closeModelCatalogPicker(true);
+    return;
+  }
+  if(["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)){
+    event.preventDefault();
+    if(!open){
+      openModelCatalogPicker();
+      return;
+    }
+    const last = modelCatalogVisibleOptions.length - 1;
+    if(event.key === "Home") setModelCatalogActive(0);
+    else if(event.key === "End") setModelCatalogActive(last);
+    else setModelCatalogActive(modelCatalogActiveIndex + (event.key === "ArrowDown" ? 1 : -1));
+    return;
+  }
+  if(event.key === "Enter" && open && modelCatalogActiveIndex >= 0){
+    event.preventDefault();
+    chooseModelCatalogValue(modelCatalogVisibleOptions[modelCatalogActiveIndex]?.value);
+  }
+}
+
+function initModelCatalogPicker(){
+  if(!modelCatalogPicker) return;
+  syncModelCatalogPicker();
+  modelCatalogTrigger.addEventListener("click", () => {
+    if(modelCatalogPopup.hidden) openModelCatalogPicker(); else closeModelCatalogPicker(false);
+  });
+  modelCatalogTrigger.addEventListener("keydown", event => {
+    if(event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey){
+      event.preventDefault();
+      openModelCatalogPicker(event.key);
+      return;
+    }
+    if((event.key === "Enter" || event.key === " ") && modelCatalogPopup.hidden){
+      event.preventDefault();
+      openModelCatalogPicker();
+      return;
+    }
+    handleModelCatalogKeydown(event);
+  });
+  modelCatalogFilter.addEventListener("input", () => renderModelCatalogPicker(modelCatalogFilter.value));
+  modelCatalogFilter.addEventListener("keydown", handleModelCatalogKeydown);
+  modelCatalogList.addEventListener("click", event => {
+    const option = event.target.closest(".modelCatalogOption");
+    if(option) chooseModelCatalogValue(option.dataset.value);
+  });
+  document.addEventListener("pointerdown", event => {
+    if(!modelCatalogPicker.contains(event.target)) closeModelCatalogPicker(false);
+  });
+  if(typeof MutationObserver !== "undefined"){
+    new MutationObserver(syncModelCatalogPicker).observe(modelSelect, { childList:true, subtree:true, characterData:true });
+  }
+}
+
 function syncChatModelSelect(){
   modelSelect.querySelectorAll("option[data-unavailable]").forEach(option => option.remove());
-  if(chatSelection.kind !== "model") return;
-  const modelId = chatSelection.modelId;
-  if(modelId && !hasModernModel(modelId)){
-    const option = document.createElement("option");
-    option.value = modelId;
-    option.textContent = (modelCatalogReady ? "不可用：" : "待验证：") + modelId;
-    option.dataset.unavailable = "true";
-    modelSelect.appendChild(option);
+  if(chatSelection.kind === "model"){
+    const modelId = chatSelection.modelId;
+    if(modelId && !hasModernModel(modelId)){
+      const option = document.createElement("option");
+      option.value = modelId;
+      option.textContent = (modelCatalogReady ? "不可用：" : "待验证：") + modelId;
+      option.dataset.unavailable = "true";
+      modelSelect.appendChild(option);
+    }
+    modelSelect.value = modelId;
   }
-  modelSelect.value = modelId;
+  if(typeof syncModelCatalogPicker === "function") syncModelCatalogPicker();
 }
 
 function syncChatSelectionUi(){
@@ -12643,6 +12899,8 @@ loginForm.addEventListener("submit", login);
 logoutBtn.addEventListener("click", logout);
 window.addEventListener("load", refreshRenderedMath);
 initSidebarUi();
+initModelAreaCollapse();
+initModelCatalogPicker();
 setFileLibraryExpanded(false);
 setContextPanelOpen(false);
 setupSettingsHeaderActions();

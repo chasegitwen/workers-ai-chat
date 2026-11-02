@@ -132,7 +132,7 @@ describe("Hermes frontend", () => {
     expect(html).toContain('id="hermesKindBtn" data-selection-kind="hermes" hidden');
     expect(html).toContain('id="hermesRouteControls" class="openClawRouteControls" hidden');
     expect(html.indexOf('id="hermesRunStatus"')).toBeGreaterThan(html.indexOf('id="chat"'));
-    expect(html).toContain('#hermesRouteControls select,#hermesRouteControls option{font-size:16px}');
+    expect(html).toContain('#hermesRouteControls select,#hermesRouteControls option,#hermesRouteControls optgroup{font-size:max(16px,1rem)}');
     const script = pageScript();
     expect(() => new Function(script)).not.toThrow();
     expect(script).toContain("var hermesSelectionActive = false;");

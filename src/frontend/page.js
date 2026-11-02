@@ -3855,6 +3855,11 @@ function closeSidebarPeek(){
   sidebarToggle?.setAttribute("aria-expanded", String(sidebarMode !== "hidden"));
 }
 
+function closeSidebarPeekOnSearchBlur(event){
+  if(mainSidebar?.contains(event.relatedTarget)) return;
+  closeSidebarPeek();
+}
+
 function openSidebarSection(focusSearch){
   if(isNarrowSidebar()){
     setSidebarDrawerOpen(true);
@@ -12480,7 +12485,7 @@ newChatBtn.addEventListener("click", () => {
 newChatBtn.addEventListener("click", createNewConversation);
 createProjectBtn.addEventListener("click", createProject);
 chatSearchInput.addEventListener("input", applyChatSearchFilter);
-chatSearchInput.addEventListener("blur", closeSidebarPeek);
+chatSearchInput.addEventListener("blur", closeSidebarPeekOnSearchBlur);
 archiveToggleBtn.addEventListener("click", event => {
   event.stopPropagation();
   setArchiveOpen(!archivePanel.classList.contains("open"));

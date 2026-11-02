@@ -8,7 +8,7 @@ const HERMES_FUNCTIONS = [
   "hermesErrorText", "hermesProviders", "hermesProvider", "hermesSelectionBlockReason", "hermesHasPendingAttachments",
   "newHermesClientRequestId", "sendHermesMessage", "submitHermesBody", "hermesRunQuery", "stopHermesTracking",
   "trackHermesRun", "applyHermesRunUpdate", "hermesTerminalText", "handleHermesTerminal", "hermesRunModelText",
-  "renderHermesApproval", "renderHermesRunStatus", "setHermesSelectionActive", "syncModelModeUi", "isOpenClawAgentMode", "selectHermesProvider"
+  "renderHermesApproval", "renderHermesRunStatus", "setHermesPanelState", "setHermesSelectionActive", "syncModelModeUi", "isOpenClawAgentMode", "selectHermesProvider"
 ];
 
 function catalog() {
@@ -29,11 +29,15 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
   const status = [];
   const polls = [];
   const functions = [...HERMES_FUNCTIONS, ...extra];
+  const stored = new Map();
   const dom = {
     hermesKindBtn: element({ hidden: true }),
     hermesRouteControls: element({ hidden: true }),
     hermesRunStatus: element({ hidden: true }),
     hermesRunStatusText: element(),
+    hermesRunCollapseBtn: element({ setAttribute(name, value) { this[name] = value; } }),
+    hermesRunHideBtn: element(),
+    hermesRunRestore: element({ hidden: true }),
     hermesApprovalPanel: element({ hidden: true }),
     hermesApprovalTool: element(),
     hermesApprovalCommand: element(),
@@ -46,10 +50,19 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
     input: { value: "What limits hunting speed?" },
     sendBtn: element()
   };
+  const chat = element({ appendChild(child) {
+    this.children = this.children.filter(item => item !== child);
+    this.children.push(child);
+  } });
   const stubs = {
     ...dom,
+    chat,
     document: { createElement: () => element({ addEventListener() {} }) },
-    localStorage: { getItem: () => null, setItem() {} },
+    localStorage: {
+      getItem: key => stored.has(key) ? stored.get(key) : null,
+      setItem: (key, value) => stored.set(key, String(value))
+    },
+    HERMES_PANEL_STORAGE_KEY: "wa_hermes_panel_state_v1",
     setContextStatus: text => status.push(text),
     syncOpenClawRouteControls() {},
     updateEffectiveModelResult() {},
@@ -93,7 +106,7 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
     hermesCatalogState: { visible: true, executionEnabled, catalog: catalog(), instances: [], loading: false },
     hermesSelection: { instanceId: "oracle-hermes", agentId: "hermes-agent", providerId: "", modelId: "" },
     hermesActiveRun: null, hermesRunView: null, hermesStreamText: "", hermesEventSource: null, hermesPollTimer: null,
-    hermesSubmitPending: null, hermesActionPending: false, chatSelection: { kind: "agent" }, activeModelMode: "modern", activeNewModeTarget: "openclaw",
+    hermesSubmitPending: null, hermesActionPending: false, hermesPanelState: "expanded", chatSelection: { kind: "agent" }, activeModelMode: "modern", activeNewModeTarget: "openclaw",
     activeProjectId: "proj-a", currentConversationId: null, conversation: [],
     selectedImage: null, pastedImageAttachments: attachments ? [{}] : [], selectedFile: null,
     pendingConversationAttachments: [], selectedFileIds: [], selectedWebPage: null
@@ -110,7 +123,7 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
   ].join("\n");
   const api = new Function(...Object.keys(stubs), source)(...Object.values(stubs));
   api.__set(state);
-  return { api, dom, fetches, status, polls };
+  return { api, dom, fetches, status, polls, stored, chat };
 }
 
 describe("Hermes frontend", () => {
@@ -118,10 +131,13 @@ describe("Hermes frontend", () => {
     const html = htmlPage();
     expect(html).toContain('id="hermesKindBtn" data-selection-kind="hermes" hidden');
     expect(html).toContain('id="hermesRouteControls" class="openClawRouteControls" hidden');
+    expect(html.indexOf('id="hermesRunStatus"')).toBeGreaterThan(html.indexOf('id="chat"'));
+    expect(html).toContain('#hermesRouteControls select,#hermesRouteControls option{font-size:14px}');
     const script = pageScript();
     expect(() => new Function(script)).not.toThrow();
     expect(script).toContain("var hermesSelectionActive = false;");
     expect(script).not.toMatch(/(?:let|const) hermesSelectionActive\b/);
+    expect(lastDeclaration(script, "loadConversationMessages")).toContain("renderHermesRunStatus()");
     expect(script.split("function sendHermesMessage(").length).toBe(2);
     // Runtime type comes from the explicit selection, not from any domain inference.
     expect(lastDeclaration(script, "sendHermesMessage")).not.toContain("hnsnowground");
@@ -221,6 +237,38 @@ describe("Hermes frontend", () => {
       "仅本次批准", "拒绝", "刷新状态", "取消任务", "停止查看"
     ]);
     expect(dom.hermesRunActions.children.map(button => button.textContent)).not.toContain("始终批准");
+  });
+
+  it("removes stale approval actions when the displayed approval is not respondable", () => {
+    const { api, dom } = sandbox();
+    api.__set({ hermesActiveRun: {
+      id: "r", status: "waiting_for_approval", terminal: false,
+      approval: { requestId: "old", executionGeneration: 1, respondable: false },
+      actions: ["approve_once", "deny", "refresh", "cancel"]
+    } });
+    api.renderHermesRunStatus();
+    expect(dom.hermesApprovalPanel.hidden).toBe(false);
+    expect(dom.hermesRunActions.children.map(button => button.textContent)).toEqual([
+      "刷新状态", "取消任务", "停止查看"
+    ]);
+  });
+
+  it("persists expanded, collapsed and hidden run-card states with a visible restore affordance", () => {
+    const { api, dom, stored, chat } = sandbox();
+    api.__set({ hermesActiveRun: { id: "r", status: "running", terminal: false, actions: ["refresh"] } });
+    api.renderHermesRunStatus();
+    expect(chat.children).toEqual([dom.hermesRunStatus, dom.hermesRunRestore]);
+    api.setHermesPanelState("collapsed");
+    expect(dom.hermesRunStatus.dataset.panelState).toBe("collapsed");
+    expect(dom.hermesRunStatus.hidden).toBe(false);
+    expect(dom.hermesRunCollapseBtn.textContent).toBe("展开");
+    api.setHermesPanelState("hidden");
+    expect(dom.hermesRunStatus.hidden).toBe(true);
+    expect(dom.hermesRunRestore.hidden).toBe(false);
+    expect(stored.get("wa_hermes_panel_state_v1")).toBe("hidden");
+    api.setHermesPanelState("expanded");
+    expect(dom.hermesRunStatus.hidden).toBe(false);
+    expect(dom.hermesRunRestore.hidden).toBe(true);
   });
 
   it("forwards the displayed approval identity and only the explicit once choice", async () => {

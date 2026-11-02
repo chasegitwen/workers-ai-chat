@@ -2506,6 +2506,7 @@ body.dark .toolErrorNotice{
 .openClawRouteControls[hidden]{display:none}
 .openClawRouteControls label{display:grid;gap:4px}
 .openClawRouteControls select{width:100%;min-width:0;padding:8px;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--text)}
+#hermesRouteControls select,#hermesRouteControls option{font-size:14px}
 .openClawCatalogLine{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--muted)}
 .openClawCatalogLine button{border:1px solid var(--border);border-radius:8px;padding:5px 8px;background:transparent;color:var(--text);cursor:pointer}
 .modelModeSwitch{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
@@ -2513,16 +2514,28 @@ body.dark .toolErrorNotice{
 .modelModeSwitch button.active{background:var(--primary);border-color:var(--primary);color:white}
 .modelModeSwitch.hasHermes{grid-template-columns:1fr 1fr 1fr}
 .modelModeSwitch button[hidden]{display:none}
-.hermesRunStatus{display:grid;gap:6px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;color:var(--text);overflow-wrap:anywhere}
+.hermesRunStatus{display:grid;gap:8px;width:min(760px,100%);min-width:0;align-self:center;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:var(--panel);color:var(--text);overflow:hidden;overflow-wrap:anywhere;box-shadow:0 8px 24px rgba(15,23,42,.1)}
 .hermesRunStatus[hidden]{display:none}
 .hermesRunStatus[data-tone="warn"]{border-color:#d97706}
 .hermesRunStatus[data-tone="error"]{border-color:#dc2626}
+.hermesRunHeader{display:flex;align-items:center;gap:8px;min-width:0;min-height:30px}
+.hermesRunHeader #hermesRunStatusText{min-width:0;flex:1;line-height:1.4}
+.hermesRunPanelControls{display:flex;flex:0 0 auto;gap:4px}
+.hermesRunPanelControls button,.hermesRunRestore{border:1px solid var(--border);border-radius:8px;padding:4px 8px;background:var(--panel);color:var(--text);cursor:pointer;font-size:12px}
+.hermesRunStatus[data-panel-state="collapsed"]{height:52px;max-height:52px;padding-top:6px;padding-bottom:6px}
+.hermesRunStatus[data-panel-state="collapsed"] #hermesApprovalPanel,
+.hermesRunStatus[data-panel-state="collapsed"] #hermesRunActions{display:none}
+.hermesRunStatus[data-panel-state="collapsed"] #hermesRunStatusText{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hermesRunRestore{position:sticky;bottom:0;z-index:2;align-self:center;max-width:100%;box-shadow:0 6px 18px rgba(15,23,42,.14)}
+.hermesRunRestore[hidden]{display:none}
+.hermesRunRestore[data-tone="warn"]{border-color:#d97706}
 .hermesApprovalPanel{display:grid;gap:5px;padding:8px;border-radius:8px;background:rgba(217,119,6,.08);font-size:12px;line-height:1.45}
 .hermesApprovalPanel[hidden]{display:none}
 .hermesApprovalPanel strong{font-size:13px}
-.hermesApprovalField{display:grid;grid-template-columns:auto 1fr;gap:6px}
+.hermesApprovalField{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px;min-width:0}
 .hermesApprovalField span:first-child{color:var(--muted)}
-.hermesApprovalCommand{white-space:pre-wrap;overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.hermesApprovalField span:last-child{min-width:0;overflow-wrap:anywhere;word-break:break-word}
+.hermesApprovalCommand{max-height:12em;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
 .hermesRunActions{display:flex;flex-wrap:wrap;gap:6px}
 .hermesRunActions button{border:1px solid var(--border);border-radius:8px;padding:4px 10px;background:transparent;color:var(--text);cursor:pointer}
 .hermesRunActions button:disabled{opacity:.55;cursor:wait}
@@ -3391,17 +3404,6 @@ body.dark .toolErrorNotice{
         <label>Provider <select id="hermesProviderSelect" aria-label="Hermes Provider"></select></label>
         <label id="hermesModelField" hidden>基础模型 <select id="hermesModelSelect" aria-label="Hermes 基础模型"></select></label>
         <div class="openClawCatalogLine"><span id="hermesCatalogStatus"></span><button id="hermesCatalogRefresh" type="button">刷新目录</button></div>
-        <div id="hermesRunStatus" class="hermesRunStatus" hidden>
-          <span id="hermesRunStatusText"></span>
-          <div id="hermesApprovalPanel" class="hermesApprovalPanel" hidden>
-            <strong>待审批操作</strong>
-            <div class="hermesApprovalField"><span>工具</span><span id="hermesApprovalTool"></span></div>
-            <div class="hermesApprovalField"><span>命令</span><span id="hermesApprovalCommand" class="hermesApprovalCommand"></span></div>
-            <div class="hermesApprovalField"><span>目标</span><span id="hermesApprovalTarget"></span></div>
-            <div class="hermesApprovalField"><span>风险</span><span id="hermesApprovalRisk"></span></div>
-          </div>
-          <div id="hermesRunActions" class="hermesRunActions"></div>
-        </div>
       </div>
       <div id="chatSelectionNotice" class="chatSelectionNotice" hidden>
         <span id="chatSelectionNoticeText"></span>
@@ -3447,6 +3449,25 @@ body.dark .toolErrorNotice{
           </div>
         </div>
         <div id="searchResults"></div>
+
+        <section id="hermesRunStatus" class="hermesRunStatus" aria-live="polite" hidden>
+          <div class="hermesRunHeader">
+            <span id="hermesRunStatusText"></span>
+            <div class="hermesRunPanelControls">
+              <button id="hermesRunCollapseBtn" type="button" aria-expanded="true">收起</button>
+              <button id="hermesRunHideBtn" type="button">隐藏</button>
+            </div>
+          </div>
+          <div id="hermesApprovalPanel" class="hermesApprovalPanel" hidden>
+            <strong>待审批操作</strong>
+            <div class="hermesApprovalField"><span>工具</span><span id="hermesApprovalTool"></span></div>
+            <div class="hermesApprovalField"><span>命令</span><span id="hermesApprovalCommand" class="hermesApprovalCommand"></span></div>
+            <div class="hermesApprovalField"><span>目标</span><span id="hermesApprovalTarget"></span></div>
+            <div class="hermesApprovalField"><span>风险</span><span id="hermesApprovalRisk"></span></div>
+          </div>
+          <div id="hermesRunActions" class="hermesRunActions"></div>
+        </section>
+        <button id="hermesRunRestore" class="hermesRunRestore" type="button" hidden>显示 Hermes 任务</button>
 
       </div>
 
@@ -10656,6 +10677,7 @@ function resetChatView(){
     renderWelcomeCard() +
     "<div id='searchResults'></div>";
   searchResults = document.getElementById("searchResults");
+  if(typeof renderHermesRunStatus === "function") renderHermesRunStatus();
   scrollBottom();
 }
 
@@ -12107,6 +12129,8 @@ async function loadConversationMessages(conversationId){
       }
     });
 
+    if(typeof renderHermesRunStatus === "function") renderHermesRunStatus();
+
     setActiveConversation();
     restoreConversationSelection(conversationId, (data.messages || []).length > 0);
     setContextStatus(getCurrentContextStatus());
@@ -13501,6 +13525,7 @@ async function streamAIResponse(response, element, isOpenClawRequest = false){
 // Top-level Hermes bindings use var on purpose: syncModelModeUi and other early callers guard
 // them with typeof, which is only safe for hoisted var bindings (a let would be in its TDZ).
 var HERMES_SELECTION_STORAGE_KEY = "wa_hermes_selection_v1";
+var HERMES_PANEL_STORAGE_KEY = "wa_hermes_panel_state_v1";
 var HERMES_POLL_MS = 4000;
 var hermesSelectionActive = false;
 var hermesCatalogState = { loaded:false, loading:false, visible:false, executionEnabled:false, instances:[], catalog:null, stale:false, error:null };
@@ -13512,6 +13537,7 @@ var hermesEventSource = null;
 var hermesPollTimer = null;
 var hermesSubmitPending = null;
 var hermesActionPending = false;
+var hermesPanelState = readHermesPanelState();
 var hermesKindBtn = document.getElementById("hermesKindBtn");
 var hermesRouteControls = document.getElementById("hermesRouteControls");
 var hermesInstanceSelect = document.getElementById("hermesInstanceSelect");
@@ -13523,6 +13549,9 @@ var hermesCatalogStatus = document.getElementById("hermesCatalogStatus");
 var hermesCatalogRefresh = document.getElementById("hermesCatalogRefresh");
 var hermesRunStatus = document.getElementById("hermesRunStatus");
 var hermesRunStatusText = document.getElementById("hermesRunStatusText");
+var hermesRunCollapseBtn = document.getElementById("hermesRunCollapseBtn");
+var hermesRunHideBtn = document.getElementById("hermesRunHideBtn");
+var hermesRunRestore = document.getElementById("hermesRunRestore");
 var hermesApprovalPanel = document.getElementById("hermesApprovalPanel");
 var hermesApprovalTool = document.getElementById("hermesApprovalTool");
 var hermesApprovalCommand = document.getElementById("hermesApprovalCommand");
@@ -13602,6 +13631,23 @@ function writeHermesSelection(){
   try{
     localStorage.setItem(HERMES_SELECTION_STORAGE_KEY, JSON.stringify({ ...hermesSelection, active:hermesSelectionActive }));
   }catch(err){}
+}
+
+function readHermesPanelState(){
+  try{
+    const value = localStorage.getItem(HERMES_PANEL_STORAGE_KEY);
+    return ["expanded", "collapsed", "hidden"].includes(value) ? value : "expanded";
+  }catch(err){
+    return "expanded";
+  }
+}
+
+function setHermesPanelState(state){
+  hermesPanelState = ["expanded", "collapsed", "hidden"].includes(state) ? state : "expanded";
+  try{
+    localStorage.setItem(HERMES_PANEL_STORAGE_KEY, hermesPanelState);
+  }catch(err){}
+  renderHermesRunStatus();
 }
 
 function hermesProviders(){
@@ -13984,9 +14030,27 @@ function renderHermesRunStatus(){
   const run = hermesActiveRun;
   if(!run && !hermesSubmitPending){
     hermesRunStatus.hidden = true;
+    if(hermesRunRestore) hermesRunRestore.hidden = true;
     return;
   }
-  hermesRunStatus.hidden = false;
+  if(chat?.appendChild){
+    chat.appendChild(hermesRunStatus);
+    if(hermesRunRestore) chat.appendChild(hermesRunRestore);
+  }
+  const panelHidden = hermesPanelState === "hidden";
+  hermesRunStatus.hidden = panelHidden;
+  hermesRunStatus.dataset.panelState = hermesPanelState;
+  if(hermesRunRestore){
+    hermesRunRestore.hidden = !panelHidden;
+    hermesRunRestore.dataset.tone = run?.status === "waiting_for_approval" ? "warn" : "";
+    hermesRunRestore.textContent = run?.status === "waiting_for_approval"
+      ? "Hermes 等待审批 · 显示任务" : "显示 Hermes 任务";
+  }
+  if(hermesRunCollapseBtn){
+    const expanded = hermesPanelState === "expanded";
+    hermesRunCollapseBtn.textContent = expanded ? "收起" : "展开";
+    hermesRunCollapseBtn.setAttribute("aria-expanded", String(expanded));
+  }
   hermesRunActions.innerHTML = "";
   renderHermesApproval(hermesSubmitPending ? null : run);
   const actions = [];
@@ -14000,8 +14064,13 @@ function renderHermesRunStatus(){
     hermesRunStatusText.textContent = parts.join(" · ");
     hermesRunStatus.dataset.tone = ["failed", "rejected", "interrupted"].includes(run.status) ? "error"
       : (["submission_unknown", "unknown", "waiting_for_approval", "cancel_requested"].includes(run.status) ? "warn" : "");
-    (run.actions || []).forEach(name => actions.push(name));
-    if(run.status === "waiting_for_approval" && run.approval?.respondable && !run.approval?.responding){
+    const approvalRespondable = run.status === "waiting_for_approval"
+      && run.approval?.respondable === true && !run.approval?.responding;
+    (run.actions || []).forEach(name => {
+      if(["approve_once", "deny"].includes(name) && !approvalRespondable) return;
+      actions.push(name);
+    });
+    if(approvalRespondable){
       if(!actions.includes("approve_once")) actions.unshift("approve_once");
       if(!actions.includes("deny")) actions.splice(actions.indexOf("approve_once") + 1, 0, "deny");
     }
@@ -14027,7 +14096,6 @@ var HERMES_ACTION_CONFIRM = {
 };
 
 async function hermesRunAction(name){
-  if(HERMES_ACTION_CONFIRM[name] && !confirm(HERMES_ACTION_CONFIRM[name])) return;
   if(name === "resubmit"){
     const pending = hermesSubmitPending;
     if(pending) await submitHermesBody(pending.body, pending.aiDiv);
@@ -14040,6 +14108,7 @@ async function hermesRunAction(name){
     return;
   }
   if(name === "dismiss"){
+    if(HERMES_ACTION_CONFIRM[name] && !confirm(HERMES_ACTION_CONFIRM[name])) return;
     // Local only: no API call; the server keeps the run and its execution slot unchanged.
     stopHermesTracking();
     hermesActiveRun = null;
@@ -14058,6 +14127,7 @@ async function hermesRunAction(name){
     await pollHermesRun();
     return;
   }
+  if(HERMES_ACTION_CONFIRM[name] && !confirm(HERMES_ACTION_CONFIRM[name])) return;
   hermesActionPending = true;
   renderHermesRunStatus();
   try{
@@ -14141,6 +14211,11 @@ function initHermesUi(){
   hermesProviderSelect.addEventListener("change", () => selectHermesProvider(hermesProviderSelect.value));
   hermesModelSelect.addEventListener("change", () => selectHermesModel(hermesModelSelect.value));
   hermesCatalogRefresh.addEventListener("click", () => loadHermesCatalog(true));
+  hermesRunCollapseBtn?.addEventListener("click", () => {
+    setHermesPanelState(hermesPanelState === "expanded" ? "collapsed" : "expanded");
+  });
+  hermesRunHideBtn?.addEventListener("click", () => setHermesPanelState("hidden"));
+  hermesRunRestore?.addEventListener("click", () => setHermesPanelState("expanded"));
   loadHermesCatalog(false).then(() => {
     if(stored?.active && hermesCatalogState.visible) setHermesSelectionActive(true);
     if(hermesCatalogState.visible && currentConversationId) restoreHermesRunForConversation(currentConversationId);

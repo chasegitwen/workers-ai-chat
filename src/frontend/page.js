@@ -2663,6 +2663,7 @@ body.dark .toolErrorNotice{
 .hermesRunStatus[hidden]{display:none}
 .hermesRunStatus[data-tone="warn"]{border-color:#d97706}
 .hermesRunStatus[data-tone="error"]{border-color:#dc2626}
+.hermesRunStatus[data-panel-state="expanded"]{max-height:min(40vh,360px);overflow:auto}
 .hermesRunHeader{display:flex;align-items:center;gap:8px;min-width:0;min-height:30px}
 .hermesRunHeader #hermesRunStatusText{min-width:0;flex:1;line-height:1.4}
 .hermesRunPanelControls{display:flex;flex:0 0 auto;gap:4px}

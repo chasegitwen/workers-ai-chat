@@ -224,7 +224,7 @@ describe("OpenClaw bridge frontend SSE state", () => {
     expect(page).toContain("id=\"conversationList\"");
     expect(page).toContain("id=\"conversationLoadMoreBtn\"");
     expect(page).toMatch(/<div id="projectStatus" class="projectStatus"><\/div>[\s\S]*?<div class="sidebarSection chatsSection">/);
-    expect(page).toMatch(/<\/aside>\s*<div id="projectSettingsPopover" class="projectSettingsPopover" hidden>/);
+    expect(page).toMatch(/<\/aside>\s*<button id="sidebarBackdrop"[^>]*><\/button>\s*<div id="projectSettingsPopover" class="projectSettingsPopover" hidden>/);
     expect(page).toContain("id=\"modelSelect\"");
     expect(page).toContain("id=\"modelSettingsBtn\"");
     expect(page).toContain("\u6a21\u578b\u8bbe\u7f6e\u4e2d\u5fc3");

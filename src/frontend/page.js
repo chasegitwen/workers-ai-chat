@@ -3822,6 +3822,7 @@ function setSidebarDrawerOpen(open){
   const narrow = isNarrowSidebar();
   const next = Boolean(open) && narrow;
   mainLayout?.classList.toggle("sidebarDrawerOpen", next);
+  mainSidebar?.toggleAttribute("inert", narrow && !next);
   sidebarToggle?.setAttribute("aria-expanded", String(narrow ? next : sidebarMode !== "hidden"));
 }
 
@@ -3860,8 +3861,8 @@ function initSidebarUi(){
   sidebarRailSearch?.addEventListener("click", () => openSidebarSection(true));
   sidebarRailSessions?.addEventListener("click", () => openSidebarSection(false));
   window.addEventListener("resize", () => {
+    setSidebarDrawerOpen(mainLayout?.classList.contains("sidebarDrawerOpen"));
     if(!isNarrowSidebar()){
-      setSidebarDrawerOpen(false);
       setSidebarMode(sidebarMode);
     }
   });
@@ -12132,7 +12133,10 @@ function renderConversationRows(targetList, conversations, options = {}){
     btn.title = item.last_message_preview
       ? (item.title || "New Chat") + "\\n" + item.last_message_preview
       : (item.title || "New Chat");
-    btn.addEventListener("click", () => loadConversationMessages(item.id));
+    btn.addEventListener("click", () => {
+      setSidebarDrawerOpen(false);
+      loadConversationMessages(item.id);
+    });
 
     const time = document.createElement("span");
     time.className = "historyTime";
@@ -12454,6 +12458,7 @@ openClawTaskHistoryPanel.addEventListener("click", event => {
   }
   loadOpenClawTaskHistory(view);
 });
+newChatBtn.addEventListener("click", () => setSidebarDrawerOpen(false));
 newChatBtn.addEventListener("click", createNewConversation);
 createProjectBtn.addEventListener("click", createProject);
 chatSearchInput.addEventListener("input", applyChatSearchFilter);

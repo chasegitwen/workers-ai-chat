@@ -403,6 +403,33 @@ body.authenticated .loginScreen{
   border-bottom:1px solid rgba(148,163,184,.18);
 }
 
+.topbarBrand{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-width:0;
+}
+
+.sidebarToggle{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:36px;
+  height:36px;
+  border:1px solid transparent;
+  border-radius:10px;
+  background:transparent;
+  color:var(--text);
+  cursor:pointer;
+  font-size:20px;
+  line-height:1;
+}
+
+.sidebarToggle:hover{
+  background:rgba(37,99,235,.08);
+  color:var(--primary);
+}
+
 .brand{
   font-size:20px;
   font-weight:700;
@@ -448,6 +475,40 @@ body.authenticated .loginScreen{
   grid-template-columns:280px minmax(0,1fr) 280px;
 }
 
+@media(min-width:801px){
+  .main[data-sidebar-mode="rail"]{
+    grid-template-columns:52px minmax(0,1fr);
+  }
+
+  .main[data-sidebar-mode="rail"].contextPanelOpen{
+    grid-template-columns:52px minmax(0,1fr) 280px;
+  }
+
+  .main[data-sidebar-mode="hidden"]{
+    grid-template-columns:minmax(0,1fr);
+  }
+
+  .main[data-sidebar-mode="hidden"].contextPanelOpen{
+    grid-template-columns:minmax(0,1fr) 280px;
+  }
+
+  .main[data-sidebar-mode="hidden"] .sidebar{
+    display:none;
+  }
+
+  .main[data-sidebar-mode="rail"] .sidebar{
+    padding:6px;
+  }
+
+  .main[data-sidebar-mode="rail"] .sidebar > :not(.sidebarRail){
+    display:none;
+  }
+
+  .main[data-sidebar-mode="rail"] .sidebarRail{
+    display:flex;
+  }
+}
+
 .sidebar{
   height:100%;
   min-height:0;
@@ -457,6 +518,39 @@ body.authenticated .loginScreen{
   padding:12px;
   display:flex;
   flex-direction:column;
+}
+
+.sidebarRail{
+  display:none;
+  flex:1;
+  flex-direction:column;
+  align-items:center;
+  gap:8px;
+}
+
+.sidebarRail button{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:40px;
+  height:40px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:transparent;
+  color:var(--text);
+  cursor:pointer;
+  font-size:19px;
+  line-height:1;
+}
+
+.sidebarRail button:first-child{
+  border-color:var(--primary);
+  background:var(--primary);
+  color:white;
+}
+
+.sidebarBackdrop{
+  display:none;
 }
 
 .sidebar h2{
@@ -2497,7 +2591,7 @@ body.dark .toolErrorNotice{
   padding:12px;
   border:1px solid var(--border);
   border-radius:14px;
-  font-size:14px;
+  font-size:16px;
   outline:none;
   background:transparent;
   color:var(--text);
@@ -2505,8 +2599,9 @@ body.dark .toolErrorNotice{
 .openClawRouteControls{display:grid;gap:8px;margin-top:10px;font-size:12px}
 .openClawRouteControls[hidden]{display:none}
 .openClawRouteControls label{display:grid;gap:4px}
-.openClawRouteControls select{width:100%;min-width:0;padding:8px;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--text)}
-#hermesRouteControls select,#hermesRouteControls option{font-size:14px}
+.openClawRouteControls select{width:100%;min-width:0;padding:8px;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--text);font-size:16px}
+.openClawRouteControls option{font-size:16px}
+#hermesRouteControls select,#hermesRouteControls option{font-size:16px}
 .openClawCatalogLine{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--muted)}
 .openClawCatalogLine button{border:1px solid var(--border);border-radius:8px;padding:5px 8px;background:transparent;color:var(--text);cursor:pointer}
 .modelModeSwitch{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
@@ -2539,20 +2634,20 @@ body.dark .toolErrorNotice{
 .hermesRunActions{display:flex;flex-wrap:wrap;gap:6px}
 .hermesRunActions button{border:1px solid var(--border);border-radius:8px;padding:4px 10px;background:transparent;color:var(--text);cursor:pointer}
 .hermesRunActions button:disabled{opacity:.55;cursor:wait}
-.selectionField{display:grid;gap:4px;font-size:12px;color:var(--muted)}
+.selectionField{display:grid;gap:4px;font-size:14px;color:var(--muted)}
 .selectionField[hidden]{display:none}
 .openClawBaseModelLine{display:flex;align-items:center;flex-wrap:wrap;gap:6px;color:var(--muted)}
 .openClawBaseModelLine span{color:var(--text);overflow-wrap:anywhere}
 .openClawBaseModelLine button{border:1px solid var(--border);border-radius:8px;padding:3px 8px;background:transparent;color:var(--text);cursor:pointer}
 .openClawBaseModelLine button:disabled{opacity:.5;cursor:default}
-.chatSelectionNotice{display:grid;gap:6px;margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:12px;line-height:1.45;color:var(--text);overflow-wrap:anywhere}
+.chatSelectionNotice{display:grid;gap:6px;margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:14px;line-height:1.45;color:var(--text);overflow-wrap:anywhere}
 .chatSelectionNotice[hidden]{display:none}
 .chatSelectionNotice[data-state="invalid"],.chatSelectionNotice[data-state="incomplete"],.chatSelectionNotice[data-state="unrecorded"]{border-color:#d97706}
 .chatSelectionNotice button{justify-self:start;border:1px solid var(--border);border-radius:8px;padding:4px 10px;background:transparent;color:var(--text);cursor:pointer}
 .chatSelectionNotice button[hidden]{display:none}
-.settingsFieldNote{font-size:12px;line-height:1.4;color:var(--muted)}
+.settingsFieldNote{font-size:14px;line-height:1.4;color:var(--muted)}
 .settingsFieldNote:empty{display:none}
-.effectiveModelResult{font-size:12px;line-height:1.45;color:var(--muted);margin-top:7px;overflow-wrap:anywhere}
+.effectiveModelResult{font-size:14px;line-height:1.45;color:var(--muted);margin-top:7px;overflow-wrap:anywhere}
 .openClawInstancesSettings{margin-top:0}
 .openClawInstanceMeta{font-size:12px;color:var(--muted);margin-top:3px;overflow-wrap:anywhere}
 
@@ -2609,7 +2704,7 @@ body.dark .toolErrorNotice{
   grid-column:1 / -1;
   margin:0;
   color:var(--muted);
-  font-size:12px;
+  font-size:14px;
   line-height:1.5;
 }
 
@@ -2645,6 +2740,10 @@ body.dark .toolErrorNotice{
   padding:9px 10px;
   background:transparent;
   color:var(--text);
+}
+
+.settingsField select{
+  font-size:16px;
 }
 
 .settingsCheck{
@@ -3099,7 +3198,31 @@ body.dark .toolErrorNotice{
   }
 
   .sidebar{
-    display:none;
+    position:fixed;
+    z-index:120;
+    top:52px;
+    left:0;
+    bottom:0;
+    width:min(280px, calc(100vw - 44px));
+    height:auto;
+    border-radius:0 14px 14px 0;
+    box-shadow:0 24px 70px rgba(15,23,42,.28);
+    transform:translateX(-110%);
+    transition:transform .18s ease;
+  }
+
+  .main.sidebarDrawerOpen .sidebar{
+    transform:translateX(0);
+  }
+
+  .main.sidebarDrawerOpen .sidebarBackdrop{
+    display:block;
+    position:fixed;
+    z-index:110;
+    inset:52px 0 0;
+    border:0;
+    background:rgba(15,23,42,.4);
+    cursor:pointer;
   }
 
   .contextPanel{
@@ -3307,7 +3430,10 @@ body.dark .toolErrorNotice{
 <div class="app">
 
   <div class="topbar">
-    <div class="brand">Workers <span>AI</span> Assistant</div>
+    <div class="topbarBrand">
+      <button id="sidebarToggle" class="sidebarToggle" type="button" aria-label="切换主导航" aria-controls="mainSidebar" aria-expanded="true" title="切换主导航">&#x2630;</button>
+      <div class="brand">Workers <span>AI</span> Assistant</div>
+    </div>
     <div class="topbarActions">
       <button id="contextPanelToggle" class="themeBtn" type="button" aria-expanded="false">Context</button>
       <button id="logoutBtn" class="themeBtn" type="button">Logout</button>
@@ -3317,7 +3443,13 @@ body.dark .toolErrorNotice{
 
   <div class="main">
 
-    <aside class="sidebar">
+    <aside id="mainSidebar" class="sidebar">
+
+      <nav class="sidebarRail" aria-label="主导航快捷方式">
+        <button id="sidebarRailNew" type="button" aria-label="新建对话" title="新建对话">+</button>
+        <button id="sidebarRailSearch" type="button" aria-label="搜索对话" title="搜索对话">&#x2315;</button>
+        <button id="sidebarRailSessions" type="button" aria-label="对话列表" title="对话列表">&#x2637;</button>
+      </nav>
 
       <button id="newChatBtn" class="newChatBtn" type="button">
         + Chat
@@ -3386,7 +3518,7 @@ body.dark .toolErrorNotice{
           border-radius:14px;
           background:transparent;
           color:var(--text);
-          font-size:14px;
+          font-size:16px;
         "
       >
       </select>
@@ -3415,6 +3547,8 @@ body.dark .toolErrorNotice{
       </div>
 
     </aside>
+
+    <button id="sidebarBackdrop" class="sidebarBackdrop" type="button" aria-label="关闭主导航"></button>
 
     <div id="projectSettingsPopover" class="projectSettingsPopover" hidden>
       <div class="projectSettingsPopoverHeader">
@@ -3662,6 +3796,76 @@ const loginBtn = document.getElementById("loginBtn");
 const loginError = document.getElementById("loginError");
 const logoutBtn = document.getElementById("logoutBtn");
 const mainLayout = document.querySelector(".main");
+const mainSidebar = document.getElementById("mainSidebar");
+const sidebarToggle = document.getElementById("sidebarToggle");
+const sidebarBackdrop = document.getElementById("sidebarBackdrop");
+const sidebarRailNew = document.getElementById("sidebarRailNew");
+const sidebarRailSearch = document.getElementById("sidebarRailSearch");
+const sidebarRailSessions = document.getElementById("sidebarRailSessions");
+const SIDEBAR_MODE_STORAGE_KEY = "wa_sidebar_mode_v1";
+let sidebarMode = readSidebarMode();
+
+function readSidebarMode(){
+  try{
+    const value = localStorage.getItem(SIDEBAR_MODE_STORAGE_KEY);
+    return ["expanded", "rail", "hidden"].includes(value) ? value : "expanded";
+  }catch(err){
+    return "expanded";
+  }
+}
+
+function isNarrowSidebar(){
+  return window.matchMedia ? window.matchMedia("(max-width:800px)").matches : window.innerWidth <= 800;
+}
+
+function setSidebarDrawerOpen(open){
+  const narrow = isNarrowSidebar();
+  const next = Boolean(open) && narrow;
+  mainLayout?.classList.toggle("sidebarDrawerOpen", next);
+  sidebarToggle?.setAttribute("aria-expanded", String(narrow ? next : sidebarMode !== "hidden"));
+}
+
+function setSidebarMode(mode){
+  sidebarMode = ["expanded", "rail", "hidden"].includes(mode) ? mode : "expanded";
+  if(mainLayout) mainLayout.dataset.sidebarMode = sidebarMode;
+  try{
+    localStorage.setItem(SIDEBAR_MODE_STORAGE_KEY, sidebarMode);
+  }catch(err){}
+  if(!isNarrowSidebar()){
+    sidebarToggle?.setAttribute("aria-expanded", String(sidebarMode !== "hidden"));
+    sidebarToggle.title = sidebarMode === "hidden" ? "显示主导航" : "切换主导航";
+  }
+}
+
+function toggleSidebar(){
+  if(isNarrowSidebar()){
+    setSidebarDrawerOpen(!mainLayout?.classList.contains("sidebarDrawerOpen"));
+    return;
+  }
+  const next = sidebarMode === "expanded" ? "rail" : sidebarMode === "rail" ? "hidden" : "expanded";
+  setSidebarMode(next);
+}
+
+function openSidebarSection(focusSearch){
+  setSidebarMode("expanded");
+  if(focusSearch) chatSearchInput?.focus();
+}
+
+function initSidebarUi(){
+  setSidebarMode(sidebarMode);
+  setSidebarDrawerOpen(false);
+  sidebarToggle?.addEventListener("click", toggleSidebar);
+  sidebarBackdrop?.addEventListener("click", () => setSidebarDrawerOpen(false));
+  sidebarRailNew?.addEventListener("click", () => newChatBtn?.click());
+  sidebarRailSearch?.addEventListener("click", () => openSidebarSection(true));
+  sidebarRailSessions?.addEventListener("click", () => openSidebarSection(false));
+  window.addEventListener("resize", () => {
+    if(!isNarrowSidebar()){
+      setSidebarDrawerOpen(false);
+      setSidebarMode(sidebarMode);
+    }
+  });
+}
 const contextPanelToggle = document.getElementById("contextPanelToggle");
 const contextPanel = document.getElementById("contextPanel");
 const contextPanelClose = document.getElementById("contextPanelClose");
@@ -12388,6 +12592,7 @@ document.addEventListener("keydown", event => {
     closeProjectActionMenu();
     closeProjectSettingsPopover();
     setContextPanelOpen(false);
+    setSidebarDrawerOpen(false);
   }
 });
 document.addEventListener("paste", event => {
@@ -12406,6 +12611,7 @@ document.addEventListener("paste", event => {
 loginForm.addEventListener("submit", login);
 logoutBtn.addEventListener("click", logout);
 window.addEventListener("load", refreshRenderedMath);
+initSidebarUi();
 setFileLibraryExpanded(false);
 setContextPanelOpen(false);
 setupSettingsHeaderActions();
@@ -13538,6 +13744,8 @@ var hermesPollTimer = null;
 var hermesSubmitPending = null;
 var hermesActionPending = false;
 var hermesPanelState = readHermesPanelState();
+var hermesPanelStateOverride = null;
+var hermesLastApprovalRequestId = "";
 var hermesKindBtn = document.getElementById("hermesKindBtn");
 var hermesRouteControls = document.getElementById("hermesRouteControls");
 var hermesInstanceSelect = document.getElementById("hermesInstanceSelect");
@@ -13644,10 +13852,21 @@ function readHermesPanelState(){
 
 function setHermesPanelState(state){
   hermesPanelState = ["expanded", "collapsed", "hidden"].includes(state) ? state : "expanded";
+  hermesPanelStateOverride = null;
   try{
     localStorage.setItem(HERMES_PANEL_STORAGE_KEY, hermesPanelState);
   }catch(err){}
   renderHermesRunStatus();
+}
+
+function observeHermesApproval(run){
+  const requestId = run?.status === "waiting_for_approval" ? String(run.approval?.requestId || "") : "";
+  if(requestId && requestId !== hermesLastApprovalRequestId){
+    hermesLastApprovalRequestId = requestId;
+    hermesPanelStateOverride = "expanded";
+  }else if(!requestId){
+    hermesPanelStateOverride = null;
+  }
 }
 
 function hermesProviders(){
@@ -13885,6 +14104,7 @@ function stopHermesTracking(){
 function trackHermesRun(run, view){
   stopHermesTracking();
   hermesActiveRun = run;
+  observeHermesApproval(run);
   hermesRunView = view || null;
   hermesStreamText = "";
   renderHermesRunStatus();
@@ -13934,6 +14154,7 @@ function handleHermesStreamEvent(data, source){
   }
   if(data.event === "approval.request"){
     hermesActiveRun = { ...hermesActiveRun, status:"waiting_for_approval", approval:data.approval || { required:true } };
+    observeHermesApproval(hermesActiveRun);
     renderHermesRunStatus();
     return;
   }
@@ -13955,6 +14176,7 @@ function applyHermesRunUpdate(run){
   if(!run || !hermesActiveRun || run.id !== hermesActiveRun.id) return;
   const wasTerminal = hermesActiveRun.terminal;
   hermesActiveRun = run;
+  observeHermesApproval(run);
   renderHermesRunStatus();
   if(run.terminal && !wasTerminal) handleHermesTerminal(run);
   if(!run.terminal && !hermesPollTimer) trackHermesRun(run, hermesRunView);
@@ -14037,9 +14259,10 @@ function renderHermesRunStatus(){
     chat.appendChild(hermesRunStatus);
     if(hermesRunRestore) chat.appendChild(hermesRunRestore);
   }
-  const panelHidden = hermesPanelState === "hidden";
+  const effectivePanelState = hermesPanelStateOverride || hermesPanelState;
+  const panelHidden = effectivePanelState === "hidden";
   hermesRunStatus.hidden = panelHidden;
-  hermesRunStatus.dataset.panelState = hermesPanelState;
+  hermesRunStatus.dataset.panelState = effectivePanelState;
   if(hermesRunRestore){
     hermesRunRestore.hidden = !panelHidden;
     hermesRunRestore.dataset.tone = run?.status === "waiting_for_approval" ? "warn" : "";
@@ -14047,7 +14270,7 @@ function renderHermesRunStatus(){
       ? "Hermes 等待审批 · 显示任务" : "显示 Hermes 任务";
   }
   if(hermesRunCollapseBtn){
-    const expanded = hermesPanelState === "expanded";
+    const expanded = effectivePanelState === "expanded";
     hermesRunCollapseBtn.textContent = expanded ? "收起" : "展开";
     hermesRunCollapseBtn.setAttribute("aria-expanded", String(expanded));
   }
@@ -14212,7 +14435,8 @@ function initHermesUi(){
   hermesModelSelect.addEventListener("change", () => selectHermesModel(hermesModelSelect.value));
   hermesCatalogRefresh.addEventListener("click", () => loadHermesCatalog(true));
   hermesRunCollapseBtn?.addEventListener("click", () => {
-    setHermesPanelState(hermesPanelState === "expanded" ? "collapsed" : "expanded");
+    const currentState = hermesPanelStateOverride || hermesPanelState;
+    setHermesPanelState(currentState === "expanded" ? "collapsed" : "expanded");
   });
   hermesRunHideBtn?.addEventListener("click", () => setHermesPanelState("hidden"));
   hermesRunRestore?.addEventListener("click", () => setHermesPanelState("expanded"));

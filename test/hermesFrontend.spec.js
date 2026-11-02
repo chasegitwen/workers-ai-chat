@@ -8,7 +8,7 @@ const HERMES_FUNCTIONS = [
   "hermesErrorText", "hermesProviders", "hermesProvider", "hermesSelectionBlockReason", "hermesHasPendingAttachments",
   "newHermesClientRequestId", "sendHermesMessage", "submitHermesBody", "hermesRunQuery", "stopHermesTracking",
   "trackHermesRun", "applyHermesRunUpdate", "hermesTerminalText", "handleHermesTerminal", "hermesRunModelText",
-  "renderHermesApproval", "renderHermesRunStatus", "setHermesPanelState", "setHermesSelectionActive", "syncModelModeUi", "isOpenClawAgentMode", "selectHermesProvider"
+  "renderHermesApproval", "renderHermesRunStatus", "setHermesPanelState", "observeHermesApproval", "setHermesSelectionActive", "syncModelModeUi", "isOpenClawAgentMode", "selectHermesProvider"
 ];
 
 function catalog() {
@@ -106,7 +106,7 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
     hermesCatalogState: { visible: true, executionEnabled, catalog: catalog(), instances: [], loading: false },
     hermesSelection: { instanceId: "oracle-hermes", agentId: "hermes-agent", providerId: "", modelId: "" },
     hermesActiveRun: null, hermesRunView: null, hermesStreamText: "", hermesEventSource: null, hermesPollTimer: null,
-    hermesSubmitPending: null, hermesActionPending: false, hermesPanelState: "expanded", chatSelection: { kind: "agent" }, activeModelMode: "modern", activeNewModeTarget: "openclaw",
+    hermesSubmitPending: null, hermesActionPending: false, hermesPanelState: "expanded", hermesPanelStateOverride: null, hermesLastApprovalRequestId: "", chatSelection: { kind: "agent" }, activeModelMode: "modern", activeNewModeTarget: "openclaw",
     activeProjectId: "proj-a", currentConversationId: null, conversation: [],
     selectedImage: null, pastedImageAttachments: attachments ? [{}] : [], selectedFile: null,
     pendingConversationAttachments: [], selectedFileIds: [], selectedWebPage: null
@@ -132,7 +132,7 @@ describe("Hermes frontend", () => {
     expect(html).toContain('id="hermesKindBtn" data-selection-kind="hermes" hidden');
     expect(html).toContain('id="hermesRouteControls" class="openClawRouteControls" hidden');
     expect(html.indexOf('id="hermesRunStatus"')).toBeGreaterThan(html.indexOf('id="chat"'));
-    expect(html).toContain('#hermesRouteControls select,#hermesRouteControls option{font-size:14px}');
+    expect(html).toContain('#hermesRouteControls select,#hermesRouteControls option{font-size:16px}');
     const script = pageScript();
     expect(() => new Function(script)).not.toThrow();
     expect(script).toContain("var hermesSelectionActive = false;");
@@ -269,6 +269,40 @@ describe("Hermes frontend", () => {
     api.setHermesPanelState("expanded");
     expect(dom.hermesRunStatus.hidden).toBe(false);
     expect(dom.hermesRunRestore.hidden).toBe(true);
+  });
+
+  it("temporarily expands the card for each new approval request without changing the saved preference", () => {
+    const { api, dom, stored } = sandbox();
+    api.__set({
+      hermesActiveRun: { id: "r", status: "running", terminal: false, actions: ["refresh"] },
+      hermesPollTimer: 1
+    });
+    api.setHermesPanelState("hidden");
+    api.applyHermesRunUpdate({
+      id: "r", status: "waiting_for_approval", terminal: false,
+      approval: { requestId: "prompt-new", executionGeneration: 2, respondable: true },
+      actions: ["approve_once", "deny"]
+    });
+    expect(dom.hermesRunStatus.hidden).toBe(false);
+    expect(dom.hermesRunStatus.dataset.panelState).toBe("expanded");
+    expect(stored.get("wa_hermes_panel_state_v1")).toBe("hidden");
+
+    api.setHermesPanelState("collapsed");
+    expect(dom.hermesRunStatus.dataset.panelState).toBe("collapsed");
+    expect(stored.get("wa_hermes_panel_state_v1")).toBe("collapsed");
+  });
+
+  it("ships persisted desktop sidebar modes and a mobile drawer instead of hiding navigation", () => {
+    const html = htmlPage();
+    expect(html).toContain('const SIDEBAR_MODE_STORAGE_KEY = "wa_sidebar_mode_v1"');
+    expect(html).toContain('.main[data-sidebar-mode="rail"]');
+    expect(html).toContain('grid-template-columns:52px minmax(0,1fr)');
+    expect(html).toContain('id="sidebarRailNew"');
+    expect(html).toContain('id="sidebarRailSearch"');
+    expect(html).toContain('id="sidebarRailSessions"');
+    expect(html).toContain('.main.sidebarDrawerOpen .sidebar');
+    expect(html).toContain('sidebarBackdrop?.addEventListener("click", () => setSidebarDrawerOpen(false))');
+    expect(html).not.toContain('@media(max-width:800px){\n\n  .main{\n    grid-template-columns:1fr;\n    min-height:0;\n  }\n\n  .main.contextPanelOpen{\n    grid-template-columns:1fr;\n  }\n\n  .sidebar{\n    display:none;');
   });
 
   it("forwards the displayed approval identity and only the explicit once choice", async () => {

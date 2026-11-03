@@ -2647,9 +2647,9 @@ body.dark .toolErrorNotice{
 .openClawRouteControls{display:grid;gap:8px;margin-top:10px;font-size:12px}
 .openClawRouteControls[hidden]{display:none}
 .openClawRouteControls label{display:grid;gap:4px}
-.openClawRouteControls select{width:100%;min-width:0;padding:8px;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--text);font-size:max(16px,1rem)}
-.openClawRouteControls option,.openClawRouteControls optgroup{font-size:max(16px,1rem)}
-#hermesRouteControls select,#hermesRouteControls option,#hermesRouteControls optgroup{font-size:max(16px,1rem)}
+.routeCatalogPicker{position:relative;min-width:0;font-size:max(16px,1rem)}
+.routeCatalogPicker .modelCatalogTrigger,.routeCatalogPicker .modelCatalogFilter,.routeCatalogPicker .modelCatalogOption,.routeCatalogPicker .modelCatalogEmpty{font-size:max(16px,1rem)}
+.routeCatalogPicker .modelCatalogPopup{top:calc(100% + 5px);bottom:auto}
 .openClawCatalogLine{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--muted)}
 .openClawCatalogLine button{border:1px solid var(--border);border-radius:8px;padding:5px 8px;background:transparent;color:var(--text);cursor:pointer}
 .modelModeSwitch{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:0}
@@ -3581,17 +3581,17 @@ body.dark .toolErrorNotice{
       </div>
       </div>
       <div id="openClawRouteControls" class="openClawRouteControls" hidden>
-        <label>实例 <select id="openClawProviderSelect" aria-label="OpenClaw 实例"></select></label>
-        <label>Agent <select id="openClawAgentSelect" aria-label="OpenClaw Agent"></select></label>
+        <label>实例 <select id="openClawProviderSelect" class="modelSelectNative" aria-label="OpenClaw 实例" aria-hidden="true" tabindex="-1"></select></label>
+        <label>Agent <select id="openClawAgentSelect" class="modelSelectNative" aria-label="OpenClaw Agent" aria-hidden="true" tabindex="-1"></select></label>
         <div class="openClawBaseModelLine">基础模型：<span id="openClawBaseModelSummary"></span><button id="openClawBaseModelChangeBtn" type="button">更改</button></div>
-        <label id="openClawBaseModelField" hidden>基础模型 <select id="openClawBaseModelSelect" aria-label="OpenClaw 基础模型"></select></label>
+        <label id="openClawBaseModelField" hidden>基础模型 <select id="openClawBaseModelSelect" class="modelSelectNative" aria-label="OpenClaw 基础模型" aria-hidden="true" tabindex="-1"></select></label>
         <div class="openClawCatalogLine"><span id="openClawCatalogStatus"></span><button id="openClawCatalogRefresh" type="button">刷新目录</button></div>
       </div>
       <div id="hermesRouteControls" class="openClawRouteControls" hidden>
-        <label>实例 <select id="hermesInstanceSelect" aria-label="Hermes 实例"></select></label>
-        <label>Agent <select id="hermesAgentSelect" aria-label="Hermes Agent"></select></label>
-        <label>Provider <select id="hermesProviderSelect" aria-label="Hermes Provider"></select></label>
-        <label id="hermesModelField" hidden>基础模型 <select id="hermesModelSelect" aria-label="Hermes 基础模型"></select></label>
+        <label>实例 <select id="hermesInstanceSelect" class="modelSelectNative" aria-label="Hermes 实例" aria-hidden="true" tabindex="-1"></select></label>
+        <label>Agent <select id="hermesAgentSelect" class="modelSelectNative" aria-label="Hermes Agent" aria-hidden="true" tabindex="-1"></select></label>
+        <label>Provider <select id="hermesProviderSelect" class="modelSelectNative" aria-label="Hermes Provider" aria-hidden="true" tabindex="-1"></select></label>
+        <label id="hermesModelField" hidden>基础模型 <select id="hermesModelSelect" class="modelSelectNative" aria-label="Hermes 基础模型" aria-hidden="true" tabindex="-1"></select></label>
         <div class="openClawCatalogLine"><span id="hermesCatalogStatus"></span><button id="hermesCatalogRefresh" type="button">刷新目录</button></div>
       </div>
       <div id="chatSelectionNotice" class="chatSelectionNotice" hidden>
@@ -9534,6 +9534,188 @@ function initModelCatalogPicker(){
   }
 }
 
+const routeCatalogPickers = new Map();
+
+function syncCatalogPickerFromSelect(select){
+  const picker = routeCatalogPickers.get(select);
+  if(!picker) return;
+  const selected = [...select.options].find(option => option.value === select.value);
+  picker.label.textContent = selected?.textContent || select.getAttribute("data-picker-placeholder") || "请选择";
+  picker.trigger.disabled = select.disabled;
+  if(!picker.popup.hidden) picker.render(picker.filter.value);
+}
+
+function attachCatalogPicker(select){
+  if(!select || routeCatalogPickers.has(select)) return routeCatalogPickers.get(select);
+  const picker = document.createElement("div");
+  picker.className = "modelCatalogPicker routeCatalogPicker";
+  const trigger = document.createElement("button");
+  const label = document.createElement("span");
+  const chevron = document.createElement("span");
+  const popup = document.createElement("div");
+  const filter = document.createElement("input");
+  const list = document.createElement("div");
+  const baseId = select.id + "Catalog";
+  trigger.type = "button";
+  trigger.className = "modelCatalogTrigger";
+  trigger.setAttribute("role", "combobox");
+  trigger.setAttribute("aria-label", select.getAttribute("aria-label") || "选择");
+  trigger.setAttribute("aria-haspopup", "listbox");
+  trigger.setAttribute("aria-expanded", "false");
+  trigger.setAttribute("aria-controls", baseId + "List");
+  label.className = "modelCatalogTriggerLabel";
+  chevron.setAttribute("aria-hidden", "true");
+  chevron.textContent = "⌄";
+  trigger.append(label, chevron);
+  popup.className = "modelCatalogPopup";
+  popup.hidden = true;
+  filter.className = "modelCatalogFilter";
+  filter.type = "search";
+  filter.autocomplete = "off";
+  filter.setAttribute("aria-label", "搜索" + (select.getAttribute("aria-label") || "选项"));
+  filter.setAttribute("aria-controls", baseId + "List");
+  filter.placeholder = "搜索";
+  list.id = baseId + "List";
+  list.className = "modelCatalogList";
+  list.setAttribute("role", "listbox");
+  list.setAttribute("aria-label", select.getAttribute("aria-label") || "选项");
+  popup.append(filter, list);
+  picker.append(trigger, popup);
+  select.insertAdjacentElement("afterend", picker);
+
+  const state = { picker, trigger, label, popup, filter, list, entries:[], activeIndex:-1 };
+  const setActive = index => {
+    const options = [...list.querySelectorAll(".modelCatalogOption")];
+    if(!options.length){
+      state.activeIndex = -1;
+      filter.removeAttribute("aria-activedescendant");
+      return;
+    }
+    state.activeIndex = Math.max(0, Math.min(index, options.length - 1));
+    options.forEach((option, optionIndex) => option.classList.toggle("active", optionIndex === state.activeIndex));
+    const active = options[state.activeIndex];
+    filter.setAttribute("aria-activedescendant", active.id);
+    active.scrollIntoView({ block:"nearest" });
+  };
+  const render = filterText => {
+    const query = String(filterText || "").trim().toLocaleLowerCase();
+    state.entries = [...select.options].map(option => ({
+      value:option.value, label:option.textContent || option.value, disabled:option.disabled
+    })).filter(entry => !query || (entry.label + " " + entry.value).toLocaleLowerCase().includes(query));
+    list.innerHTML = "";
+    if(!state.entries.length){
+      const empty = document.createElement("div");
+      empty.className = "modelCatalogEmpty";
+      empty.textContent = "没有匹配的选项";
+      list.appendChild(empty);
+      setActive(-1);
+      return;
+    }
+    state.entries.forEach((entry, index) => {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.id = baseId + "Option-" + index;
+      option.className = "modelCatalogOption";
+      option.dataset.value = entry.value;
+      option.disabled = entry.disabled;
+      option.setAttribute("role", "option");
+      option.setAttribute("aria-selected", String(entry.value === select.value));
+      option.textContent = entry.label;
+      list.appendChild(option);
+    });
+    const selectedIndex = state.entries.findIndex(entry => entry.value === select.value && !entry.disabled);
+    const firstEnabled = state.entries.findIndex(entry => !entry.disabled);
+    setActive(selectedIndex >= 0 ? selectedIndex : firstEnabled);
+  };
+  const close = (restoreFocus = true) => {
+    if(popup.hidden) return;
+    popup.hidden = true;
+    trigger.setAttribute("aria-expanded", "false");
+    filter.removeAttribute("aria-activedescendant");
+    if(restoreFocus) trigger.focus();
+  };
+  const open = (initialFilter = "") => {
+    if(trigger.disabled) return;
+    popup.hidden = false;
+    trigger.setAttribute("aria-expanded", "true");
+    filter.value = initialFilter;
+    render(initialFilter);
+    filter.focus();
+  };
+  const choose = value => {
+    const option = [...select.options].find(item => item.value === value);
+    if(!option || option.disabled) return;
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles:true }));
+    syncCatalogPickerFromSelect(select);
+    close(true);
+  };
+  const keydown = event => {
+    const isOpen = !popup.hidden;
+    if(event.key === "Tab" && isOpen){ close(false); return; }
+    if(event.key === "Escape" && isOpen){
+      event.preventDefault();
+      event.stopPropagation();
+      close(true);
+      return;
+    }
+    if(["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)){
+      event.preventDefault();
+      if(!isOpen){ open(); return; }
+      let next = event.key === "Home" ? 0 : event.key === "End" ? state.entries.length - 1
+        : state.activeIndex + (event.key === "ArrowDown" ? 1 : -1);
+      const step = event.key === "ArrowUp" ? -1 : 1;
+      while(state.entries[next]?.disabled) next += step;
+      setActive(next);
+      return;
+    }
+    if(event.key === "Enter" && isOpen && state.activeIndex >= 0){
+      event.preventDefault();
+      choose(state.entries[state.activeIndex]?.value);
+    }
+  };
+  state.render = render;
+  state.close = close;
+  state.choose = choose;
+  routeCatalogPickers.set(select, state);
+  trigger.addEventListener("click", () => popup.hidden ? open() : close(false));
+  trigger.addEventListener("keydown", event => {
+    if(event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey){
+      event.preventDefault();
+      open(event.key);
+      return;
+    }
+    if((event.key === "Enter" || event.key === " ") && popup.hidden){
+      event.preventDefault();
+      open();
+      return;
+    }
+    keydown(event);
+  });
+  filter.addEventListener("input", () => render(filter.value));
+  filter.addEventListener("keydown", keydown);
+  list.addEventListener("click", event => {
+    const option = event.target.closest(".modelCatalogOption");
+    if(option) choose(option.dataset.value);
+  });
+  document.addEventListener("pointerdown", event => {
+    if(!picker.contains(event.target)) close(false);
+  });
+  if(typeof MutationObserver !== "undefined"){
+    new MutationObserver(() => syncCatalogPickerFromSelect(select)).observe(select, { childList:true, subtree:true, characterData:true });
+  }
+  syncCatalogPickerFromSelect(select);
+  return state;
+}
+
+function initRouteCatalogPickers(){
+  [
+    openClawProviderSelect, openClawAgentSelect, openClawBaseModelSelect,
+    document.getElementById("hermesInstanceSelect"), document.getElementById("hermesAgentSelect"),
+    document.getElementById("hermesProviderSelect"), document.getElementById("hermesModelSelect")
+  ].forEach(attachCatalogPicker);
+}
+
 function syncChatModelSelect(){
   modelSelect.querySelectorAll("option[data-unavailable]").forEach(option => option.remove());
   if(chatSelection.kind === "model"){
@@ -9713,6 +9895,7 @@ function fillSelectionSelect(select, entries, selectedId, { emptyLabel = "", mis
     select.appendChild(option);
     select.value = selectedId;
   }
+  syncCatalogPickerFromSelect(select);
 }
 
 function ensureOpenClawCatalogForInstance(instance){
@@ -9736,6 +9919,7 @@ function fillOpenClawSelect(select, entries, selected, emptyLabel){
     select.appendChild(option);
   });
   if([...select.options].some(option => option.value === selected)) select.value = selected;
+  syncCatalogPickerFromSelect(select);
 }
 
 function openClawModelsForAgent(catalog, agentId){
@@ -9778,6 +9962,7 @@ function syncOpenClawRouteControls(){
   fillSelectionSelect(openClawBaseModelSelect, agentModels, chatSelection.baseModelId, { emptyLabel:followLabel, missingPrefix });
   const canChangeBase = agentModels.length > 0 || Boolean(chatSelection.baseModelId);
   openClawBaseModelSelect.disabled = !canChangeBase;
+  syncCatalogPickerFromSelect(openClawBaseModelSelect);
   openClawBaseModelSummary.textContent = chatSelection.baseModelId ? "显式指定 · " + chatSelection.baseModelId : followLabel;
   openClawBaseModelField.hidden = !openClawBasePickerOpen;
   openClawBaseModelChangeBtn.textContent = openClawBasePickerOpen ? "收起" : "更改";
@@ -12907,6 +13092,7 @@ window.addEventListener("load", refreshRenderedMath);
 initSidebarUi();
 initModelAreaCollapse();
 initModelCatalogPicker();
+initRouteCatalogPickers();
 setFileLibraryExpanded(false);
 setContextPanelOpen(false);
 setupSettingsHeaderActions();
@@ -14256,6 +14442,7 @@ function syncHermesRouteControls(){
     hermesProviderSelect.appendChild(option);
   }
   hermesProviderSelect.value = hermesSelection.providerId || "";
+  syncCatalogPickerFromSelect(hermesProviderSelect);
 
   const provider = hermesProvider(hermesSelection.providerId);
   hermesModelField.hidden = !hermesSelection.providerId;

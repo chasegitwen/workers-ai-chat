@@ -218,6 +218,7 @@ export function createHarness({
     normalizeOpenClawInstanceList: list => Array.isArray(list) ? list : [],
     getSelectedProviderForRequest: modelId => models.find(model => model.id === modelId)?.provider || "",
     syncOpenClawTaskVisibility: () => {},
+    syncCatalogPickerFromSelect: () => {},
     loadOpenClawCatalog: (force, catalogId) => { calls.loadOpenClawCatalog.push(catalogId); },
     categoryLabel: value => value,
     modelCategoryFromLegacy: model => model.providerType,

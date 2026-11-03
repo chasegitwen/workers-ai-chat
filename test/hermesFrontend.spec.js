@@ -142,7 +142,8 @@ describe("Hermes frontend", () => {
     expect(html.indexOf('id="hermesRunMount"')).toBeGreaterThan(html.indexOf('class="inputBar"'));
     expect(html.indexOf('id="hermesRunMount"')).toBeLessThan(html.indexOf('id="openClawTaskBanner"'));
     expect(html).toContain('.hermesRunStatus[data-panel-state="expanded"]{max-height:min(40vh,360px);overflow:auto}');
-    expect(html).toContain('#hermesRouteControls select,#hermesRouteControls option,#hermesRouteControls optgroup{font-size:max(16px,1rem)}');
+    expect(html).toContain('.routeCatalogPicker{position:relative;min-width:0;font-size:max(16px,1rem)}');
+    expect(html).toContain('.routeCatalogPicker .modelCatalogTrigger,.routeCatalogPicker .modelCatalogFilter,.routeCatalogPicker .modelCatalogOption,.routeCatalogPicker .modelCatalogEmpty{font-size:max(16px,1rem)}');
     const script = pageScript();
     expect(() => new Function(script)).not.toThrow();
     expect(script).toContain("var hermesSelectionActive = false;");

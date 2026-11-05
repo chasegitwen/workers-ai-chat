@@ -14474,7 +14474,7 @@ function renderHermesCapabilities(){
   if(data?.environment?.status === "available"){
     const environment = data.environment;
     appendHermesCapabilityEmpty(hermesEnvironmentInfo,
-      "实例 " + (data.instanceId || "未知") + " · 平台 " + (environment.platform || "未知") + " · 模型 " + (environment.model || "Agent 默认"));
+      "实例 " + (data.instanceId || "未知") + " · 平台 " + (environment.platform || "未知") + " · 模型 " + (environment.model || "未确认"));
     appendHermesCapabilityEmpty(hermesEnvironmentInfo,
       "工作目录：8642 Runs API 未提供可确认或可选择的工作目录");
     appendHermesCapabilityEmpty(hermesEnvironmentInfo,

@@ -156,6 +156,7 @@ describe("Hermes frontend", () => {
     expect(html.indexOf('id="hermesCapabilitiesPanel"')).toBeLessThan(html.indexOf('id="chatSelectionNotice"'));
     expect(html).toContain('fetch("/api/hermes/capabilities-panel?" + params.toString())');
     expect(html).toContain('item.enabled === true ? "已启用" : (item.enabled === false ? "未启用" : "启用状态未知")');
+    expect(html).toContain('" · 模型 " + (environment.model || "未确认")');
     expect(html).toContain('工作目录：8642 Runs API 未提供可确认或可选择的工作目录');
     expect(html).toContain('文件成果：8642 API 未提供可验证的成果列表或下载接口');
     expect(lastDeclaration(pageScript(), "loadHermesCapabilities")).toContain("hermesCapabilitiesState.data = null");

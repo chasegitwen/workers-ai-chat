@@ -184,6 +184,13 @@ describe("Hermes catalog and provider selection", () => {
     caps.features.run_stop = false;
     expect(normalizeHermesCapabilities(caps)).toMatchObject({ executionReady: false, missing: ["run_stop"] });
     expect(normalizeHermesCapabilities({ object: "list" }).recognized).toBe(false);
+    const aggregateClarify = mock.defaultCapabilities();
+    aggregateClarify.features.run_clarify = true;
+    delete aggregateClarify.features.run_clarify_response;
+    delete aggregateClarify.features.clarify_events;
+    expect(normalizeHermesCapabilities(aggregateClarify).features).toMatchObject({
+      run_clarify: true, run_clarify_response: true, clarify_events: true
+    });
   });
 
   it("serves the catalog through the API without credentials and caches it", async () => {
@@ -706,6 +713,137 @@ describe("Hermes run approvals", () => {
       "SELECT approval_response_pending FROM hermes_runs WHERE id = ?"
     ).bind(run.id).first();
     expect(row.approval_response_pending).toBe(0);
+  });
+});
+
+describe("Hermes run clarifications", () => {
+  it("restores a distinct Clarify prompt, answers the same run, and re-syncs authoritative state", async () => {
+    const run = (await submit()).json.run;
+    const prompt = mock.requestClarify(upstreamRunId(run), {
+      prompt_id: "clarify-current",
+      execution_generation: 7,
+      question: "Use loaded or empty vehicle conditions?"
+    });
+
+    const waiting = (await getRun(run.id)).json.run;
+    expect(waiting).toMatchObject({
+      status: "waiting_for_clarification",
+      approval: null,
+      clarify: {
+        kind: "clarify",
+        status: "pending",
+        requestId: prompt.prompt_id,
+        executionGeneration: 7,
+        question: "Use loaded or empty vehicle conditions?",
+        respondable: true
+      }
+    });
+    expect(waiting.actions).toEqual(["answer_clarify", "refresh", "cancel"]);
+    const getsBefore = mock.calls.filter(item => item.method === "GET" && item.path === "/v1/runs/" + upstreamRunId(run)).length;
+
+    const answered = await action(run.id, "clarify", { body: {
+      request_id: prompt.prompt_id,
+      execution_generation: 7,
+      answer: "Use the fully loaded condition."
+    } });
+    expect(answered.status).toBe(200);
+    expect(answered.json.run).toMatchObject({ status: "running", clarify: null, approval: null });
+    expect(answered.json.clarifyResponse).toMatchObject({ requestId: prompt.prompt_id, executionGeneration: 7, resolved: 1 });
+    const upstream = mock.calls.filter(item => item.method === "POST" && item.path.endsWith("/clarify"));
+    expect(upstream).toHaveLength(1);
+    expect(upstream[0].body).toEqual({
+      request_id: prompt.prompt_id,
+      execution_generation: 7,
+      answer: "Use the fully loaded condition."
+    });
+    const getsAfter = mock.calls.filter(item => item.method === "GET" && item.path === "/v1/runs/" + upstreamRunId(run)).length;
+    expect(getsAfter - getsBefore).toBeGreaterThanOrEqual(2);
+    expect(mock.posts()).toHaveLength(1);
+    const stored = await env.DB.prepare(
+      "SELECT clarify_request_id, clarify_json, clarify_response_pending FROM hermes_runs WHERE id = ?"
+    ).bind(run.id).first();
+    expect(stored).toEqual({ clarify_request_id: null, clarify_json: null, clarify_response_pending: 0 });
+  });
+
+  it("rejects foreign users and stale clarification identities without forwarding", async () => {
+    const run = (await submit({}, { user: "alice" })).json.run;
+    const prompt = mock.requestClarify(upstreamRunId(run), { prompt_id: "clarify-a", execution_generation: 2 });
+    await getRun(run.id, { user: "alice" });
+    const body = { request_id: prompt.prompt_id, execution_generation: 2, answer: "loaded" };
+
+    expect((await action(run.id, "clarify", { user: "bob", body })).status).toBe(404);
+    expect((await action(run.id, "clarify", { user: "alice", body: { ...body, request_id: "clarify-foreign" } })).json.error.code)
+      .toBe("hermes_clarify_stale");
+    expect((await action(run.id, "clarify", { user: "alice", body: { ...body, execution_generation: 1 } })).json.error.code)
+      .toBe("hermes_clarify_stale");
+
+    mock.requestClarify(upstreamRunId(run), { prompt_id: "clarify-b", execution_generation: 3 });
+    const expired = await action(run.id, "clarify", { user: "alice", body });
+    expect(expired.status).toBe(409);
+    expect(expired.json.error.code).toBe("hermes_clarify_stale");
+    expect(mock.calls.filter(item => item.path.endsWith("/clarify"))).toHaveLength(0);
+  });
+
+  it("allows only one concurrent clarification answer and keeps approval policy unchanged", async () => {
+    const run = (await submit()).json.run;
+    const prompt = mock.requestClarify(upstreamRunId(run), { prompt_id: "clarify-race", execution_generation: 5 });
+    await getRun(run.id);
+    mock.onClarify = async () => {
+      await new Promise(resolve => setTimeout(resolve, 30));
+      return null;
+    };
+    const options = { body: { request_id: prompt.prompt_id, execution_generation: 5, answer: "loaded" } };
+    const responses = await Promise.all([
+      action(run.id, "clarify", options),
+      action(run.id, "clarify", options)
+    ]);
+    expect(responses.map(item => item.status).sort()).toEqual([200, 409]);
+    expect(mock.calls.filter(item => item.path.endsWith("/clarify"))).toHaveLength(1);
+
+    mock.complete(upstreamRunId(run));
+    await getRun(run.id);
+    const approvalRun = (await submit()).json.run;
+    const approval = mock.requestApproval(upstreamRunId(approvalRun), { prompt_id: "approval-regression" });
+    const denied = await action(approvalRun.id, "approval", { body: {
+      request_id: approval.prompt_id,
+      execution_generation: approval.execution_generation,
+      choice: "deny"
+    } });
+    expect(denied.status).toBe(200);
+    expect(mock.calls.find(item => item.path.endsWith("/approval")).body.choice).toBe("deny");
+  });
+
+  it("fails closed without explicit Clarify capabilities and sanitizes Clarify SSE separately", async () => {
+    mock.capabilities = mock.defaultCapabilities();
+    mock.capabilities.features.run_clarify_response = false;
+    const run = (await submit()).json.run;
+    const prompt = mock.requestClarify(upstreamRunId(run), {
+      prompt_id: "clarify-no-capability",
+      question: "Token Bearer sk-secret123456 — which mode?"
+    });
+    const waiting = (await getRun(run.id)).json.run;
+    expect(waiting.clarify).toMatchObject({ kind: "clarify", respondable: false });
+    expect(waiting.actions).not.toContain("answer_clarify");
+    const refused = await action(run.id, "clarify", { body: {
+      request_id: prompt.prompt_id,
+      execution_generation: prompt.execution_generation,
+      answer: "safe"
+    } });
+    expect(refused.status).toBe(409);
+    expect(refused.json.error.code).toBe("hermes_clarify_unavailable");
+    expect(mock.calls.filter(item => item.path.endsWith("/clarify"))).toHaveLength(0);
+
+    mock.onEvents = () => new Response(sseBody([
+      sseFrame(8, { event: "clarify.request", prompt_id: prompt.prompt_id,
+        execution_generation: prompt.execution_generation, question: "Token Bearer sk-secret123456 — which mode?" }),
+      sseFrame(9, { event: "clarify.settled" })
+    ]), { headers: { "Content-Type": "text/event-stream" } });
+    const stream = await call("GET", "/api/hermes/runs/" + run.id + "/events?project_id=default");
+    expect(stream.text).toContain("clarify.request");
+    expect(stream.text).toContain("clarify.settled");
+    expect(stream.text).toContain('"respondable":false');
+    expect(stream.text).not.toContain("sk-secret123456");
+    expect(stream.text).not.toContain("approval.request");
   });
 });
 

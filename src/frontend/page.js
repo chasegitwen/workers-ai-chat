@@ -2670,6 +2670,7 @@ body.dark .toolErrorNotice{
 .hermesRunPanelControls button,.hermesRunRestore{border:1px solid var(--border);border-radius:8px;padding:4px 8px;background:var(--panel);color:var(--text);cursor:pointer;font-size:12px}
 .hermesRunStatus[data-panel-state="collapsed"]{height:52px;max-height:52px;padding-top:6px;padding-bottom:6px}
 .hermesRunStatus[data-panel-state="collapsed"] #hermesApprovalPanel,
+.hermesRunStatus[data-panel-state="collapsed"] #hermesClarifyPanel,
 .hermesRunStatus[data-panel-state="collapsed"] #hermesRunTimeline,
 .hermesRunStatus[data-panel-state="collapsed"] #hermesRunActions{display:none}
 .hermesRunStatus[data-panel-state="collapsed"] #hermesRunStatusText{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2683,6 +2684,12 @@ body.dark .toolErrorNotice{
 .hermesApprovalField span:first-child{color:var(--muted)}
 .hermesApprovalField span:last-child{min-width:0;overflow-wrap:anywhere;word-break:break-word}
 .hermesApprovalCommand{max-height:12em;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.hermesClarifyPanel{display:grid;gap:8px;padding:10px;border-radius:8px;background:rgba(37,99,235,.08);font-size:13px;line-height:1.45}
+.hermesClarifyPanel[hidden]{display:none}
+.hermesClarifyQuestion{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
+.hermesClarifyPanel textarea{box-sizing:border-box;width:100%;min-height:72px;resize:vertical;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--panel);color:var(--text);font:inherit}
+.hermesClarifyPanel button{justify-self:start;border:1px solid var(--primary);border-radius:8px;padding:5px 12px;background:var(--primary);color:white;cursor:pointer}
+.hermesClarifyPanel button:disabled,.hermesClarifyPanel textarea:disabled{opacity:.55;cursor:wait}
 .hermesRunTimeline{display:grid;gap:6px;min-width:0}
 .hermesRunTimeline[hidden]{display:none}
 .hermesTimelineHeading{font-size:12px;font-weight:600;color:var(--muted)}
@@ -3685,6 +3692,12 @@ body.dark .toolErrorNotice{
         <div class="hermesApprovalField"><span>命令</span><span id="hermesApprovalCommand" class="hermesApprovalCommand"></span></div>
         <div class="hermesApprovalField"><span>目标</span><span id="hermesApprovalTarget"></span></div>
         <div class="hermesApprovalField"><span>风险</span><span id="hermesApprovalRisk"></span></div>
+      </div>
+      <div id="hermesClarifyPanel" class="hermesClarifyPanel" hidden>
+        <strong>Hermes 需要补充信息</strong>
+        <div id="hermesClarifyQuestion" class="hermesClarifyQuestion"></div>
+        <textarea id="hermesClarifyAnswer" maxlength="32000" aria-label="回答 Hermes 的澄清问题" placeholder="输入回答"></textarea>
+        <button id="hermesClarifySubmit" type="button">提交回答</button>
       </div>
       <div id="hermesRunTimeline" class="hermesRunTimeline" hidden></div>
       <div id="hermesRunActions" class="hermesRunActions"></div>
@@ -14241,6 +14254,7 @@ var hermesActionPending = false;
 var hermesPanelState = readHermesPanelState();
 var hermesPanelStateOverride = null;
 var hermesLastApprovalRequestId = "";
+var hermesLastClarifyRequestId = "";
 var hermesKindBtn = document.getElementById("hermesKindBtn");
 var hermesRouteControls = document.getElementById("hermesRouteControls");
 var hermesInstanceSelect = document.getElementById("hermesInstanceSelect");
@@ -14261,6 +14275,10 @@ var hermesApprovalTool = document.getElementById("hermesApprovalTool");
 var hermesApprovalCommand = document.getElementById("hermesApprovalCommand");
 var hermesApprovalTarget = document.getElementById("hermesApprovalTarget");
 var hermesApprovalRisk = document.getElementById("hermesApprovalRisk");
+var hermesClarifyPanel = document.getElementById("hermesClarifyPanel");
+var hermesClarifyQuestion = document.getElementById("hermesClarifyQuestion");
+var hermesClarifyAnswer = document.getElementById("hermesClarifyAnswer");
+var hermesClarifySubmit = document.getElementById("hermesClarifySubmit");
 var hermesRunTimeline = document.getElementById("hermesRunTimeline");
 var hermesRunActions = document.getElementById("hermesRunActions");
 
@@ -14271,6 +14289,7 @@ var HERMES_STATUS_LABELS = {
   queued:"排队中",
   running:"执行中",
   waiting_for_approval:"等待审批",
+  waiting_for_clarification:"等待回答",
   stopping:"停止中",
   cancel_requested:"停止中（等待确认）",
   unknown:"状态未知",
@@ -14289,6 +14308,7 @@ var HERMES_ACTION_LABELS = {
   resolve_unknown:"结算未知状态",
   approve_once:"仅本次批准",
   deny:"拒绝",
+  answer_clarify:"提交回答",
   dismiss:"停止查看",
   resubmit:"按原请求重试"
 };
@@ -14314,6 +14334,13 @@ var HERMES_ERROR_TEXT = {
   hermes_approval_status_unavailable:"暂时无法确认当前审批，请稍后重试",
   hermes_invalid_approval_identity:"审批标识无效，请刷新状态",
   hermes_stale_generation:"审批执行代次已过期，请刷新状态",
+  hermes_clarify_stale:"澄清问题已过期或已被回答，请刷新状态",
+  hermes_clarify_in_progress:"澄清回答正在提交或已由其他设备处理，请勿重复提交",
+  hermes_clarify_unavailable:"当前没有可回答的澄清问题，或 Hermes 未声明支持此能力",
+  hermes_clarify_status_unavailable:"暂时无法确认当前澄清问题，请稍后重试",
+  hermes_invalid_clarify_identity:"澄清请求标识无效，请刷新状态",
+  hermes_invalid_clarify_answer:"请输入澄清问题的回答",
+  hermes_clarify_answer_too_long:"回答过长，请缩短后重试",
   hermes_idempotency_not_durable:"Hermes 幂等存储不是持久化的，不能安全核对",
   hermes_idempotency_window_expired:"已超出 Hermes 幂等保留期，不能安全核对"
 };
@@ -14358,10 +14385,14 @@ function setHermesPanelState(state){
 
 function observeHermesApproval(run){
   const requestId = run?.status === "waiting_for_approval" ? String(run.approval?.requestId || "") : "";
+  const clarifyRequestId = run?.status === "waiting_for_clarification" ? String(run.clarify?.requestId || "") : "";
   if(requestId && requestId !== hermesLastApprovalRequestId){
     hermesLastApprovalRequestId = requestId;
     hermesPanelStateOverride = "expanded";
-  }else if(!requestId){
+  }else if(clarifyRequestId && clarifyRequestId !== hermesLastClarifyRequestId){
+    hermesLastClarifyRequestId = clarifyRequestId;
+    hermesPanelStateOverride = "expanded";
+  }else if(!requestId && !clarifyRequestId){
     hermesPanelStateOverride = null;
   }
 }
@@ -14781,6 +14812,16 @@ function handleHermesStreamEvent(data, source){
     renderHermesRunStatus();
     return;
   }
+  if(data.event === "clarify.request"){
+    hermesActiveRun = { ...hermesActiveRun, status:"waiting_for_clarification", clarify:data.clarify || { kind:"clarify", required:true } };
+    observeHermesApproval(hermesActiveRun);
+    renderHermesRunStatus();
+    return;
+  }
+  if(data.event === "clarify.settled" || data.event === "clarify.responded"){
+    pollHermesRun();
+    return;
+  }
   if(data.event === "replay.truncated"){
     setContextStatus("Hermes 事件流部分记录已过期，以最终结果为准");
     return;
@@ -14870,6 +14911,23 @@ function renderHermesApproval(run){
   hermesApprovalRisk.textContent = approval.risk || approval.description || "该操作被 Hermes 安全策略拦截，执行前需要明确确认";
 }
 
+function renderHermesClarify(run){
+  if(!hermesClarifyPanel) return;
+  const clarify = run?.status === "waiting_for_clarification" ? run.clarify : null;
+  hermesClarifyPanel.hidden = !clarify;
+  if(!clarify) return;
+  hermesClarifyQuestion.textContent = clarify.question || "澄清内容正在同步，请刷新状态";
+  const requestId = String(clarify.requestId || "");
+  if(hermesClarifyPanel.dataset.requestId !== requestId){
+    hermesClarifyPanel.dataset.requestId = requestId;
+    hermesClarifyAnswer.value = "";
+  }
+  const disabled = hermesActionPending || clarify.responding || !clarify.respondable;
+  hermesClarifyAnswer.disabled = disabled;
+  hermesClarifySubmit.disabled = disabled;
+  hermesClarifySubmit.textContent = clarify.responding ? "提交中…" : "提交回答";
+}
+
 function renderHermesRunStatus(){
   if(!hermesRunStatus) return;
   const run = hermesActiveRun;
@@ -14890,9 +14948,11 @@ function renderHermesRunStatus(){
   hermesRunStatus.dataset.panelState = effectivePanelState;
   if(hermesRunRestore){
     hermesRunRestore.hidden = !panelHidden;
-    hermesRunRestore.dataset.tone = run?.status === "waiting_for_approval" ? "warn" : "";
+    const needsInput = ["waiting_for_approval", "waiting_for_clarification"].includes(run?.status);
+    hermesRunRestore.dataset.tone = needsInput ? "warn" : "";
     hermesRunRestore.textContent = run?.status === "waiting_for_approval"
-      ? "Hermes 等待审批 · 显示任务" : "显示 Hermes 任务";
+      ? "Hermes 等待审批 · 显示任务"
+      : (run?.status === "waiting_for_clarification" ? "Hermes 等待回答 · 显示问题" : "显示 Hermes 任务");
   }
   if(hermesRunCollapseBtn){
     const expanded = effectivePanelState === "expanded";
@@ -14901,6 +14961,7 @@ function renderHermesRunStatus(){
   }
   hermesRunActions.innerHTML = "";
   renderHermesApproval(hermesSubmitPending ? null : run);
+  renderHermesClarify(hermesSubmitPending ? null : run);
   renderHermesTimeline(hermesSubmitPending ? null : run);
   const actions = [];
   if(hermesSubmitPending){
@@ -14913,11 +14974,12 @@ function renderHermesRunStatus(){
     if(run.error) parts.push(hermesErrorText(run.error));
     hermesRunStatusText.textContent = parts.join(" · ");
     hermesRunStatus.dataset.tone = ["failed", "rejected", "interrupted"].includes(run.status) ? "error"
-      : (["submission_unknown", "unknown", "waiting_for_approval", "stopping", "cancel_requested"].includes(run.status) ? "warn" : "");
+      : (["submission_unknown", "unknown", "waiting_for_approval", "waiting_for_clarification", "stopping", "cancel_requested"].includes(run.status) ? "warn" : "");
     const approvalRespondable = run.status === "waiting_for_approval"
       && run.approval?.respondable === true && !run.approval?.responding;
     (run.actions || []).forEach(name => {
       if(["approve_once", "deny"].includes(name) && !approvalRespondable) return;
+      if(name === "answer_clarify") return;
       actions.push(name);
     });
     if(approvalRespondable){
@@ -14930,7 +14992,7 @@ function renderHermesRunStatus(){
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = HERMES_ACTION_LABELS[name] || name;
-    button.disabled = hermesActionPending || Boolean(run?.approval?.responding);
+    button.disabled = hermesActionPending || Boolean(run?.approval?.responding) || Boolean(run?.clarify?.responding);
     button.addEventListener("click", () => hermesRunAction(name));
     hermesRunActions.appendChild(button);
   });
@@ -14944,6 +15006,53 @@ var HERMES_ACTION_CONFIRM = {
   deny:"拒绝当前显示的这一项操作？Hermes 将收到明确拒绝，不会执行该操作。",
   cancel:"确定取消这个 Hermes 任务？"
 };
+
+async function submitHermesClarify(){
+  const run = hermesActiveRun;
+  const clarify = run?.clarify;
+  if(!run || run.status !== "waiting_for_clarification" || !clarify?.respondable
+    || !clarify.requestId || !Number.isInteger(clarify.executionGeneration)){
+    setContextStatus("当前澄清问题已过期、尚未同步，或 Hermes 未声明支持回答能力");
+    await pollHermesRun();
+    return;
+  }
+  const answer = String(hermesClarifyAnswer?.value || "");
+  if(!answer.trim()){
+    setContextStatus("请输入澄清问题的回答");
+    hermesClarifyAnswer?.focus?.();
+    return;
+  }
+  if(hermesActionPending) return;
+  hermesActionPending = true;
+  renderHermesRunStatus();
+  try{
+    const res = await fetch("/api/hermes/runs/" + encodeURIComponent(run.id) + "/clarify", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json; charset=utf-8" },
+      body:JSON.stringify({
+        project_id:run.projectId,
+        request_id:clarify.requestId,
+        execution_generation:clarify.executionGeneration,
+        answer
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok || !data.ok){
+      setContextStatus("Hermes 澄清回答提交失败：" + hermesErrorText(data.error));
+      await pollHermesRun();
+      return;
+    }
+    applyHermesRunUpdate(data.run);
+    if(data.syncError) setContextStatus("回答已提交，但 Hermes 最新状态暂时无法同步：" + hermesErrorText(data.syncError));
+    else setContextStatus("澄清回答已提交，Hermes 继续执行原任务");
+  }catch(err){
+    setContextStatus("Hermes 澄清回答提交失败：" + err.message);
+    await pollHermesRun();
+  }finally{
+    hermesActionPending = false;
+    renderHermesRunStatus();
+  }
+}
 
 async function hermesRunAction(name){
   if(name === "resubmit"){
@@ -15061,6 +15170,7 @@ function initHermesUi(){
   hermesProviderSelect.addEventListener("change", () => selectHermesProvider(hermesProviderSelect.value));
   hermesModelSelect.addEventListener("change", () => selectHermesModel(hermesModelSelect.value));
   hermesCatalogRefresh.addEventListener("click", () => loadHermesCatalog(true));
+  hermesClarifySubmit?.addEventListener("click", submitHermesClarify);
   hermesRunCollapseBtn?.addEventListener("click", () => {
     const currentState = hermesPanelStateOverride || hermesPanelState;
     setHermesPanelState(currentState === "expanded" ? "collapsed" : "expanded");

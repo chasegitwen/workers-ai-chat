@@ -15,6 +15,7 @@ import {
 } from "./config.js";
 import { HermesError, publicError } from "./errors.js";
 import { HERMES_APPROVAL_POLICY } from "./permissions.js";
+import { sanitizeHermesClarifyPrompt } from "./clarifications.js";
 import {
   assertConversationAccess,
   cancelHermesRun,
@@ -27,6 +28,7 @@ import {
   recordHermesTimelineEvents,
   requireOwnedHermesRun,
   respondToHermesApproval,
+  respondToHermesClarify,
   resolveUnknownHermesRun,
   sanitizeHermesApprovalPrompt,
   submitHermesRun,
@@ -36,7 +38,7 @@ import { createSseParser, formatSseFrame } from "./sse.js";
 import { isHermesTerminal, mapHermesUpstreamStatus } from "./status.js";
 import { sanitizeHermesTimelineEvent } from "./timeline.js";
 
-const RUN_ROUTE = /^\/api\/hermes\/runs\/(hrun_[a-f0-9]{32})(?:\/(events|cancel|approval|reconcile|resolve-unknown))?$/;
+const RUN_ROUTE = /^\/api\/hermes\/runs\/(hrun_[a-f0-9]{32})(?:\/(events|cancel|approval|clarify|reconcile|resolve-unknown))?$/;
 const MAX_DELTA_CHARS = 8000;
 
 function errorResponse(err) {
@@ -97,7 +99,7 @@ async function handleCatalog(env, url, options) {
   }
 }
 
-function sanitizeEvent(frame) {
+function sanitizeEvent(frame, capabilities = null) {
   const data = frame.data || {};
   const event = String(frame.event || "");
   const out = { event, seq: frame.seq };
@@ -113,13 +115,21 @@ function sanitizeEvent(frame) {
     case "approval.request":
       out.approval = sanitizeHermesApprovalPrompt(data, {
         executionGeneration: data.execution_generation,
-        respondable: true
+        respondable: Boolean(capabilities?.features?.run_approval_response && capabilities?.features?.approval_events)
       });
       return out;
+    case "clarify.request":
+      out.clarify = sanitizeHermesClarifyPrompt(data, {
+        executionGeneration: data.execution_generation,
+        respondable: Boolean(capabilities?.features?.run_clarify_response && capabilities?.features?.clarify_events)
+      });
+      return out.clarify ? out : null;
     case "run.queued":
     case "run.steered":
     case "approval.settled":
     case "approval.responded":
+    case "clarify.settled":
+    case "clarify.responded":
       return out;
     case "replay.truncated":
       out.oldestRetainedSeq = Number.isInteger(data.oldest_retained_seq) ? data.oldest_retained_seq : null;
@@ -143,6 +153,7 @@ async function handleEvents(request, env, row, url, options) {
   // last_seq is forwarded. After a disconnect the client re-reads state via GET instead.
   // last_event_seq is kept for diagnostics only.
   const lastSeq = Number.isInteger(row.last_event_seq) ? row.last_event_seq : -1;
+  const capabilities = await hermesCapabilities(env, row.instance_id);
   const sseHeaders = {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache, no-transform",
@@ -182,7 +193,7 @@ async function handleEvents(request, env, row, url, options) {
         }
         if (frame.type !== "event") continue;
         if (Number.isInteger(frame.seq) && frame.seq > maxSeq) maxSeq = frame.seq;
-        const safe = sanitizeEvent(frame);
+        const safe = sanitizeEvent(frame, capabilities);
         if (!safe) continue;
         if (["tool.started", "tool.completed", "subagent.start", "subagent.complete"].includes(safe.event)) {
           try {
@@ -305,6 +316,13 @@ export async function handleHermes(request, env, url, ctx, options = {}) {
       }
       const { run, approvalResponse } = await respondToHermesApproval(env, row, body, routeOptions);
       return await runResponse(env, run, { approvalResponse });
+    }
+    if (action === "clarify") {
+      if (!hermesExecutionEnabled(env)) {
+        throw new HermesError("hermes_execution_disabled", "Hermes execution is disabled", { httpStatus: 403 });
+      }
+      const { run, clarifyResponse, syncError } = await respondToHermesClarify(env, row, body, routeOptions);
+      return await runResponse(env, run, { clarifyResponse, syncError });
     }
     if (action === "reconcile") {
       if (!hermesExecutionEnabled(env)) {

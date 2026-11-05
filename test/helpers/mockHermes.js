@@ -42,6 +42,7 @@ export class MockHermes {
     this.onGet = null;
     this.onStop = null;
     this.onApproval = null;
+    this.onClarify = null;
     this.onEvents = null;
     this.capabilities = null;
     this.modelOptions = {
@@ -66,6 +67,7 @@ export class MockHermes {
       features: {
         run_submission: true, run_status: true, run_events_sse: true, run_stop: true,
         run_approval_response: true, approval_events: true, tool_progress_events: true, model_options: true,
+        run_clarify_response: true, clarify_events: true,
         run_unknown_resolution: this.unknownResolution,
         runs_idempotency: { supported: true, durable: this.durableIdempotency, retention_seconds: 86400 }
       },
@@ -116,6 +118,25 @@ export class MockHermes {
     return control;
   }
 
+  requestClarify(runId, clarify = {}) {
+    const run = this.run(runId);
+    const executionGeneration = Number.isInteger(clarify.execution_generation)
+      ? clarify.execution_generation
+      : run.execution_generation;
+    const control = {
+      kind: "clarify",
+      prompt_id: clarify.prompt_id || "clarify_" + crypto.randomUUID().replace(/-/g, ""),
+      execution_generation: executionGeneration,
+      question: clarify.question || "Which operating condition should Hermes use?"
+    };
+    Object.assign(run, {
+      status: "waiting_for_clarification",
+      execution_generation: executionGeneration,
+      pending_controls: [control]
+    });
+    return control;
+  }
+
   only(path) {
     return this.calls.filter(call => call.path === path || call.pathPrefix === path);
   }
@@ -157,7 +178,7 @@ export class MockHermes {
       return json({ run_id: run.run_id, status: "started", replayed: false }, 202);
     }
 
-    const match = url.pathname.match(/^\/v1\/runs\/([^/]+)(?:\/(events|stop|approval|resolve-unknown))?$/);
+    const match = url.pathname.match(/^\/v1\/runs\/([^/]+)(?:\/(events|stop|approval|clarify|resolve-unknown))?$/);
     if (match) {
       const [, runId, action] = match;
       call.pathPrefix = "/v1/runs/" + (action || "");
@@ -206,6 +227,32 @@ export class MockHermes {
         return json({
           object: "hermes.run.approval_response", run_id: runId,
           request_id: control.prompt_id, choice: call.body.choice, resolved: 1
+        });
+      }
+      if (action === "clarify" && method === "POST") {
+        if (this.onClarify) {
+          const override = await this.onClarify(call, run);
+          if (override) return override;
+        }
+        if (!run) return err(404, "run_not_found", "Run not found: " + runId);
+        const control = Array.isArray(run.pending_controls)
+          ? run.pending_controls.find(item => item.kind === "clarify")
+          : null;
+        if (run.status !== "waiting_for_clarification" || !control) {
+          return err(409, "clarify_not_pending", "Run has no pending clarification");
+        }
+        if (call.body?.request_id !== control.prompt_id
+          || call.body?.execution_generation !== control.execution_generation) {
+          return err(409, "stale_generation", "Clarification identity is stale");
+        }
+        if (typeof call.body?.answer !== "string" || !call.body.answer.trim()) {
+          return err(400, "invalid_params", "Answer is required");
+        }
+        run.status = "running";
+        run.pending_controls = [];
+        return json({
+          object: "hermes.run.clarify_response", run_id: runId,
+          request_id: control.prompt_id, answer: call.body.answer, resolved: 1
         });
       }
       if (action === "resolve-unknown" && method === "POST") {

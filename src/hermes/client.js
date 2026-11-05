@@ -127,6 +127,13 @@ export function createHermesClient(env, instanceId, { fetchImpl } = {}) {
         mutating: true
       }
     ),
+    respondClarify: (runId, requestId, executionGeneration, answer) => request(
+      "POST", runPath(runId, "/clarify"), {
+        body: { request_id: requestId, execution_generation: executionGeneration, answer },
+        timeoutMs: HERMES_TIMEOUTS_MS.clarify,
+        mutating: true
+      }
+    ),
     resolveUnknown: (runId, admissionId, executionGeneration) => request("POST", runPath(runId, "/resolve-unknown"), {
       body: { admission_id: admissionId, execution_generation: executionGeneration },
       timeoutMs: HERMES_TIMEOUTS_MS.resolveUnknown,

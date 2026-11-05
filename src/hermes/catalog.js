@@ -19,6 +19,9 @@ const BOOLEAN_FEATURES = [
   ...REQUIRED_FEATURES,
   "run_approval_response",
   "approval_events",
+  "run_clarify",
+  "run_clarify_response",
+  "clarify_events",
   "tool_progress_events",
   "run_unknown_resolution",
   "model_options"
@@ -35,6 +38,12 @@ export function normalizeHermesCapabilities(payload) {
   BOOLEAN_FEATURES.forEach(name => {
     out[name] = features[name] === true;
   });
+  // Hermes may advertise Clarify as one aggregate run capability or as separate response/event
+  // flags. Both forms are explicit declarations; absence of both continues to fail closed.
+  if (out.run_clarify) {
+    out.run_clarify_response = true;
+    out.clarify_events = true;
+  }
   const idem = features.runs_idempotency && typeof features.runs_idempotency === "object" ? features.runs_idempotency : {};
   const runsIdempotency = {
     supported: idem.supported === true,

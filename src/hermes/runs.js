@@ -19,6 +19,7 @@ import { readProject } from "../api/projects.js";
 import { createHermesClient, isHermesRunId } from "./client.js";
 import {
   HERMES_APPROVAL_CLAIM_STALE_MS,
+  HERMES_CLARIFY_CLAIM_STALE_MS,
   HERMES_AGENT_ID,
   HERMES_MAX_INPUT_CHARS,
   HERMES_STALE_SUBMIT_MS,
@@ -26,6 +27,11 @@ import {
   hermesInstance,
   resolveHermesUpstream
 } from "./config.js";
+import {
+  HERMES_CLARIFY_MAX_ANSWER_CHARS,
+  canRespondToHermesClarify,
+  sanitizeHermesClarifyPrompt
+} from "./clarifications.js";
 import { getHermesCatalog, validateHermesModelSelection } from "./catalog.js";
 import { HermesError, publicError, safeCode, safeMessage } from "./errors.js";
 import {
@@ -54,7 +60,8 @@ const RUN_COLUMNS = `id, owner_username, project_id, conversation_id, instance_i
   actual_model, route_source, status, upstream_status, status_detail, error_code, error_message, holds_slot,
   last_event_seq, timeline_json, user_message_id, assistant_message_id, usage_json, cancel_requested_at, submitted_at,
   completed_at, approval_request_id, approval_generation, approval_json, approval_response_pending,
-  approval_response_started_at, created_at, updated_at`;
+  approval_response_started_at, clarify_request_id, clarify_generation, clarify_json,
+  clarify_response_pending, clarify_response_started_at, created_at, updated_at`;
 
 function log(event, detail) {
   console.log("[hermes] " + event, detail);
@@ -113,6 +120,16 @@ function parseStoredApproval(row) {
   }
 }
 
+function parseStoredClarify(row) {
+  if (!row?.clarify_json) return null;
+  try {
+    const clarify = JSON.parse(row.clarify_json);
+    return clarify && typeof clarify === "object" ? clarify : null;
+  } catch (err) {
+    return null;
+  }
+}
+
 function parseStoredTimeline(row) {
   if (!row?.timeline_json) return [];
   try {
@@ -135,6 +152,19 @@ function approvalFromSnapshot(snapshot, fallbackGeneration = null) {
   });
 }
 
+function clarifyFromSnapshot(snapshot, fallbackGeneration = null) {
+  const controls = Array.isArray(snapshot?.pending_controls) ? snapshot.pending_controls : [];
+  const prompt = controls.find(control => {
+    const kind = String(control?.kind || control?.type || control?.control_type || "").toLowerCase();
+    return kind === "clarify";
+  }) || (snapshot?.clarify && typeof snapshot.clarify === "object" ? snapshot.clarify : null);
+  return sanitizeHermesClarifyPrompt(prompt, {
+    executionGeneration: Number.isInteger(snapshot?.execution_generation)
+      ? snapshot.execution_generation
+      : fallbackGeneration
+  });
+}
+
 export function publicHermesRun(row, { capabilities = null } = {}) {
   if (!row) return null;
   let usage = null;
@@ -151,10 +181,25 @@ export function publicHermesRun(row, { capabilities = null } = {}) {
     respondable: approvalRespondable && !row.approval_response_pending,
     responding: Boolean(row.approval_response_pending)
   }) : (row.status === "waiting_for_approval" ? {
+    kind: "approval",
+    status: row.approval_response_pending ? "responding" : "unavailable",
     required: true,
     respondable: false,
     responding: Boolean(row.approval_response_pending),
     policy: HERMES_APPROVAL_POLICY
+  } : null);
+  const storedClarify = row.status === "waiting_for_clarification" ? parseStoredClarify(row) : null;
+  const clarifyRespondable = canRespondToHermesClarify({ capabilities, run: row, prompt: storedClarify });
+  const clarify = storedClarify ? sanitizeHermesClarifyPrompt(storedClarify, {
+    executionGeneration: row.clarify_generation,
+    respondable: clarifyRespondable && !row.clarify_response_pending,
+    responding: Boolean(row.clarify_response_pending)
+  }) : (row.status === "waiting_for_clarification" ? {
+    kind: "clarify",
+    status: row.clarify_response_pending ? "responding" : "unavailable",
+    required: true,
+    respondable: false,
+    responding: Boolean(row.clarify_response_pending)
   } : null);
   return {
     id: row.id,
@@ -181,6 +226,7 @@ export function publicHermesRun(row, { capabilities = null } = {}) {
     assistantMessageId: row.assistant_message_id || null,
     usage,
     approval,
+    clarify,
     cancelRequested: Boolean(row.cancel_requested_at),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -193,13 +239,18 @@ export function hermesRunActions(row, { capabilities = null, now = Date.now() } 
   const actions = [];
   if (!row || isHermesTerminal(row.status)) return actions;
   if (row.upstream_run_id) actions.push("refresh");
-  if (row.upstream_run_id && ["queued", "running", "waiting_for_approval", "stopping", "cancel_requested"].includes(row.status)) {
+  if (row.upstream_run_id && ["queued", "running", "waiting_for_approval", "waiting_for_clarification", "stopping", "cancel_requested"].includes(row.status)) {
     actions.push("cancel");
   }
   const approval = parseStoredApproval(row);
   if (!row.approval_response_pending
     && canRespondToHermesApproval({ capabilities, run: row, prompt: approval })) {
     actions.unshift("approve_once", "deny");
+  }
+  const clarify = parseStoredClarify(row);
+  if (!row.clarify_response_pending
+    && canRespondToHermesClarify({ capabilities, run: row, prompt: clarify })) {
+    actions.unshift("answer_clarify");
   }
   // No user action releases the slot while the remote outcome is unknown: submission_unknown
   // and unknown keep holds_slot=1 until an authoritative terminal status is observed or an
@@ -525,7 +576,9 @@ async function finalizeCompleted(env, row, snapshot) {
        assistant_message_id = COALESCE(assistant_message_id, ?), actual_provider = ?, actual_model = ?, route_source = ?,
        usage_json = ?, error_code = NULL, error_message = NULL, approval_request_id = NULL,
        approval_generation = NULL, approval_json = NULL, approval_response_pending = 0,
-       approval_response_started_at = NULL, completed_at = COALESCE(completed_at, ?), updated_at = ?
+       approval_response_started_at = NULL, clarify_request_id = NULL, clarify_generation = NULL,
+       clarify_json = NULL, clarify_response_pending = 0, clarify_response_started_at = NULL,
+       completed_at = COALESCE(completed_at, ?), updated_at = ?
      WHERE id = ? AND status NOT IN (` + TERMINAL_SQL + `)`
   ).bind(
     safeCode(snapshot.status) || "completed",
@@ -561,12 +614,22 @@ async function applySnapshot(env, row, snapshot) {
   const snapshotApproval = mapped === "waiting_for_approval"
     ? approvalFromSnapshot(snapshot, generation ?? row.execution_generation)
     : null;
+  const snapshotClarify = mapped === "waiting_for_clarification"
+    ? clarifyFromSnapshot(snapshot, generation ?? row.execution_generation)
+    : null;
   const sameClaim = Boolean(
     snapshotApproval?.requestId
     && row.approval_response_pending
     && row.approval_request_id === snapshotApproval.requestId
     && row.approval_generation === snapshotApproval.executionGeneration
     && Date.now() - Number(row.approval_response_started_at || 0) < HERMES_APPROVAL_CLAIM_STALE_MS
+  );
+  const sameClarifyClaim = Boolean(
+    snapshotClarify?.requestId
+    && row.clarify_response_pending
+    && row.clarify_request_id === snapshotClarify.requestId
+    && row.clarify_generation === snapshotClarify.executionGeneration
+    && Date.now() - Number(row.clarify_response_started_at || 0) < HERMES_CLARIFY_CLAIM_STALE_MS
   );
   const common = {
     upstream_status: upstreamStatus || null,
@@ -576,7 +639,12 @@ async function applySnapshot(env, row, snapshot) {
     approval_generation: snapshotApproval?.executionGeneration ?? null,
     approval_json: snapshotApproval ? JSON.stringify(snapshotApproval) : null,
     approval_response_pending: sameClaim ? 1 : 0,
-    approval_response_started_at: sameClaim ? row.approval_response_started_at : null
+    approval_response_started_at: sameClaim ? row.approval_response_started_at : null,
+    clarify_request_id: snapshotClarify?.requestId || null,
+    clarify_generation: snapshotClarify?.executionGeneration ?? null,
+    clarify_json: snapshotClarify ? JSON.stringify(snapshotClarify) : null,
+    clarify_response_pending: sameClarifyClaim ? 1 : 0,
+    clarify_response_started_at: sameClarifyClaim ? row.clarify_response_started_at : null
   };
   if (!mapped) {
     await updateActiveRun(db, row.id, { ...common, status_detail: "unrecognized_upstream_status" });
@@ -685,7 +753,7 @@ export async function cancelHermesRun(env, row, { fetchImpl } = {}) {
   await updateActiveRun(db, row.id, {
     status: "cancel_requested",
     cancel_requested_at: row.cancel_requested_at || Date.now()
-  }, { fromStatuses: ["queued", "running", "waiting_for_approval", "stopping", "cancel_requested"] });
+  }, { fromStatuses: ["queued", "running", "waiting_for_approval", "waiting_for_clarification", "stopping", "cancel_requested"] });
   let cancelError = null;
   try {
     const client = createHermesClient(env, row.instance_id, { fetchImpl });
@@ -786,6 +854,90 @@ export async function respondToHermesApproval(env, row, body, { fetchImpl } = {}
         WHERE id = ? AND approval_request_id = ? AND approval_generation = ?`
     ).bind(Date.now(), row.id, requestId, generation).run();
     log("approval_failed", { run_id: row.id, code: err?.code || "error", execution_generation: generation });
+    throw err;
+  }
+}
+
+export async function respondToHermesClarify(env, row, body, { fetchImpl } = {}) {
+  if (typeof body?.answer !== "string" || !body.answer.trim()) {
+    throw new HermesError("hermes_invalid_clarify_answer",
+      "A non-empty clarification answer is required", { httpStatus: 400 });
+  }
+  if (body.answer.length > HERMES_CLARIFY_MAX_ANSWER_CHARS) {
+    throw new HermesError("hermes_clarify_answer_too_long",
+      "The clarification answer is too long", { httpStatus: 413 });
+  }
+  const answer = body.answer;
+  const requestId = String(body?.request_id || body?.requestId || "").trim();
+  const generation = body?.execution_generation ?? body?.executionGeneration;
+  if (!requestId || requestId.length > 256 || /[\u0000-\u001f\u007f]/.test(requestId)
+    || !Number.isInteger(generation) || generation < 0) {
+    throw new HermesError("hermes_invalid_clarify_identity",
+      "The current clarification request_id and execution_generation are required", { httpStatus: 400 });
+  }
+
+  // The cached card is advisory. Verify the live canonical control before claiming it.
+  const synced = await syncHermesRun(env, row, { fetchImpl });
+  if (synced.syncError) {
+    throw new HermesError("hermes_clarify_status_unavailable",
+      "Could not verify the current Hermes clarification; refresh and try again", { httpStatus: 503 });
+  }
+  row = synced.run;
+  const capabilities = await hermesCapabilities(env, row.instance_id, { refresh: true, fetchImpl });
+  const clarify = parseStoredClarify(row);
+  if (!canRespondToHermesClarify({ capabilities, run: row, prompt: clarify })) {
+    throw new HermesError("hermes_clarify_unavailable",
+      "Hermes does not have a respondable clarification for this run", { httpStatus: 409 });
+  }
+  if (clarify.requestId !== requestId || clarify.executionGeneration !== generation
+    || row.clarify_request_id !== requestId || row.clarify_generation !== generation) {
+    throw new HermesError("hermes_clarify_stale",
+      "The clarification changed or expired; refresh before responding", { httpStatus: 409 });
+  }
+
+  const claimStartedAt = Date.now();
+  const claim = await env.DB.prepare(
+    `UPDATE hermes_runs
+        SET clarify_response_pending = 1, clarify_response_started_at = ?, updated_at = ?
+      WHERE id = ? AND status = 'waiting_for_clarification'
+        AND clarify_request_id = ? AND clarify_generation = ?
+        AND clarify_response_pending = 0`
+  ).bind(claimStartedAt, claimStartedAt, row.id, requestId, generation).run();
+  if (!(claim?.meta?.changes > 0)) {
+    throw new HermesError("hermes_clarify_in_progress",
+      "This clarification is already being answered or has changed", { httpStatus: 409 });
+  }
+
+  try {
+    const client = createHermesClient(env, row.instance_id, { fetchImpl });
+    const response = await client.respondClarify(row.upstream_run_id, requestId, generation, answer);
+    const timestamp = Date.now();
+    await env.DB.prepare(
+      `UPDATE hermes_runs
+          SET status = 'running', upstream_status = 'running', status_detail = 'clarify_answered',
+              clarify_request_id = NULL, clarify_generation = NULL, clarify_json = NULL,
+              clarify_response_pending = 0, clarify_response_started_at = NULL, updated_at = ?
+        WHERE id = ? AND status = 'waiting_for_clarification'
+          AND clarify_request_id = ? AND clarify_generation = ?`
+    ).bind(timestamp, row.id, requestId, generation).run();
+    log("clarify_responded", { run_id: row.id, execution_generation: generation });
+    const authoritative = await syncHermesRun(env, await readRunById(env.DB, row.id), { fetchImpl });
+    return {
+      run: authoritative.run,
+      syncError: authoritative.syncError,
+      clarifyResponse: {
+        requestId,
+        executionGeneration: generation,
+        resolved: Number.isFinite(response.body?.resolved) ? response.body.resolved : null
+      }
+    };
+  } catch (err) {
+    await env.DB.prepare(
+      `UPDATE hermes_runs
+          SET clarify_response_pending = 0, clarify_response_started_at = NULL, updated_at = ?
+        WHERE id = ? AND clarify_request_id = ? AND clarify_generation = ?`
+    ).bind(Date.now(), row.id, requestId, generation).run();
+    log("clarify_failed", { run_id: row.id, code: err?.code || "error", execution_generation: generation });
     throw err;
   }
 }

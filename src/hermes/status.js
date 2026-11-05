@@ -1,6 +1,7 @@
 // Local Hermes run states and the mapping from Hermes v0.22.5 run statuses.
 //
-// Upstream (GET /v1/runs/{id}): queued, running, waiting_for_approval, stopping, unknown
+// Upstream (GET /v1/runs/{id}): queued, running, waiting_for_approval,
+// waiting_for_clarification, stopping, unknown
 // (authority mode, not terminal), completed, failed, cancelled, interrupted.
 // Local-only states:
 //   reserving / submitting  slot taken, POST not yet answered
@@ -15,7 +16,7 @@ export const HERMES_TERMINAL_STATUSES = Object.freeze([
 
 export const HERMES_ACTIVE_STATUSES = Object.freeze([
   "reserving", "submitting", "submission_unknown", "queued", "running",
-  "waiting_for_approval", "stopping", "cancel_requested", "unknown"
+  "waiting_for_approval", "waiting_for_clarification", "stopping", "cancel_requested", "unknown"
 ]);
 
 const UPSTREAM_TO_LOCAL = Object.freeze({
@@ -23,6 +24,7 @@ const UPSTREAM_TO_LOCAL = Object.freeze({
   started: "queued",
   running: "running",
   waiting_for_approval: "waiting_for_approval",
+  waiting_for_clarification: "waiting_for_clarification",
   stopping: "stopping",
   unknown: "unknown",
   completed: "completed",

@@ -68,6 +68,7 @@ export function sanitizeHermesApprovalPrompt(prompt, options = {}) {
     && choices.includes("once") && choices.includes("deny"));
   return {
     kind: "approval",
+    status: options.responding ? "responding" : "pending",
     requestId,
     executionGeneration,
     tool,

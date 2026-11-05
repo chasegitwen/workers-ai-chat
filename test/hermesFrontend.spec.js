@@ -9,7 +9,7 @@ const HERMES_FUNCTIONS = [
   "newHermesClientRequestId", "sendHermesMessage", "submitHermesBody", "hermesRunQuery", "stopHermesTracking",
   "trackHermesRun", "applyHermesRunUpdate", "hermesTerminalText", "handleHermesTerminal", "hermesRunModelText",
   "hermesTimelineEventKey", "mergeHermesTimeline", "hermesTimelineEntries", "hermesTimelineSummary", "hermesDurationText",
-  "renderHermesTimeline", "renderHermesApproval", "renderHermesRunStatus", "setHermesPanelState", "observeHermesApproval", "setHermesSelectionActive", "syncModelModeUi", "isOpenClawAgentMode", "selectHermesProvider"
+  "renderHermesTimeline", "renderHermesApproval", "renderHermesClarify", "renderHermesRunStatus", "setHermesPanelState", "observeHermesApproval", "setHermesSelectionActive", "syncModelModeUi", "isOpenClawAgentMode", "selectHermesProvider"
 ];
 
 function catalog() {
@@ -48,6 +48,10 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
     hermesApprovalCommand: element(),
     hermesApprovalTarget: element(),
     hermesApprovalRisk: element(),
+    hermesClarifyPanel: element({ hidden: true }),
+    hermesClarifyQuestion: element(),
+    hermesClarifyAnswer: element({ value: "", focus() {} }),
+    hermesClarifySubmit: element({ disabled: false }),
     hermesRunTimeline: element({ hidden: true, innerHTML: "", appendChild(child) { this.children.push(child); } }),
     hermesRunActions: element({ innerHTML: "", appendChild(child) { this.children.push(child); } }),
     modelSelectField: element(),
@@ -99,7 +103,7 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
     modelSelect: { value: "" },
     setInterval: () => 1,
     clearInterval() {},
-    HERMES_STATUS_LABELS: { queued: "排队中", running: "执行中", stopping: "停止中", cancel_requested: "停止中（等待确认）", unknown: "状态未知", failed: "失败", cancelled: "已取消", completed: "已完成" },
+    HERMES_STATUS_LABELS: { queued: "排队中", running: "执行中", waiting_for_clarification: "等待回答", stopping: "停止中", cancel_requested: "停止中（等待确认）", unknown: "状态未知", failed: "失败", cancelled: "已取消", completed: "已完成" },
     HERMES_ACTION_LABELS: {
       approve_once: "仅本次批准", deny: "拒绝", cancel: "取消任务", refresh: "刷新状态", dismiss: "停止查看"
     },
@@ -120,7 +124,7 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
     hermesCatalogState: { visible: true, executionEnabled, catalog: catalog(), instances: [], loading: false },
     hermesSelection: { instanceId: "oracle-hermes", agentId: "hermes-agent", providerId: "", modelId: "" },
     hermesActiveRun: null, hermesRunView: null, hermesStreamText: "", hermesEventSource: null, hermesPollTimer: null,
-    hermesSubmitPending: null, hermesActionPending: false, hermesPanelState: "expanded", hermesPanelStateOverride: null, hermesLastApprovalRequestId: "", chatSelection: { kind: "agent" }, activeModelMode: "modern", activeNewModeTarget: "openclaw",
+    hermesSubmitPending: null, hermesActionPending: false, hermesPanelState: "expanded", hermesPanelStateOverride: null, hermesLastApprovalRequestId: "", hermesLastClarifyRequestId: "", chatSelection: { kind: "agent" }, activeModelMode: "modern", activeNewModeTarget: "openclaw",
     activeProjectId: "proj-a", currentConversationId: null, conversation: [],
     selectedImage: null, pastedImageAttachments: attachments ? [{}] : [], selectedFile: null,
     pendingConversationAttachments: [], selectedFileIds: [], selectedWebPage: null
@@ -147,6 +151,8 @@ describe("Hermes frontend", () => {
     expect(html).toContain('id="hermesRouteControls" class="openClawRouteControls" hidden');
     expect(html.indexOf('id="hermesRunMount"')).toBeGreaterThan(html.indexOf('class="inputBar"'));
     expect(html.indexOf('id="hermesRunMount"')).toBeLessThan(html.indexOf('id="openClawTaskBanner"'));
+    expect(html).toContain('id="hermesClarifyPanel" class="hermesClarifyPanel" hidden');
+    expect(html).toContain('id="hermesClarifyAnswer" maxlength="32000"');
     expect(html).toContain('.hermesRunStatus[data-panel-state="expanded"]{max-height:min(40vh,360px);overflow:auto}');
     expect(html).toContain('.routeCatalogPicker{position:relative;min-width:0;font-size:max(16px,1rem)}');
     expect(html).toContain('.routeCatalogPicker .modelCatalogTrigger,.routeCatalogPicker .modelCatalogFilter,.routeCatalogPicker .modelCatalogOption,.routeCatalogPicker .modelCatalogEmpty{font-size:max(16px,1rem)}');
@@ -335,6 +341,45 @@ describe("Hermes frontend", () => {
     expect(dom.hermesRunActions.children.map(button => button.textContent)).toEqual([
       "刷新状态", "取消任务", "停止查看"
     ]);
+  });
+
+  it("renders Clarify as a separate answer card and never mixes in approval actions", () => {
+    const { api, dom } = sandbox();
+    api.__set({ hermesActiveRun: {
+      id: "r", status: "waiting_for_clarification", terminal: false,
+      clarify: {
+        kind: "clarify", status: "pending", requestId: "clarify-7", executionGeneration: 4,
+        question: "使用满载还是空载工况？", respondable: true, responding: false
+      },
+      approval: null,
+      actions: ["answer_clarify", "refresh", "cancel"]
+    } });
+    api.renderHermesRunStatus();
+    expect(dom.hermesClarifyPanel.hidden).toBe(false);
+    expect(dom.hermesClarifyQuestion.textContent).toBe("使用满载还是空载工况？");
+    expect(dom.hermesApprovalPanel.hidden).toBe(true);
+    expect(dom.hermesClarifySubmit.disabled).toBe(false);
+    expect(dom.hermesRunActions.children.map(button => button.textContent)).toEqual([
+      "刷新状态", "取消任务", "停止查看"
+    ]);
+  });
+
+  it("submits the exact Clarify identity and answer only through the Worker route", async () => {
+    const { api, dom, fetches } = sandbox({ extra: ["submitHermesClarify"] });
+    api.__set({ hermesActiveRun: {
+      id: "hrun_" + "4".repeat(32), projectId: "proj-a", status: "waiting_for_clarification", terminal: false,
+      clarify: { kind: "clarify", requestId: "clarify-exact", executionGeneration: 11, respondable: true },
+      actions: ["answer_clarify"]
+    } });
+    dom.hermesClarifyAnswer.value = "采用满载工况";
+    await api.submitHermesClarify();
+    expect(fetches).toHaveLength(1);
+    expect(fetches[0].url).toBe("/api/hermes/runs/hrun_" + "4".repeat(32) + "/clarify");
+    expect(fetches[0].body).toEqual({
+      project_id: "proj-a", request_id: "clarify-exact", execution_generation: 11, answer: "采用满载工况"
+    });
+    expect(fetches[0].init.headers).toEqual({ "Content-Type":"application/json; charset=utf-8" });
+    expect(api.__get().hermesActionPending).toBe(false);
   });
 
   it("persists expanded, collapsed and hidden run-card states with a visible restore affordance", () => {

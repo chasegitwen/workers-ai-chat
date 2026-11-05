@@ -35,11 +35,12 @@ export function redactSecrets(text, secrets = []) {
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
     .replace(/HermesRoom\s+[A-Za-z0-9._~+/=-]+/gi, "HermesRoom [redacted]")
     .replace(/\b(sk|pk|rk)-[A-Za-z0-9_-]{8,}/g, "[redacted]")
-    .replace(/("?(?:api[_-]?key|token|secret|password|authorization|cf-access-client-secret)"?\s*[:=]\s*)("[^"]*"|[^\s,;}]+)/gi, "$1[redacted]");
+    .replace(/("?(?:api[_-]?key|access[_-]?key|private[_-]?key|token|secret|password|authorization|cookie|set-cookie|session|client[_-]?secret|cf-access-client-secret)"?\s*[:=]\s*)("[^"]*"|[^\s,;}]+)/gi, "$1[redacted]");
 }
 
-export function safeMessage(text, secrets = []) {
-  return redactSecrets(text, secrets).replace(/\s+/g, " ").trim().slice(0, MAX_MESSAGE_CHARS);
+export function safeMessage(text, secrets = [], maxChars = MAX_MESSAGE_CHARS) {
+  const limit = Number.isInteger(maxChars) ? Math.max(0, Math.min(1000, maxChars)) : MAX_MESSAGE_CHARS;
+  return redactSecrets(text, secrets).replace(/\s+/g, " ").trim().slice(0, limit);
 }
 
 export function safeCode(value) {

@@ -13,7 +13,7 @@ import {
   hermesExecutionEnabled,
   hermesInstance
 } from "./config.js";
-import { HermesError, publicError, safeCode, safeMessage } from "./errors.js";
+import { HermesError, publicError } from "./errors.js";
 import { HERMES_APPROVAL_POLICY } from "./permissions.js";
 import {
   assertConversationAccess,
@@ -24,6 +24,7 @@ import {
   readRunById,
   reconcileHermesRun,
   recordHermesEventSeq,
+  recordHermesTimelineEvents,
   requireOwnedHermesRun,
   respondToHermesApproval,
   resolveUnknownHermesRun,
@@ -33,6 +34,7 @@ import {
 } from "./runs.js";
 import { createSseParser, formatSseFrame } from "./sse.js";
 import { isHermesTerminal, mapHermesUpstreamStatus } from "./status.js";
+import { sanitizeHermesTimelineEvent } from "./timeline.js";
 
 const RUN_ROUTE = /^\/api\/hermes\/runs\/(hrun_[a-f0-9]{32})(?:\/(events|cancel|approval|reconcile|resolve-unknown))?$/;
 const MAX_DELTA_CHARS = 8000;
@@ -104,14 +106,10 @@ function sanitizeEvent(frame) {
       out.delta = String(data.delta ?? "").slice(0, MAX_DELTA_CHARS);
       return out;
     case "tool.started":
-      out.tool = safeCode(String(data.tool || "").toLowerCase().replace(/[^a-z0-9_]/g, "_")) || "tool";
-      out.preview = safeMessage(data.preview || "").slice(0, 200);
-      return out;
     case "tool.completed":
-      out.tool = safeCode(String(data.tool || "").toLowerCase().replace(/[^a-z0-9_]/g, "_")) || "tool";
-      out.error = data.error === true;
-      out.duration = Number.isFinite(data.duration) ? data.duration : null;
-      return out;
+    case "subagent.start":
+    case "subagent.complete":
+      return sanitizeHermesTimelineEvent(event, data, frame.seq);
     case "approval.request":
       out.approval = sanitizeHermesApprovalPrompt(data, {
         executionGeneration: data.execution_generation,
@@ -186,6 +184,9 @@ async function handleEvents(request, env, row, url, options) {
         if (Number.isInteger(frame.seq) && frame.seq > maxSeq) maxSeq = frame.seq;
         const safe = sanitizeEvent(frame);
         if (!safe) continue;
+        if (["tool.started", "tool.completed", "subagent.start", "subagent.complete"].includes(safe.event)) {
+          await recordHermesTimelineEvents(env, row.id, [safe]);
+        }
         await write(formatSseFrame(safe, Number.isInteger(frame.seq) ? frame.seq : null));
         if (safe.terminal) sawTerminal = true;
       }

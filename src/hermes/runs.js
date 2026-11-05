@@ -41,6 +41,7 @@ import {
   mapHermesUpstreamStatus,
   sqlStatusList
 } from "./status.js";
+import { mergeHermesTimeline, sanitizeHermesTimelineEvent, timelineEventsFromSnapshot } from "./timeline.js";
 
 const CLIENT_REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
 const ACTIVE_SQL = sqlStatusList(HERMES_ACTIVE_STATUSES);
@@ -51,7 +52,7 @@ const RUN_COLUMNS = `id, owner_username, project_id, conversation_id, instance_i
   request_fingerprint, upstream_idempotency_key, upstream_request_json, upstream_run_id, upstream_session_id,
   admission_id, execution_generation, model_mode, requested_provider, requested_model, actual_provider,
   actual_model, route_source, status, upstream_status, status_detail, error_code, error_message, holds_slot,
-  last_event_seq, user_message_id, assistant_message_id, usage_json, cancel_requested_at, submitted_at,
+  last_event_seq, timeline_json, user_message_id, assistant_message_id, usage_json, cancel_requested_at, submitted_at,
   completed_at, approval_request_id, approval_generation, approval_json, approval_response_pending,
   approval_response_started_at, created_at, updated_at`;
 
@@ -112,6 +113,15 @@ function parseStoredApproval(row) {
   }
 }
 
+function parseStoredTimeline(row) {
+  if (!row?.timeline_json) return [];
+  try {
+    return mergeHermesTimeline([], JSON.parse(row.timeline_json));
+  } catch (err) {
+    return [];
+  }
+}
+
 function approvalFromSnapshot(snapshot, fallbackGeneration = null) {
   const controls = Array.isArray(snapshot?.pending_controls) ? snapshot.pending_controls : [];
   const prompt = controls.find(control => {
@@ -167,6 +177,7 @@ export function publicHermesRun(row, { capabilities = null } = {}) {
     routeSource: row.route_source || null,
     error: row.error_code ? { code: row.error_code, message: row.error_message || "" } : null,
     lastEventSeq: Number.isInteger(row.last_event_seq) ? row.last_event_seq : -1,
+    timeline: parseStoredTimeline(row),
     assistantMessageId: row.assistant_message_id || null,
     usage,
     approval,
@@ -534,6 +545,8 @@ async function finalizeCompleted(env, row, snapshot) {
 
 async function applySnapshot(env, row, snapshot) {
   const db = env.DB;
+  const snapshotTimeline = timelineEventsFromSnapshot(snapshot);
+  if (snapshotTimeline.length) await recordHermesTimelineEvents(env, row.id, snapshotTimeline);
   const upstreamStatus = safeCode(snapshot?.status);
   const mapped = mapHermesUpstreamStatus(upstreamStatus);
   const admissionId = cleanText(snapshot?.admission_id, 160) || null;
@@ -815,6 +828,20 @@ export async function recordHermesEventSeq(env, runId, seq) {
   await env.DB.prepare(
     "UPDATE hermes_runs SET last_event_seq = ? WHERE id = ? AND last_event_seq < ?"
   ).bind(seq, runId, seq).run();
+}
+
+export async function recordHermesTimelineEvents(env, runId, events) {
+  const safeEvents = (Array.isArray(events) ? events : [events])
+    .map(event => sanitizeHermesTimelineEvent(event?.event, event, event?.seq))
+    .filter(Boolean);
+  if (!safeEvents.length) return;
+  const row = await env.DB.prepare("SELECT timeline_json FROM hermes_runs WHERE id = ?").bind(runId).first();
+  if (!row) return;
+  let current = [];
+  try { current = row.timeline_json ? JSON.parse(row.timeline_json) : []; } catch (err) { current = []; }
+  const timeline = mergeHermesTimeline(current, safeEvents);
+  await env.DB.prepare("UPDATE hermes_runs SET timeline_json = ?, updated_at = ? WHERE id = ?")
+    .bind(JSON.stringify(timeline), Date.now(), runId).run();
 }
 
 export { readRunById, hermesCapabilities, sanitizeHermesApprovalPrompt };

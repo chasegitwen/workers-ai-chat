@@ -2670,6 +2670,7 @@ body.dark .toolErrorNotice{
 .hermesRunPanelControls button,.hermesRunRestore{border:1px solid var(--border);border-radius:8px;padding:4px 8px;background:var(--panel);color:var(--text);cursor:pointer;font-size:12px}
 .hermesRunStatus[data-panel-state="collapsed"]{height:52px;max-height:52px;padding-top:6px;padding-bottom:6px}
 .hermesRunStatus[data-panel-state="collapsed"] #hermesApprovalPanel,
+.hermesRunStatus[data-panel-state="collapsed"] #hermesRunTimeline,
 .hermesRunStatus[data-panel-state="collapsed"] #hermesRunActions{display:none}
 .hermesRunStatus[data-panel-state="collapsed"] #hermesRunStatusText{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hermesRunRestore{max-width:100%;box-shadow:0 6px 18px rgba(15,23,42,.14)}
@@ -2682,6 +2683,18 @@ body.dark .toolErrorNotice{
 .hermesApprovalField span:first-child{color:var(--muted)}
 .hermesApprovalField span:last-child{min-width:0;overflow-wrap:anywhere;word-break:break-word}
 .hermesApprovalCommand{max-height:12em;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.hermesRunTimeline{display:grid;gap:6px;min-width:0}
+.hermesRunTimeline[hidden]{display:none}
+.hermesTimelineHeading{font-size:12px;font-weight:600;color:var(--muted)}
+.hermesTimelineItem{border:1px solid var(--border);border-radius:8px;background:rgba(148,163,184,.06);font-size:12px}
+.hermesTimelineItem[data-tone="success"]{border-left:3px solid #16a34a}
+.hermesTimelineItem[data-tone="error"]{border-left:3px solid #dc2626}
+.hermesTimelineItem[data-tone="running"]{border-left:3px solid #d97706}
+.hermesTimelineItem summary{display:flex;align-items:center;gap:7px;padding:7px 8px;cursor:pointer;list-style-position:inside;min-width:0}
+.hermesTimelineTitle{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hermesTimelineMeta{margin-left:auto;color:var(--muted);white-space:nowrap}
+.hermesTimelineBody{display:grid;gap:5px;padding:0 8px 8px}
+.hermesTimelineText{max-height:10em;overflow:auto;padding:6px;border-radius:6px;background:rgba(15,23,42,.06);white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
 .hermesRunActions{display:flex;flex-wrap:wrap;gap:6px}
 .hermesRunActions button{border:1px solid var(--border);border-radius:8px;padding:4px 10px;background:transparent;color:var(--text);cursor:pointer}
 .hermesRunActions button:disabled{opacity:.55;cursor:wait}
@@ -3673,6 +3686,7 @@ body.dark .toolErrorNotice{
         <div class="hermesApprovalField"><span>目标</span><span id="hermesApprovalTarget"></span></div>
         <div class="hermesApprovalField"><span>风险</span><span id="hermesApprovalRisk"></span></div>
       </div>
+      <div id="hermesRunTimeline" class="hermesRunTimeline" hidden></div>
       <div id="hermesRunActions" class="hermesRunActions"></div>
     </section>
     <button id="hermesRunRestore" class="hermesRunRestore" type="button" hidden>显示 Hermes 任务</button>
@@ -14247,6 +14261,7 @@ var hermesApprovalTool = document.getElementById("hermesApprovalTool");
 var hermesApprovalCommand = document.getElementById("hermesApprovalCommand");
 var hermesApprovalTarget = document.getElementById("hermesApprovalTarget");
 var hermesApprovalRisk = document.getElementById("hermesApprovalRisk");
+var hermesRunTimeline = document.getElementById("hermesRunTimeline");
 var hermesRunActions = document.getElementById("hermesRunActions");
 
 var HERMES_STATUS_LABELS = {
@@ -14256,8 +14271,8 @@ var HERMES_STATUS_LABELS = {
   queued:"排队中",
   running:"执行中",
   waiting_for_approval:"等待审批",
-  stopping:"正在停止",
-  cancel_requested:"已请求取消，等待确认",
+  stopping:"停止中",
+  cancel_requested:"停止中（等待确认）",
   unknown:"状态未知",
   completed:"已完成",
   failed:"失败",
@@ -14624,6 +14639,129 @@ function closeHermesEventStream(source, refresh){
   if(refresh) pollHermesRun();
 }
 
+function hermesTimelineEventKey(event){
+  if(Number.isInteger(event?.seq)) return "seq:" + event.seq;
+  return [event?.event, event?.tool, event?.goal, event?.preview, event?.result, event?.summary].join("|");
+}
+
+function mergeHermesTimeline(current, incoming){
+  const merged = [];
+  const positions = new Map();
+  [...(Array.isArray(current) ? current : []), ...(Array.isArray(incoming) ? incoming : [])].forEach(event => {
+    if(!event || !["tool.started", "tool.completed", "subagent.start", "subagent.complete"].includes(event.event)) return;
+    const key = hermesTimelineEventKey(event);
+    if(positions.has(key)) merged[positions.get(key)] = event;
+    else{
+      positions.set(key, merged.length);
+      merged.push(event);
+    }
+  });
+  return merged.slice(-50);
+}
+
+function hermesTimelineEntries(timeline){
+  const entries = [];
+  (Array.isArray(timeline) ? timeline : []).forEach(event => {
+    if(event.event === "tool.started"){
+      entries.push({ kind:"tool", name:event.tool || "tool", args:event.preview || "", status:"running", seq:event.seq });
+      return;
+    }
+    if(event.event === "tool.completed"){
+      let entry = null;
+      for(let i = entries.length - 1; i >= 0; i -= 1){
+        if(entries[i].kind === "tool" && entries[i].name === (event.tool || "tool") && entries[i].status === "running"){
+          entry = entries[i];
+          break;
+        }
+      }
+      if(!entry){
+        entry = { kind:"tool", name:event.tool || "tool", args:"", seq:event.seq };
+        entries.push(entry);
+      }
+      entry.result = event.result || "";
+      entry.duration = event.duration;
+      entry.status = event.error ? "error" : "success";
+      return;
+    }
+    if(event.event === "subagent.start"){
+      entries.push({ kind:"subagent", name:"子代理", goal:event.goal || "", status:"running", seq:event.seq });
+      return;
+    }
+    if(event.event === "subagent.complete"){
+      let entry = null;
+      for(let i = entries.length - 1; i >= 0; i -= 1){
+        if(entries[i].kind === "subagent" && entries[i].status === "running"){
+          entry = entries[i];
+          break;
+        }
+      }
+      if(!entry){
+        entry = { kind:"subagent", name:"子代理", goal:event.goal || "", seq:event.seq };
+        entries.push(entry);
+      }
+      entry.summary = event.summary || "";
+      entry.duration = event.duration;
+      entry.status = ["failed", "error", "cancelled"].includes(event.status) ? "error" : "success";
+    }
+  });
+  return entries;
+}
+
+function hermesTimelineSummary(timeline){
+  const entries = hermesTimelineEntries(timeline);
+  const tools = entries.filter(entry => entry.kind === "tool");
+  const last = entries.at(-1);
+  if(!last) return "";
+  return tools.length + " tools · last: " + last.name;
+}
+
+function hermesDurationText(duration){
+  if(!Number.isFinite(duration)) return "";
+  if(duration < 1000) return Math.round(duration) + " ms";
+  return (duration / 1000).toFixed(duration < 10000 ? 1 : 0) + " s";
+}
+
+function renderHermesTimeline(run){
+  if(!hermesRunTimeline) return;
+  const entries = hermesTimelineEntries(run?.timeline);
+  hermesRunTimeline.innerHTML = "";
+  hermesRunTimeline.hidden = !entries.length;
+  if(!entries.length) return;
+  const heading = document.createElement("div");
+  heading.className = "hermesTimelineHeading";
+  heading.textContent = "执行详情 · " + hermesTimelineSummary(run.timeline);
+  hermesRunTimeline.appendChild(heading);
+  entries.forEach(entry => {
+    const item = document.createElement("details");
+    item.className = "hermesTimelineItem";
+    item.dataset.tone = entry.status;
+    const summary = document.createElement("summary");
+    const title = document.createElement("span");
+    title.className = "hermesTimelineTitle";
+    title.textContent = (entry.status === "success" ? "✓ " : (entry.status === "error" ? "✕ " : "… ")) + entry.name;
+    const meta = document.createElement("span");
+    meta.className = "hermesTimelineMeta";
+    meta.textContent = hermesDurationText(entry.duration) || (entry.status === "running" ? "运行中" : "");
+    summary.appendChild(title);
+    summary.appendChild(meta);
+    item.appendChild(summary);
+    const body = document.createElement("div");
+    body.className = "hermesTimelineBody";
+    const details = entry.kind === "tool"
+      ? [["参数", entry.args], ["结果", entry.result]]
+      : [["目标", entry.goal], ["摘要", entry.summary]];
+    details.forEach(([label, value]) => {
+      if(!value) return;
+      const text = document.createElement("div");
+      text.className = "hermesTimelineText";
+      text.textContent = label + "：" + value;
+      body.appendChild(text);
+    });
+    item.appendChild(body);
+    hermesRunTimeline.appendChild(item);
+  });
+}
+
 function handleHermesStreamEvent(data, source){
   if(!hermesActiveRun || !data) return;
   if(data.event === "message.delta"){
@@ -14631,8 +14769,10 @@ function handleHermesStreamEvent(data, source){
     if(hermesRunView) renderAssistantMarkdown(hermesRunView, hermesStreamText);
     return;
   }
-  if(data.event === "tool.started"){
-    setContextStatus("Hermes 正在调用工具：" + (data.tool || "tool"));
+  if(["tool.started", "tool.completed", "subagent.start", "subagent.complete"].includes(data.event)){
+    hermesActiveRun = { ...hermesActiveRun, timeline:mergeHermesTimeline(hermesActiveRun.timeline, [data]) };
+    if(data.event === "tool.started") setContextStatus("Hermes 正在调用工具：" + (data.tool || "tool"));
+    renderHermesRunStatus();
     return;
   }
   if(data.event === "approval.request"){
@@ -14658,11 +14798,11 @@ function handleHermesStreamEvent(data, source){
 function applyHermesRunUpdate(run){
   if(!run || !hermesActiveRun || run.id !== hermesActiveRun.id) return;
   const wasTerminal = hermesActiveRun.terminal;
-  hermesActiveRun = run;
-  observeHermesApproval(run);
+  hermesActiveRun = { ...run, timeline:mergeHermesTimeline(hermesActiveRun.timeline, run.timeline) };
+  observeHermesApproval(hermesActiveRun);
   renderHermesRunStatus();
-  if(run.terminal && !wasTerminal) handleHermesTerminal(run);
-  if(!run.terminal && !hermesPollTimer) trackHermesRun(run, hermesRunView);
+  if(hermesActiveRun.terminal && !wasTerminal) handleHermesTerminal(hermesActiveRun);
+  if(!hermesActiveRun.terminal && !hermesPollTimer) trackHermesRun(hermesActiveRun, hermesRunView);
 }
 
 async function pollHermesRun(){
@@ -14761,6 +14901,7 @@ function renderHermesRunStatus(){
   }
   hermesRunActions.innerHTML = "";
   renderHermesApproval(hermesSubmitPending ? null : run);
+  renderHermesTimeline(hermesSubmitPending ? null : run);
   const actions = [];
   if(hermesSubmitPending){
     hermesRunStatus.dataset.tone = "warn";
@@ -14768,10 +14909,11 @@ function renderHermesRunStatus(){
     actions.push("resubmit");
   }else{
     const parts = ["Hermes 任务 · " + (HERMES_STATUS_LABELS[run.status] || run.status), "模型：" + hermesRunModelText(run)];
+    if(effectivePanelState === "collapsed" && hermesTimelineSummary(run.timeline)) parts.push(hermesTimelineSummary(run.timeline));
     if(run.error) parts.push(hermesErrorText(run.error));
     hermesRunStatusText.textContent = parts.join(" · ");
     hermesRunStatus.dataset.tone = ["failed", "rejected", "interrupted"].includes(run.status) ? "error"
-      : (["submission_unknown", "unknown", "waiting_for_approval", "cancel_requested"].includes(run.status) ? "warn" : "");
+      : (["submission_unknown", "unknown", "waiting_for_approval", "stopping", "cancel_requested"].includes(run.status) ? "warn" : "");
     const approvalRespondable = run.status === "waiting_for_approval"
       && run.approval?.respondable === true && !run.approval?.responding;
     (run.actions || []).forEach(name => {

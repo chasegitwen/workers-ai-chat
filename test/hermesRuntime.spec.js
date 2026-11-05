@@ -390,8 +390,10 @@ describe("Hermes SSE proxy, disconnect and resume", () => {
     mock.onEvents = () => new Response(sseBody([
       ": open\n\n",
       sseFrame(0, { event: "tool.started", tool: "terminal", preview: "export TOKEN=abc Bearer sk-secret123456" }),
-      sseFrame(1, { event: "message.delta", delta: "Hello " }),
-      sseFrame(2, { event: "subagent.start", goal: "internal" }),
+      sseFrame(1, { event: "tool.completed", tool: "terminal", duration: 125, result_preview: "COOKIE=session-value " + "x".repeat(700), error: false }),
+      sseFrame(2, { event: "subagent.start", goal: "inspect TOKEN=agent-secret" }),
+      sseFrame(3, { event: "subagent.complete", status: "completed", duration: 240, summary: "found api_key=key-secret" }),
+      sseFrame(4, { event: "message.delta", delta: "Hello " }),
       "data: not-json\n\n"
     ], { close: false }), { headers: { "Content-Type": "text/event-stream" } });
 
@@ -399,13 +401,24 @@ describe("Hermes SSE proxy, disconnect and resume", () => {
     expect(firstStream.headers.get("Content-Type")).toContain("text/event-stream");
     expect(firstStream.text).toContain("\"event\":\"message.delta\"");
     expect(firstStream.text).toContain("\"event\":\"tool.started\"");
-    expect(firstStream.text).not.toContain("subagent");
+    expect(firstStream.text).toContain("\"event\":\"tool.completed\"");
+    expect(firstStream.text).toContain("\"result\":\"COOKIE=[redacted] x");
+    expect(firstStream.text).toContain("\"event\":\"subagent.start\"");
+    expect(firstStream.text).toContain("\"event\":\"subagent.complete\"");
     expect(firstStream.text).not.toContain("sk-secret123456");
     expect(firstStream.text).not.toContain("TOKEN=abc");
+    expect(firstStream.text).not.toContain("session-value");
+    expect(firstStream.text).not.toContain("agent-secret");
+    expect(firstStream.text).not.toContain("key-secret");
     expect(firstStream.text).toContain("hermes.stream_closed");
 
     const afterDrop = (await getRun(run.id)).json.run;
-    expect(afterDrop).toMatchObject({ status: "running", lastEventSeq: 2 });
+    expect(afterDrop).toMatchObject({ status: "running", lastEventSeq: 4 });
+    expect(afterDrop.timeline).toHaveLength(4);
+    expect(afterDrop.timeline[1]).toMatchObject({ event: "tool.completed", tool: "terminal", duration: 125, error: false });
+    expect(afterDrop.timeline[1].result).toHaveLength(500);
+    expect(JSON.stringify(afterDrop.timeline)).not.toMatch(/session-value|agent-secret|key-secret/);
+    expectNoSecrets(JSON.stringify(afterDrop.timeline));
     expect(await messages(run.conversationId)).toHaveLength(1);
 
     // A new connection never asks upstream to replay, even when the browser offers a cursor.
@@ -414,8 +427,8 @@ describe("Hermes SSE proxy, disconnect and resume", () => {
       upstreamHeaders = callInfo.headers;
       mock.complete(upstreamId, "Hello world");
       return new Response(sseBody([
-        sseFrame(3, { event: "message.delta", delta: "world" }),
-        sseFrame(4, { event: "run.completed", output: "SSE output must not be trusted alone" })
+        sseFrame(5, { event: "message.delta", delta: "world" }),
+        sseFrame(6, { event: "run.completed", output: "SSE output must not be trusted alone" })
       ]), { headers: { "Content-Type": "text/event-stream" } });
     };
     const resumed = await call("GET", "/api/hermes/runs/" + run.id + "/events?project_id=default&last_seq=1",
@@ -423,10 +436,11 @@ describe("Hermes SSE proxy, disconnect and resume", () => {
     expect(upstreamHeaders.has("Last-Event-ID")).toBe(false);
     const eventsCall = mock.calls.filter(item => item.path.endsWith("/events")).at(-1);
     expect(eventsCall.search).toBe("");
-    expect(resumed.text).toContain("id: 3");
+    expect(resumed.text).toContain("id: 5");
     expect(resumed.text).toContain("hermes.snapshot");
     const done = (await getRun(run.id)).json.run;
     expect(done.status).toBe("completed");
+    expect(done.timeline).toHaveLength(4);
     const rows = await messages(run.conversationId);
     expect(rows.filter(row => row.role === "assistant").map(row => row.content)).toEqual(["Hello world"]);
   });

@@ -8,7 +8,8 @@ const HERMES_FUNCTIONS = [
   "hermesErrorText", "hermesProviders", "hermesProvider", "hermesSelectionBlockReason", "hermesHasPendingAttachments",
   "newHermesClientRequestId", "sendHermesMessage", "submitHermesBody", "hermesRunQuery", "stopHermesTracking",
   "trackHermesRun", "applyHermesRunUpdate", "hermesTerminalText", "handleHermesTerminal", "hermesRunModelText",
-  "renderHermesApproval", "renderHermesRunStatus", "setHermesPanelState", "observeHermesApproval", "setHermesSelectionActive", "syncModelModeUi", "isOpenClawAgentMode", "selectHermesProvider"
+  "hermesTimelineEventKey", "mergeHermesTimeline", "hermesTimelineEntries", "hermesTimelineSummary", "hermesDurationText",
+  "renderHermesTimeline", "renderHermesApproval", "renderHermesRunStatus", "setHermesPanelState", "observeHermesApproval", "setHermesSelectionActive", "syncModelModeUi", "isOpenClawAgentMode", "selectHermesProvider"
 ];
 
 function catalog() {
@@ -47,6 +48,7 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
     hermesApprovalCommand: element(),
     hermesApprovalTarget: element(),
     hermesApprovalRisk: element(),
+    hermesRunTimeline: element({ hidden: true, innerHTML: "", appendChild(child) { this.children.push(child); } }),
     hermesRunActions: element({ innerHTML: "", appendChild(child) { this.children.push(child); } }),
     modelSelectField: element(),
     openClawRouteControls: element({ hidden: true }),
@@ -54,6 +56,10 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
     input: { value: "What limits hunting speed?" },
     sendBtn: element()
   };
+  Object.defineProperty(dom.hermesRunTimeline, "innerHTML", {
+    get() { return this.html || ""; },
+    set(value) { this.html = value; this.children = []; }
+  });
   const chat = element({ appendChild(child) {
     this.children = this.children.filter(item => item !== child);
     this.children.push(child);
@@ -65,7 +71,7 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
   const stubs = {
     ...dom,
     chat,
-    document: { createElement: () => element({ addEventListener() {} }) },
+    document: { createElement: tagName => element({ tagName, addEventListener() {}, appendChild(child) { this.children.push(child); } }) },
     localStorage: {
       getItem: key => stored.has(key) ? stored.get(key) : null,
       setItem: (key, value) => stored.set(key, String(value))
@@ -93,7 +99,7 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
     modelSelect: { value: "" },
     setInterval: () => 1,
     clearInterval() {},
-    HERMES_STATUS_LABELS: { queued: "排队中", running: "执行中", completed: "已完成" },
+    HERMES_STATUS_LABELS: { queued: "排队中", running: "执行中", stopping: "停止中", cancel_requested: "停止中（等待确认）", unknown: "状态未知", failed: "失败", cancelled: "已取消", completed: "已完成" },
     HERMES_ACTION_LABELS: {
       approve_once: "仅本次批准", deny: "拒绝", cancel: "取消任务", refresh: "刷新状态", dismiss: "停止查看"
     },
@@ -232,7 +238,11 @@ describe("Hermes frontend", () => {
     const { api, dom, chat } = sandbox();
     api.__set({ hermesActiveRun: {
       id: "r", status: "completed", terminal: true,
-      requestedProvider: "zai", requestedModel: "glm-5.3", actions: []
+      requestedProvider: "zai", requestedModel: "glm-5.3", actions: [],
+      timeline: [
+        { event: "tool.started", seq: 1, tool: "terminal", preview: "pwd" },
+        { event: "tool.completed", seq: 2, tool: "terminal", result: "C:/work", duration: 80, error: false }
+      ]
     } });
     api.renderHermesRunStatus();
     chat.innerHTML = "<div id='searchResults'></div>";
@@ -242,6 +252,53 @@ describe("Hermes frontend", () => {
     expect(dom.hermesRunStatus.hidden).toBe(false);
     expect(dom.hermesRunStatusText.textContent).toContain("已完成");
     expect(dom.hermesRunStatusText.textContent).toContain("zai / glm-5.3（请求）");
+    expect(dom.hermesRunTimeline.hidden).toBe(false);
+    expect(dom.hermesRunTimeline.children[1].dataset.tone).toBe("success");
+  });
+
+  it("renders and deduplicates live tool/subagent details, and keeps them across snapshots", () => {
+    const { api, dom } = sandbox({ extra: ["handleHermesStreamEvent"] });
+    api.__set({ hermesActiveRun: { id: "r", status: "running", terminal: false, actions: [], timeline: [] } });
+    const started = { event: "tool.started", seq: 10, tool: "terminal", preview: "git status" };
+    api.handleHermesStreamEvent(started, null);
+    api.handleHermesStreamEvent(started, null);
+    api.handleHermesStreamEvent({ event: "tool.completed", seq: 11, tool: "terminal", result: "clean", duration: 120, error: false }, null);
+    api.handleHermesStreamEvent({ event: "subagent.start", seq: 12, goal: "inspect tests", status: "running" }, null);
+    api.handleHermesStreamEvent({ event: "subagent.complete", seq: 13, summary: "all good", duration: 300, status: "completed" }, null);
+    expect(api.__get().hermesActiveRun.timeline).toHaveLength(4);
+    expect(dom.hermesRunTimeline.hidden).toBe(false);
+    expect(dom.hermesRunTimeline.children).toHaveLength(3);
+    expect(dom.hermesRunTimeline.children[1].tagName).toBe("details");
+    expect(dom.hermesRunTimeline.children[1].dataset.tone).toBe("success");
+    expect(dom.hermesRunTimeline.children[2].dataset.tone).toBe("success");
+
+    api.applyHermesRunUpdate({ id: "r", status: "running", terminal: false, actions: [], timeline: [started] });
+    expect(api.__get().hermesActiveRun.timeline).toHaveLength(4);
+    api.setHermesPanelState("collapsed");
+    expect(dom.hermesRunStatusText.textContent).toContain("1 tools · last: 子代理");
+  });
+
+  it("keeps stopping, unknown, failed and cancelled visually distinct", () => {
+    const { api, dom } = sandbox();
+    api.__set({ hermesActiveRun: { id: "r", status: "cancel_requested", terminal: false, actions: [] } });
+    api.renderHermesRunStatus();
+    expect(dom.hermesRunStatusText.textContent).toContain("停止中");
+    expect(dom.hermesRunStatusText.textContent).not.toContain("已取消");
+    expect(dom.hermesRunStatus.dataset.tone).toBe("warn");
+
+    api.__set({ hermesActiveRun: { id: "r", status: "unknown", terminal: false, actions: [] } });
+    api.renderHermesRunStatus();
+    expect(dom.hermesRunStatusText.textContent).toContain("状态未知");
+    expect(dom.hermesRunStatus.dataset.tone).toBe("warn");
+
+    api.__set({ hermesActiveRun: { id: "r", status: "failed", terminal: true, actions: [] } });
+    api.renderHermesRunStatus();
+    expect(dom.hermesRunStatus.dataset.tone).toBe("error");
+
+    api.__set({ hermesActiveRun: { id: "r", status: "cancelled", terminal: true, actions: [] } });
+    api.renderHermesRunStatus();
+    expect(dom.hermesRunStatusText.textContent).toContain("已取消");
+    expect(dom.hermesRunStatus.dataset.tone).toBe("");
   });
 
   it("renders the exact pending operation and only once/deny approval actions", () => {

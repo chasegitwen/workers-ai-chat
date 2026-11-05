@@ -6,7 +6,7 @@ import { element, lastDeclaration, pageScript } from "./helpers/selectionHarness
 
 const HERMES_FUNCTIONS = [
   "hermesErrorText", "hermesCapabilitySectionText", "hermesProviders", "hermesProvider", "hermesSelectionBlockReason", "hermesHasPendingAttachments",
-  "newHermesClientRequestId", "hermesModelOptionsFromDraft", "readHermesRunSettingsDraft", "writeHermesRunSettingsDraft", "sendHermesMessage", "submitHermesBody", "hermesRunQuery", "stopHermesTracking",
+  "newHermesClientRequestId", "hermesAllowedReasoningEfforts", "hermesModelOptionsFromDraft", "readHermesRunSettingsDraft", "writeHermesRunSettingsDraft", "sendHermesMessage", "submitHermesBody", "hermesRunQuery", "stopHermesTracking",
   "trackHermesRun", "applyHermesRunUpdate", "hermesTerminalText", "handleHermesTerminal", "hermesRunModelText",
   "hermesTimelineEventKey", "mergeHermesTimeline", "hermesTimelineEntries", "hermesTimelineSummary", "hermesDurationText",
   "renderHermesTimeline", "renderHermesApproval", "renderHermesClarify", "renderHermesRunStatus", "setHermesPanelState", "observeHermesApproval", "setHermesSelectionActive", "syncModelModeUi", "isOpenClawAgentMode", "selectHermesProvider"
@@ -125,7 +125,7 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
     hermesCatalogState: { visible: true, executionEnabled, catalog: catalog(), instances: [], loading: false },
     hermesSelection: { instanceId: "oracle-hermes", agentId: "hermes-agent", providerId: "", modelId: "" },
     hermesActiveRun: null, hermesRunView: null, hermesStreamText: "", hermesEventSource: null, hermesPollTimer: null,
-    hermesSubmitPending: null, hermesActionPending: false, hermesPanelState: "expanded", hermesPanelStateOverride: null, hermesLastApprovalRequestId: "", hermesLastClarifyRequestId: "", chatSelection: { kind: "agent" }, activeModelMode: "modern", activeNewModeTarget: "openclaw",
+    hermesSubmitPending: null, hermesSettingsState: { open:false, loading:false, error:null, panel:null, draft:{ reasoningEffort:"", serviceTier:"" } }, hermesActionPending: false, hermesPanelState: "expanded", hermesPanelStateOverride: null, hermesLastApprovalRequestId: "", hermesLastClarifyRequestId: "", chatSelection: { kind: "agent" }, activeModelMode: "modern", activeNewModeTarget: "openclaw",
     activeProjectId: "proj-a", currentConversationId: null, conversation: [],
     selectedImage: null, pastedImageAttachments: attachments ? [{}] : [], selectedFile: null,
     pendingConversationAttachments: [], selectedFileIds: [], selectedWebPage: null
@@ -192,6 +192,16 @@ describe("Hermes frontend", () => {
       reasoning: { effort: "high", enabled: true },
       service_tier: "priority"
     });
+  });
+
+  it("reset clears reasoning override even after select rebuild", async () => {
+    const { api, fetches, stored } = sandbox();
+    stored.set("hermesRunSettings.v1", JSON.stringify({ reasoningEffort: "high", serviceTier: "priority" }));
+    // Simulate drawer render rebuilding the select after a previous high selection.
+    api.writeHermesRunSettingsDraft({ reasoningEffort: "", serviceTier: "priority" });
+    await api.sendHermesMessage();
+    expect(fetches[0].body.model_options).toEqual({ service_tier: "priority" });
+    expect(fetches[0].body.model_options.reasoning).toBeUndefined();
   });
 
   it("omits model_options on Hermes submit when settings inherit", async () => {

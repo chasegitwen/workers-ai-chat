@@ -3586,7 +3586,7 @@ body.dark .toolErrorNotice{
 <button id="hermesSettingsBackdrop" class="hermesWorkbenchBackdrop" type="button" aria-label="关闭 Hermes 运行设置" hidden></button>
 <aside id="hermesSettingsDrawer" class="hermesWorkbenchDrawer" aria-label="Hermes 运行设置" aria-hidden="true" hidden>
   <div class="hermesWorkbenchHeader">
-    <div><h2>设置</h2><p>Hermes Run Settings · 当前请求覆盖，默认继承后端</p></div>
+    <div><h2>设置</h2><p>Hermes Run Settings · 后续请求覆盖（本浏览器），默认继承后端</p></div>
     <button id="hermesSettingsClose" class="hermesWorkbenchClose" type="button" aria-label="关闭">&times;</button>
   </div>
   <div class="hermesWorkbenchBody hermesSettingsBody">
@@ -15085,19 +15085,28 @@ function writeHermesRunSettingsDraft(draft){
   localStorage.setItem(HERMES_RUN_SETTINGS_STORAGE_KEY, JSON.stringify(hermesSettingsState.draft));
 }
 
+function hermesAllowedReasoningEfforts(){
+  const fromPanel = hermesSettingsState?.panel?.fields?.reasoning_effort?.efforts;
+  if(Array.isArray(fromPanel) && fromPanel.length) return fromPanel;
+  return ["none","minimal","low","medium","high","xhigh","max","ultra"];
+}
+
 function hermesModelOptionsFromDraft(draft){
+  const panel = hermesSettingsState?.panel;
+  const reasoningWritable = !panel || panel?.fields?.reasoning_effort?.writable !== false;
+  const tierWritable = !panel || panel?.fields?.service_tier?.writable !== false;
   const options = {};
   const effort = String(draft?.reasoningEffort || "").trim();
-  if(effort){
+  if(effort && reasoningWritable && hermesAllowedReasoningEfforts().includes(effort)){
     options.reasoning = { effort, enabled: effort !== "none" };
   }
   const tier = String(draft?.serviceTier || "").trim();
-  if(tier === "priority"){
-    options.service_tier = "priority";
-  }else if(tier === "default"){
-    options.service_tier = "default";
-  }else if(tier === "fast"){
-    options.fast = true;
+  if(tierWritable){
+    if(tier === "priority"){
+      options.service_tier = "priority";
+    }else if(tier === "default"){
+      options.service_tier = "default";
+    }
   }
   return Object.keys(options).length ? options : null;
 }
@@ -15132,7 +15141,7 @@ function renderHermesRunSettings(){
   if(hermesSettingsScopes){
     hermesSettingsScopes.innerHTML = "";
     const scopes = panel?.scopes || {
-      request:{ label:"当前请求", description:"写入本次 /v1/runs；默认继承。" },
+      request:{ label:"后续请求（本浏览器）", description:"写入后续 /v1/runs；默认继承。" },
       session:{ label:"当前会话", description:"会话级 model lock 本阶段不对 Web 用户开放写入。" },
       global:{ label:"全局配置", description:"不修改 config.yaml / .env / API Key。" }
     };
@@ -15156,7 +15165,6 @@ function renderHermesRunSettings(){
   }
   if(hermesSettingsReasoning){
     const efforts = panel?.fields?.reasoning_effort?.efforts || ["none","minimal","low","medium","high","xhigh","max","ultra"];
-    const current = hermesSettingsReasoning.value;
     hermesSettingsReasoning.innerHTML = "";
     const inheritOpt = document.createElement("option");
     inheritOpt.value = "";
@@ -15168,7 +15176,7 @@ function renderHermesRunSettings(){
       opt.textContent = effort;
       hermesSettingsReasoning.appendChild(opt);
     });
-    hermesSettingsReasoning.value = draft.reasoningEffort || current || "";
+    hermesSettingsReasoning.value = draft.reasoningEffort || "";
     hermesSettingsReasoning.disabled = panel?.fields?.reasoning_effort?.writable === false;
   }
   if(hermesSettingsServiceTier){

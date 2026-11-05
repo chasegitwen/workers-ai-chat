@@ -132,8 +132,8 @@ export function buildHermesRunSettingsPanel({ catalog, capabilities } = {}) {
     object: "hermes.run_settings",
     scopes: {
       request: {
-        label: "当前请求",
-        description: "写入本次 /v1/runs 请求体；默认继承，仅在覆盖时发送 model_options / provider / model。"
+        label: "后续请求（本浏览器）",
+        description: "写入后续 Hermes 执行请求（本浏览器本地偏好）；默认继承，仅在覆盖时发送 model_options / provider / model。Worker 按 Hermes v0.22.5 api_server 契约转发 model_options.reasoning / service_tier。"
       },
       session: {
         label: "当前会话",

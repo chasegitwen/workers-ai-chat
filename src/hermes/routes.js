@@ -109,7 +109,8 @@ async function handleRunSettings(env, url, { fetchImpl } = {}) {
   if (!hermesInstance(instanceId)) {
     throw new HermesError("hermes_unknown_instance", "Unknown Hermes instance", { httpStatus: 400 });
   }
-  const { catalog, stale, source, error } = await getHermesCatalog(env, instanceId, { fetchImpl });
+  const refresh = ["1", "true", "yes"].includes(String(url.searchParams.get("refresh") || "").toLowerCase());
+  const { catalog, stale, source, error } = await getHermesCatalog(env, instanceId, { refresh, fetchImpl });
   const panel = buildHermesRunSettingsPanel({ catalog, capabilities: catalog?.capabilities });
   return jsonResponse({
     ok: true,

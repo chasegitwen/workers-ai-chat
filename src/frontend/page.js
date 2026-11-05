@@ -1,4 +1,4 @@
-﻿export function htmlPage() {
+export function htmlPage() {
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -14448,6 +14448,13 @@ function hermesCapabilitySectionText(section, label){
   if(section.status === "available") return label + "：" + section.items.length;
   if(section.status === "unconfigured") return label + "：Hermes 实例未配置";
   if(section.status === "unavailable") return label + "：当前 Hermes 未广告此接口";
+  if(section.status === "error" && label === "Skills" && section.error?.upstreamStatus === 500){
+    const skillsEnumerateMessage = String(section.error?.message || "").toLowerCase();
+    if(skillsEnumerateMessage.includes("failed to enumerate skills") ||
+        skillsEnumerateMessage.includes("known hermes upstream v0.22.x get /v1/skills defect")){
+      return "Skills：Hermes 上游已知缺陷（v0.22.x /v1/skills 返回 500），不是 Worker/Access 鉴权失败；Toolsets 不受影响";
+    }
+  }
   if(section.status === "error") return label + "：加载失败（" + hermesErrorText(section.error) + "）";
   return label + "：状态未知";
 }

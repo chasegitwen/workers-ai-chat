@@ -84,6 +84,14 @@ function section(status, items = [], error = null) {
   return { status, items, error };
 }
 
+function clarifyKnownSkillsEnumerationError(error) {
+  if (error?.upstreamStatus !== 500 || !/Failed to enumerate skills/i.test(error.message || "")) return error;
+  return {
+    ...error,
+    message: "Known Hermes upstream v0.22.x GET /v1/skills defect (HTTP 500); not a Worker/Access authentication failure; Toolsets are unaffected"
+  };
+}
+
 function unavailableExecutionEnvironment(status = "available", error = null) {
   return {
     status,
@@ -134,7 +142,8 @@ export async function getHermesCapabilitiesPanel(env, instanceId, { fetchImpl } 
     try {
       return section("available", normalize((await getter()).body, client.secrets));
     } catch (err) {
-      return section("error", [], publicError(err));
+      const error = publicError(err);
+      return section("error", [], name === "skills" ? clarifyKnownSkillsEnumerationError(error) : error);
     }
   }
 

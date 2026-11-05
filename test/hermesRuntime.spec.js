@@ -293,6 +293,27 @@ describe("Hermes read-only capabilities panel", () => {
     expectNoSecrets(response.text);
   });
 
+  it("labels the known v0.22.x skills enumeration failure without hiding toolsets", async () => {
+    mock.onSkills = () => new Response(JSON.stringify({
+      error: { message: "Failed to enumerate skills", type: "server_error" }
+    }), { status: 500, headers: { "Content-Type": "application/json" } });
+
+    const response = await call("GET", "/api/hermes/capabilities-panel");
+
+    expect(response.status).toBe(200);
+    expect(response.json.skills).toMatchObject({
+      status: "error",
+      items: [],
+      error: {
+        code: "hermes_upstream_error",
+        upstreamStatus: 500,
+        message: expect.stringContaining("Known Hermes upstream v0.22.x GET /v1/skills defect")
+      }
+    });
+    expect(response.json.toolsets).toMatchObject({ status: "available" });
+    expect(response.json.toolsets.items).toHaveLength(mock.toolsets.length);
+  });
+
   it("reports unadvertised, unconfigured and failed endpoints without inventing availability", async () => {
     mock.capabilities = mock.defaultCapabilities();
     delete mock.capabilities.endpoints.skills;

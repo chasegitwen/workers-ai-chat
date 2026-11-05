@@ -5,7 +5,7 @@ import { element, lastDeclaration, pageScript } from "./helpers/selectionHarness
 // Runs the real (last-declared) Hermes page functions in a sandbox with stubbed DOM/fetch.
 
 const HERMES_FUNCTIONS = [
-  "hermesErrorText", "hermesProviders", "hermesProvider", "hermesSelectionBlockReason", "hermesHasPendingAttachments",
+  "hermesErrorText", "hermesCapabilitySectionText", "hermesProviders", "hermesProvider", "hermesSelectionBlockReason", "hermesHasPendingAttachments",
   "newHermesClientRequestId", "sendHermesMessage", "submitHermesBody", "hermesRunQuery", "stopHermesTracking",
   "trackHermesRun", "applyHermesRunUpdate", "hermesTerminalText", "handleHermesTerminal", "hermesRunModelText",
   "hermesTimelineEventKey", "mergeHermesTimeline", "hermesTimelineEntries", "hermesTimelineSummary", "hermesDurationText",
@@ -175,6 +175,17 @@ describe("Hermes frontend", () => {
     expect(script.split("function sendHermesMessage(").length).toBe(2);
     // Runtime type comes from the explicit selection, not from any domain inference.
     expect(lastDeclaration(script, "sendHermesMessage")).not.toContain("hnsnowground");
+  });
+
+  it("explains the known skills enumeration gap without changing other errors", () => {
+    const { api } = sandbox();
+    const known = { status: "error", items: [], error: {
+      code: "hermes_upstream_error", upstreamStatus: 500,
+      message: "Known Hermes upstream v0.22.x GET /v1/skills defect (HTTP 500)"
+    } };
+    expect(api.hermesCapabilitySectionText(known, "Skills")).toContain("Hermes 上游已知缺陷");
+    expect(api.hermesCapabilitySectionText(known, "Skills")).toContain("不是 Worker/Access 鉴权失败");
+    expect(api.hermesCapabilitySectionText(known, "Toolsets")).toContain("加载失败");
   });
 
   it("switches the selector to Hermes and hides model/OpenClaw controls", () => {

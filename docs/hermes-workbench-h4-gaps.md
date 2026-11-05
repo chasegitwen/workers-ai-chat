@@ -46,3 +46,7 @@ H4 所需的四项能力在 Hermes `v0.22.5` 的 8642 稳定 API 中均不完整
 5. 网络边界：仍由 Worker 持有 Token 并代理窄接口；8642 保持受保护，9119 保持本机管理面且不暴露公网。
 
 在上述上游契约出现前，H4 应保持当前只读降级状态。
+
+## Skills 枚举上游缺陷
+
+Hermes Agent `v0.22.x` 的 `GET /v1/skills` 存在已知上游缺陷：handler 向 `find_all_skills()` 传入已不再接受的 `include_editorial` 参数，随后以 HTTP 500 返回 `Failed to enumerate skills`。这不是 Worker 或 Access 鉴权失败，也不影响 Toolsets；能力面板保持 Skills 为错误状态、不伪造条目，并明确标注该限制。上游跟踪见 [#117046](https://github.com/NousResearch/hermes-agent/issues/117046) 和 [#148508](https://github.com/NousResearch/hermes-agent/issues/148508)。

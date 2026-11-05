@@ -352,6 +352,61 @@ describe("Hermes read-only capabilities panel", () => {
   });
 });
 
+describe("Hermes run settings payload wiring", () => {
+  it("exposes read-only run-settings with honest gaps", async () => {
+    const response = await call("GET", "/api/hermes/run-settings?instance_id=oracle-hermes");
+    expect(response.status).toBe(200);
+    expect(response.json.ok).toBe(true);
+    expect(response.json.settings.fields.reasoning_effort.writable).toBe(true);
+    expect(response.json.settings.fields.max_turns.writable).toBe(false);
+    expect(response.json.settings.fields.approval_policy.policy).toBe("once_or_deny");
+    expect(response.json.approvalPolicy).toMatchObject({ policy: "once_or_deny", writable: false });
+    expect((await call("POST", "/api/hermes/run-settings", { body: {} })).status).toBe(404);
+  });
+
+  it("forwards model_options into the upstream /v1/runs body when overridden", async () => {
+    const submitted = await submit({
+      provider: "minimax",
+      model: "MiniMax-M3",
+      model_options: { reasoning: { effort: "high" }, service_tier: "priority" }
+    });
+    expect(submitted.status).toBe(202);
+    const post = mock.posts()[0];
+    expect(post.body).toEqual({
+      input: "Explain wheel-rail contact",
+      session_id: expect.stringMatching(/^webai-/),
+      provider: "minimax",
+      model: "MiniMax-M3",
+      model_options: {
+        reasoning: { effort: "high", enabled: true },
+        service_tier: "priority"
+      }
+    });
+    const row = await env.DB.prepare(
+      "SELECT upstream_request_json FROM hermes_runs WHERE id = ?"
+    ).bind(submitted.json.run.id).first();
+    expect(JSON.parse(row.upstream_request_json).model_options).toEqual({
+      reasoning: { effort: "high", enabled: true },
+      service_tier: "priority"
+    });
+  });
+
+  it("omits model_options when inheriting and rejects unsupported option keys", async () => {
+    const inherited = await submit({ provider: "minimax", model: "MiniMax-M3" });
+    expect(inherited.status).toBe(202);
+    expect(mock.posts()[0].body.model_options).toBeUndefined();
+
+    const rejected = await submit({
+      provider: "minimax",
+      model: "MiniMax-M3",
+      model_options: { temperature: 0.1 }
+    });
+    expect(rejected.status).toBe(400);
+    expect(rejected.json.error.code).toBe("hermes_unsupported_model_option");
+    expect(mock.posts()).toHaveLength(1);
+  });
+});
+
 describe("Hermes run submission and completion", () => {
   it("submits through /v1/runs, completes once, and records the actual model", async () => {
     const submitted = await submit({ provider: "minimax", model: "MiniMax-M3" });

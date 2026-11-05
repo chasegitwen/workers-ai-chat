@@ -6,7 +6,7 @@ import { element, lastDeclaration, pageScript } from "./helpers/selectionHarness
 
 const HERMES_FUNCTIONS = [
   "hermesErrorText", "hermesCapabilitySectionText", "hermesProviders", "hermesProvider", "hermesSelectionBlockReason", "hermesHasPendingAttachments",
-  "newHermesClientRequestId", "sendHermesMessage", "submitHermesBody", "hermesRunQuery", "stopHermesTracking",
+  "newHermesClientRequestId", "hermesModelOptionsFromDraft", "readHermesRunSettingsDraft", "writeHermesRunSettingsDraft", "sendHermesMessage", "submitHermesBody", "hermesRunQuery", "stopHermesTracking",
   "trackHermesRun", "applyHermesRunUpdate", "hermesTerminalText", "handleHermesTerminal", "hermesRunModelText",
   "hermesTimelineEventKey", "mergeHermesTimeline", "hermesTimelineEntries", "hermesTimelineSummary", "hermesDurationText",
   "renderHermesTimeline", "renderHermesApproval", "renderHermesClarify", "renderHermesRunStatus", "setHermesPanelState", "observeHermesApproval", "setHermesSelectionActive", "syncModelModeUi", "isOpenClawAgentMode", "selectHermesProvider"
@@ -81,6 +81,7 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
       setItem: (key, value) => stored.set(key, String(value))
     },
     HERMES_PANEL_STORAGE_KEY: "wa_hermes_panel_state_v1",
+    HERMES_RUN_SETTINGS_STORAGE_KEY: "hermesRunSettings.v1",
     setContextStatus: text => status.push(text),
     syncOpenClawRouteControls() {},
     updateEffectiveModelResult() {},
@@ -165,6 +166,38 @@ describe("Hermes frontend", () => {
     expect(deletion).toContain("删除任务不可撤销");
     expect(deletion).toContain("if(!confirm(");
     expect(deletion).toContain('"DELETE"');
+  });
+
+  it("renders the Hermes-only Settings entry with inherit defaults and honest gaps", () => {
+    const html = htmlPage();
+    expect(html).toContain('id="hermesSettingsToggle"');
+    expect(html).toContain('id="hermesSettingsDrawer" class="hermesWorkbenchDrawer"');
+    expect(html).toContain("Hermes Run Settings");
+    expect(html).toContain("继承后端（不发送 model_options.reasoning）");
+    expect(html).toContain("不可用：Hermes max_iterations");
+    expect(html.indexOf('id="hermesSettingsToggle"')).toBeGreaterThan(html.indexOf('id="hermesJobsToggle"'));
+    const send = lastDeclaration(pageScript(), "sendHermesMessage");
+    expect(send).toContain("hermesModelOptionsFromDraft");
+    expect(send).toContain("body.model_options");
+    const draft = lastDeclaration(pageScript(), "hermesModelOptionsFromDraft");
+    expect(draft).toContain("reasoning");
+    expect(draft).toContain("service_tier");
+  });
+
+  it("includes model_options on Hermes submit when settings override", async () => {
+    const { api, fetches, stored } = sandbox();
+    stored.set("hermesRunSettings.v1", JSON.stringify({ reasoningEffort: "high", serviceTier: "priority" }));
+    await api.sendHermesMessage();
+    expect(fetches[0].body.model_options).toEqual({
+      reasoning: { effort: "high", enabled: true },
+      service_tier: "priority"
+    });
+  });
+
+  it("omits model_options on Hermes submit when settings inherit", async () => {
+    const { api, fetches } = sandbox();
+    await api.sendHermesMessage();
+    expect(fetches[0].body.model_options).toBeUndefined();
   });
 
   it("sorts workbench sessions newest first before rendering", () => {

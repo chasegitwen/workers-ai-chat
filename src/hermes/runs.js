@@ -33,6 +33,7 @@ import {
   sanitizeHermesClarifyPrompt
 } from "./clarifications.js";
 import { getHermesCatalog, validateHermesModelSelection } from "./catalog.js";
+import { requireHermesModelOptions } from "./settings.js";
 import { HermesError, publicError, safeCode, safeMessage } from "./errors.js";
 import {
   HERMES_APPROVAL_CHOICES,
@@ -370,6 +371,8 @@ function parseSubmitRequest(body) {
   const input = String(body?.input ?? "").trim();
   const provider = cleanText(body?.provider, 80);
   const model = cleanText(body?.model, 160);
+  const modelOptionsParsed = requireHermesModelOptions(body?.model_options);
+  const modelOptions = modelOptionsParsed.modelOptions;
   const instance = hermesInstance(instanceId);
   if (!instance) throw new HermesError("hermes_unknown_instance", "Unknown Hermes instance", { httpStatus: 400 });
   if (!instance.agents.some(agent => agent.id === agentId)) {
@@ -386,7 +389,7 @@ function parseSubmitRequest(body) {
   if (body?.attachments?.length || body?.fileIds?.length || body?.conversationAttachmentIds?.length) {
     throw new HermesError("hermes_attachments_unsupported", "Hermes runs accept text only in this stage", { httpStatus: 400 });
   }
-  return { instanceId, agentId, clientRequestId, projectId, conversationId, input, provider, model };
+  return { instanceId, agentId, clientRequestId, projectId, conversationId, input, provider, model, modelOptions };
 }
 
 async function existingByRequestId(db, owner, clientRequestId) {
@@ -410,7 +413,7 @@ export async function submitHermesRun(env, { owner, body, fetchImpl }) {
 
   const fingerprint = await sha256Hex(JSON.stringify([
     request.projectId, request.conversationId, request.instanceId, request.agentId,
-    request.input, request.provider, request.model
+    request.input, request.provider, request.model, request.modelOptions || null
   ]));
   const prior = await existingByRequestId(db, owner, request.clientRequestId);
   if (prior) return replayOrConflict(prior, fingerprint);
@@ -440,6 +443,9 @@ export async function submitHermesRun(env, { owner, body, fetchImpl }) {
   if (selection.mode === "explicit") {
     upstreamBody.provider = selection.provider;
     upstreamBody.model = selection.model;
+  }
+  if (request.modelOptions) {
+    upstreamBody.model_options = request.modelOptions;
   }
   const upstreamRequestJson = JSON.stringify(upstreamBody);
   const timestamp = Date.now();

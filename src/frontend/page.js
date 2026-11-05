@@ -1698,7 +1698,7 @@ body.dark .projectRuntimeItem{
 .hermesWorkbenchTitleForm{border:1px solid var(--primary);border-radius:10px;padding:10px;margin-bottom:10px}.hermesWorkbenchTitleForm label{display:block;font-size:12px;margin-bottom:6px}.hermesWorkbenchTitleForm input{width:100%;min-height:38px;border:1px solid var(--border);border-radius:8px;background:inherit;color:inherit;padding:7px 9px;font:inherit}.hermesWorkbenchTitleForm div{display:flex;justify-content:flex-end;gap:6px;margin-top:8px}
 .hermesJobsToolbar{grid-template-columns:minmax(0,1fr) auto auto auto}.hermesJobsEditor{padding:12px 16px;border-bottom:1px solid var(--border,#d9dee8);display:grid;grid-template-columns:1fr 1fr;gap:9px}.hermesJobsEditor label{display:flex;flex-direction:column;gap:4px;font-size:12px}.hermesJobsEditor .wide{grid-column:1/-1}.hermesJobsEditor input,.hermesJobsEditor textarea{font:inherit;border:1px solid var(--border,#d9dee8);border-radius:8px;padding:8px;background:inherit;color:inherit;min-width:0}.hermesJobsEditor textarea{min-height:92px;resize:vertical}.hermesJobsEditorActions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px}.hermesJobsEditorActions button{font:inherit;border:1px solid var(--border,#d9dee8);border-radius:7px;background:transparent;color:inherit;padding:7px 11px;cursor:pointer}.hermesJobsPrompt,.hermesJobsResult{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto;margin:8px 0 0;padding:8px;border-radius:7px;background:rgba(127,127,127,.08)}
 @media(max-width:640px){.hermesWorkbenchToolbar{grid-template-columns:1fr 1fr}.hermesWorkbenchToolbar input{grid-column:1/-1}.hermesWorkbenchDrawer{width:100vw}.hermesWorkbenchHeader{padding:12px}.hermesWorkbenchBody{padding:10px 12px 24px}}
-@media(max-width:640px){.hermesJobsToolbar{grid-template-columns:1fr 1fr}.hermesJobsEditor{grid-template-columns:1fr}.hermesJobsEditor .wide,.hermesJobsEditorActions{grid-column:1}}
+.hermesSettingsBody{display:flex;flex-direction:column;gap:12px}.hermesSettingsSection{border:1px solid var(--border,#d9dee8);border-radius:10px;padding:12px}.hermesSettingsSection h3{margin:0 0 8px;font-size:14px}.hermesSettingsLabel{display:flex;flex-direction:column;gap:6px;font-size:13px}.hermesSettingsLabel select{border:1px solid var(--border,#d9dee8);border-radius:8px;padding:7px 10px;background:inherit;color:inherit}.hermesSettingsHint,.hermesSettingsGap{font-size:12px;color:var(--muted,#667085);margin:6px 0 0;line-height:1.45}.hermesSettingsList{margin:0;padding-left:18px;font-size:12px;color:var(--muted,#667085);line-height:1.45}.hermesSettingsEffective{font-size:13px;line-height:1.5}@media(max-width:640px){.hermesJobsToolbar{grid-template-columns:1fr 1fr}.hermesJobsEditor{grid-template-columns:1fr}.hermesJobsEditor .wide,.hermesJobsEditorActions{grid-column:1}}
 
 .contextSection{
   display:flex;
@@ -3583,6 +3583,57 @@ body.dark .toolErrorNotice{
   </div>
 </aside>
 
+<button id="hermesSettingsBackdrop" class="hermesWorkbenchBackdrop" type="button" aria-label="关闭 Hermes 运行设置" hidden></button>
+<aside id="hermesSettingsDrawer" class="hermesWorkbenchDrawer" aria-label="Hermes 运行设置" aria-hidden="true" hidden>
+  <div class="hermesWorkbenchHeader">
+    <div><h2>设置</h2><p>Hermes Run Settings · 当前请求覆盖，默认继承后端</p></div>
+    <button id="hermesSettingsClose" class="hermesWorkbenchClose" type="button" aria-label="关闭">&times;</button>
+  </div>
+  <div class="hermesWorkbenchBody hermesSettingsBody">
+    <div id="hermesSettingsStatus" class="hermesWorkbenchStatus">默认继承后端配置；仅覆盖项会写入本次执行请求。</div>
+    <section class="hermesSettingsSection">
+      <h3>作用域</h3>
+      <ul id="hermesSettingsScopes" class="hermesSettingsList"></ul>
+    </section>
+    <section class="hermesSettingsSection">
+      <h3>当前有效模型 / Provider</h3>
+      <div id="hermesSettingsEffective" class="hermesSettingsEffective"></div>
+    </section>
+    <section class="hermesSettingsSection">
+      <h3>推理强度（Reasoning Effort）</h3>
+      <label class="hermesSettingsLabel">当前请求 <select id="hermesSettingsReasoning" aria-label="Reasoning Effort">
+        <option value="">继承后端（不发送 model_options.reasoning）</option>
+      </select></label>
+      <p class="hermesSettingsHint">仅当选择具体强度时写入 model_options；保存后对后续 Hermes 发送生效。</p>
+    </section>
+    <section class="hermesSettingsSection">
+      <h3>Service Tier</h3>
+      <label class="hermesSettingsLabel">当前请求 <select id="hermesSettingsServiceTier" aria-label="Service Tier">
+        <option value="">继承后端</option>
+        <option value="priority">priority（或 fast）</option>
+        <option value="default">default</option>
+      </select></label>
+    </section>
+    <section class="hermesSettingsSection">
+      <h3>执行轮数 / Max turns</h3>
+      <div id="hermesSettingsMaxTurns" class="hermesSettingsGap">不可用：Hermes max_iterations 由服务端策略决定，POST /v1/runs 不接受该字段。</div>
+    </section>
+    <section class="hermesSettingsSection">
+      <h3>工具审批策略</h3>
+      <div id="hermesSettingsApproval" class="hermesSettingsEffective"></div>
+    </section>
+    <section class="hermesSettingsSection">
+      <h3>缺口说明</h3>
+      <ul id="hermesSettingsGaps" class="hermesSettingsList"></ul>
+    </section>
+    <div class="hermesWorkbenchActions">
+      <button id="hermesSettingsReset" type="button">恢复继承</button>
+      <button id="hermesSettingsRefresh" type="button">刷新说明</button>
+      <button id="hermesSettingsApply" type="button">应用到后续请求</button>
+    </div>
+  </div>
+</aside>
+
 <div class="app">
 
   <div class="topbar">
@@ -3698,7 +3749,7 @@ body.dark .toolErrorNotice{
         <label>Provider <select id="hermesProviderSelect" class="modelSelectNative" aria-label="Hermes Provider" aria-hidden="true" tabindex="-1"></select></label>
         <label id="hermesModelField" hidden>基础模型 <select id="hermesModelSelect" class="modelSelectNative" aria-label="Hermes 基础模型" aria-hidden="true" tabindex="-1"></select></label>
         <div class="openClawCatalogLine"><span id="hermesCatalogStatus"></span><button id="hermesCatalogRefresh" type="button">刷新目录</button></div>
-        <div class="hermesCapabilitiesLine"><button id="hermesCapabilitiesToggle" type="button" aria-expanded="false" aria-controls="hermesCapabilitiesPanel">能力</button><button id="hermesWorkbenchToggle" type="button" aria-expanded="false" aria-controls="hermesWorkbenchDrawer">会话 / 项目</button><button id="hermesJobsToggle" type="button" aria-expanded="false" aria-controls="hermesJobsDrawer">定时任务</button></div>
+        <div class="hermesCapabilitiesLine"><button id="hermesCapabilitiesToggle" type="button" aria-expanded="false" aria-controls="hermesCapabilitiesPanel">能力</button><button id="hermesWorkbenchToggle" type="button" aria-expanded="false" aria-controls="hermesWorkbenchDrawer">会话 / 项目</button><button id="hermesJobsToggle" type="button" aria-expanded="false" aria-controls="hermesJobsDrawer">定时任务</button><button id="hermesSettingsToggle" type="button" aria-expanded="false" aria-controls="hermesSettingsDrawer">设置</button></div>
         <section id="hermesCapabilitiesPanel" class="hermesCapabilitiesPanel" aria-label="Hermes 能力" hidden>
           <div class="hermesCapabilitiesToolbar">
             <input id="hermesCapabilitiesSearch" type="search" autocomplete="off" placeholder="搜索 Skills / Toolsets" aria-label="搜索 Hermes 能力">
@@ -14384,6 +14435,23 @@ var hermesWorkbenchStatus = document.getElementById("hermesWorkbenchStatus");
 var hermesWorkbenchList = document.getElementById("hermesWorkbenchList");
 var hermesWorkbenchState = { open:false, loading:false, reloadPending:false, archived:false, sessions:[], projects:[], capabilities:null, error:null, searchTimer:null };
 var hermesJobsToggle = document.getElementById("hermesJobsToggle");
+  var HERMES_RUN_SETTINGS_STORAGE_KEY = "hermesRunSettings.v1";
+  var hermesSettingsState = { open:false, loading:false, error:null, panel:null, draft:{ reasoningEffort:"", serviceTier:"" } };
+  var hermesSettingsToggle = document.getElementById("hermesSettingsToggle");
+  var hermesSettingsDrawer = document.getElementById("hermesSettingsDrawer");
+  var hermesSettingsBackdrop = document.getElementById("hermesSettingsBackdrop");
+  var hermesSettingsClose = document.getElementById("hermesSettingsClose");
+  var hermesSettingsStatus = document.getElementById("hermesSettingsStatus");
+  var hermesSettingsScopes = document.getElementById("hermesSettingsScopes");
+  var hermesSettingsEffective = document.getElementById("hermesSettingsEffective");
+  var hermesSettingsReasoning = document.getElementById("hermesSettingsReasoning");
+  var hermesSettingsServiceTier = document.getElementById("hermesSettingsServiceTier");
+  var hermesSettingsMaxTurns = document.getElementById("hermesSettingsMaxTurns");
+  var hermesSettingsApproval = document.getElementById("hermesSettingsApproval");
+  var hermesSettingsGaps = document.getElementById("hermesSettingsGaps");
+  var hermesSettingsReset = document.getElementById("hermesSettingsReset");
+  var hermesSettingsRefresh = document.getElementById("hermesSettingsRefresh");
+  var hermesSettingsApply = document.getElementById("hermesSettingsApply");
 var hermesJobsDrawer = document.getElementById("hermesJobsDrawer");
 var hermesJobsBackdrop = document.getElementById("hermesJobsBackdrop");
 var hermesJobsClose = document.getElementById("hermesJobsClose");
@@ -14994,6 +15062,157 @@ async function renameHermesWorkbenchProject(project){
   }catch(err){ setContextStatus("Hermes 项目重命名失败：" + hermesErrorText(err)); }
 }
 
+
+function readHermesRunSettingsDraft(){
+  try{
+    const raw = localStorage.getItem(HERMES_RUN_SETTINGS_STORAGE_KEY);
+    if(!raw) return { reasoningEffort:"", serviceTier:"" };
+    const parsed = JSON.parse(raw);
+    return {
+      reasoningEffort: typeof parsed?.reasoningEffort === "string" ? parsed.reasoningEffort : "",
+      serviceTier: typeof parsed?.serviceTier === "string" ? parsed.serviceTier : ""
+    };
+  }catch(err){
+    return { reasoningEffort:"", serviceTier:"" };
+  }
+}
+
+function writeHermesRunSettingsDraft(draft){
+  hermesSettingsState.draft = {
+    reasoningEffort: draft?.reasoningEffort || "",
+    serviceTier: draft?.serviceTier || ""
+  };
+  localStorage.setItem(HERMES_RUN_SETTINGS_STORAGE_KEY, JSON.stringify(hermesSettingsState.draft));
+}
+
+function hermesModelOptionsFromDraft(draft){
+  const options = {};
+  const effort = String(draft?.reasoningEffort || "").trim();
+  if(effort){
+    options.reasoning = { effort, enabled: effort !== "none" };
+  }
+  const tier = String(draft?.serviceTier || "").trim();
+  if(tier === "priority"){
+    options.service_tier = "priority";
+  }else if(tier === "default"){
+    options.service_tier = "default";
+  }else if(tier === "fast"){
+    options.fast = true;
+  }
+  return Object.keys(options).length ? options : null;
+}
+
+function setHermesSettingsOpen(open){
+  hermesSettingsState.open = Boolean(open);
+  if(hermesSettingsDrawer){
+    hermesSettingsDrawer.hidden = !hermesSettingsState.open;
+    hermesSettingsDrawer.setAttribute("aria-hidden", hermesSettingsState.open ? "false" : "true");
+  }
+  if(hermesSettingsBackdrop) hermesSettingsBackdrop.hidden = !hermesSettingsState.open;
+  hermesSettingsToggle?.setAttribute("aria-expanded", hermesSettingsState.open ? "true" : "false");
+  if(hermesSettingsState.open){
+    hermesSettingsState.draft = readHermesRunSettingsDraft();
+    loadHermesRunSettings(false);
+  }
+}
+
+function renderHermesRunSettings(){
+  const panel = hermesSettingsState.panel;
+  const draft = hermesSettingsState.draft || readHermesRunSettingsDraft();
+  if(hermesSettingsStatus){
+    if(hermesSettingsState.loading) hermesSettingsStatus.textContent = "Hermes 运行设置加载中…";
+    else if(hermesSettingsState.error) hermesSettingsStatus.textContent = "设置说明加载失败：" + hermesErrorText(hermesSettingsState.error);
+    else {
+      const inherit = !draft.reasoningEffort && !draft.serviceTier;
+      hermesSettingsStatus.textContent = inherit
+        ? "当前请求：全部继承后端配置（不会发送 model_options）。"
+        : "当前请求：已覆盖 " + [draft.reasoningEffort ? ("reasoning=" + draft.reasoningEffort) : "", draft.serviceTier ? ("tier=" + draft.serviceTier) : ""].filter(Boolean).join("，") + "，将写入执行请求。";
+    }
+  }
+  if(hermesSettingsScopes){
+    hermesSettingsScopes.innerHTML = "";
+    const scopes = panel?.scopes || {
+      request:{ label:"当前请求", description:"写入本次 /v1/runs；默认继承。" },
+      session:{ label:"当前会话", description:"会话级 model lock 本阶段不对 Web 用户开放写入。" },
+      global:{ label:"全局配置", description:"不修改 config.yaml / .env / API Key。" }
+    };
+    ["request","session","global"].forEach(key => {
+      const row = scopes[key];
+      if(!row) return;
+      const li = document.createElement("li");
+      li.textContent = (row.label || key) + "：" + (row.description || row.note || "");
+      hermesSettingsScopes.appendChild(li);
+    });
+  }
+  if(hermesSettingsEffective){
+    const defaults = panel?.defaults || {};
+    const providerMode = hermesSelection.providerId ? ("覆盖 " + hermesSelection.providerId + " / " + (hermesSelection.modelId || "")) : "继承 Agent 默认";
+    hermesSettingsEffective.innerHTML = [
+      "<div>目录默认：" + escapeHtml([defaults.provider, defaults.model].filter(Boolean).join(" / ") || "（未知）") + "</div>",
+      "<div>当前选择：" + escapeHtml(providerMode) + "</div>",
+      "<div>推理：" + escapeHtml(draft.reasoningEffort ? ("覆盖 " + draft.reasoningEffort) : "继承") + "</div>",
+      "<div>Service tier：" + escapeHtml(draft.serviceTier ? ("覆盖 " + draft.serviceTier) : "继承") + "</div>"
+    ].join("");
+  }
+  if(hermesSettingsReasoning){
+    const efforts = panel?.fields?.reasoning_effort?.efforts || ["none","minimal","low","medium","high","xhigh","max","ultra"];
+    const current = hermesSettingsReasoning.value;
+    hermesSettingsReasoning.innerHTML = "";
+    const inheritOpt = document.createElement("option");
+    inheritOpt.value = "";
+    inheritOpt.textContent = "继承后端（不发送 model_options.reasoning）";
+    hermesSettingsReasoning.appendChild(inheritOpt);
+    efforts.forEach(effort => {
+      const opt = document.createElement("option");
+      opt.value = effort;
+      opt.textContent = effort;
+      hermesSettingsReasoning.appendChild(opt);
+    });
+    hermesSettingsReasoning.value = draft.reasoningEffort || current || "";
+    hermesSettingsReasoning.disabled = panel?.fields?.reasoning_effort?.writable === false;
+  }
+  if(hermesSettingsServiceTier){
+    hermesSettingsServiceTier.value = draft.serviceTier || "";
+    hermesSettingsServiceTier.disabled = panel?.fields?.service_tier?.writable === false;
+  }
+  if(hermesSettingsMaxTurns){
+    hermesSettingsMaxTurns.textContent = panel?.fields?.max_turns?.unavailableReason
+      || "不可用：Hermes max_iterations 由服务端策略决定，POST /v1/runs 不接受该字段。";
+  }
+  if(hermesSettingsApproval){
+    const field = panel?.fields?.approval_policy || {};
+    hermesSettingsApproval.textContent = "策略 " + (field.policy || "once_or_deny")
+      + "（只读展示；可选 " + ((field.choices || ["once","deny"]).join(" / ")) + "）。不可在此修改。";
+  }
+  if(hermesSettingsGaps){
+    hermesSettingsGaps.innerHTML = "";
+    (panel?.gaps || []).forEach(gap => {
+      const li = document.createElement("li");
+      li.textContent = (gap.summary || gap.id || "") + (gap.detail ? (" — " + gap.detail) : "");
+      hermesSettingsGaps.appendChild(li);
+    });
+  }
+}
+
+async function loadHermesRunSettings(force){
+  if(hermesSettingsState.loading) return;
+  hermesSettingsState.loading = true;
+  hermesSettingsState.error = null;
+  renderHermesRunSettings();
+  try{
+    const instanceId = encodeURIComponent(hermesSelection.instanceId || "oracle-hermes");
+    const res = await fetch("/api/hermes/run-settings?instance_id=" + instanceId + (force ? "&refresh=1" : ""));
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok || !data.ok) throw data.error || { code:"hermes_settings_unavailable", message:"运行设置不可用" };
+    hermesSettingsState.panel = data.settings || null;
+  }catch(err){
+    hermesSettingsState.error = err;
+  }finally{
+    hermesSettingsState.loading = false;
+    renderHermesRunSettings();
+  }
+}
+
 function setHermesJobsOpen(open){
   hermesJobsState.open = Boolean(open);
   if(hermesJobsDrawer){
@@ -15330,6 +15549,8 @@ async function sendHermesMessage(){
     input:message,
     client_request_id:newHermesClientRequestId()
   };
+  const modelOptions = hermesModelOptionsFromDraft(readHermesRunSettingsDraft());
+  if(modelOptions) body.model_options = modelOptions;
   addUserMessage(message, null, null, []);
   conversation.push({ role:"user", content:message });
   input.value = "";
@@ -15941,7 +16162,7 @@ function initHermesUi(){
   hermesCapabilitiesCategory?.addEventListener("change", renderHermesCapabilities);
   hermesWorkbenchToggle?.addEventListener("click", () => {
     const opening = !hermesWorkbenchState.open;
-    if(opening) setHermesJobsOpen(false);
+    if(opening){ setHermesJobsOpen(false); setHermesSettingsOpen(false); }
     setHermesWorkbenchOpen(opening);
   });
   hermesWorkbenchClose?.addEventListener("click", () => setHermesWorkbenchOpen(false));
@@ -15957,10 +16178,45 @@ function initHermesUi(){
   });
   hermesWorkbenchProjectCreate?.addEventListener("click", createHermesWorkbenchProject);
   hermesJobsToggle?.addEventListener("click", () => {
-    const opening = !hermesJobsState.open;
-    if(opening) setHermesWorkbenchOpen(false);
-    setHermesJobsOpen(opening);
-  });
+      const opening = !hermesJobsState.open;
+      if(opening){ setHermesWorkbenchOpen(false); setHermesSettingsOpen(false); }
+      setHermesJobsOpen(opening);
+    });
+    hermesSettingsToggle?.addEventListener("click", () => {
+      const opening = !hermesSettingsState.open;
+      if(opening){ setHermesWorkbenchOpen(false); setHermesJobsOpen(false); }
+      setHermesSettingsOpen(opening);
+    });
+    hermesSettingsClose?.addEventListener("click", () => setHermesSettingsOpen(false));
+    hermesSettingsBackdrop?.addEventListener("click", () => setHermesSettingsOpen(false));
+    hermesSettingsReset?.addEventListener("click", () => {
+      writeHermesRunSettingsDraft({ reasoningEffort:"", serviceTier:"" });
+      renderHermesRunSettings();
+      setContextStatus("已恢复 Hermes 运行参数继承");
+    });
+    hermesSettingsRefresh?.addEventListener("click", () => loadHermesRunSettings(true));
+    hermesSettingsApply?.addEventListener("click", () => {
+      writeHermesRunSettingsDraft({
+        reasoningEffort: hermesSettingsReasoning?.value || "",
+        serviceTier: hermesSettingsServiceTier?.value || ""
+      });
+      renderHermesRunSettings();
+      setContextStatus("已应用到后续 Hermes 请求（覆盖项会写入执行请求体）");
+    });
+    hermesSettingsReasoning?.addEventListener("change", () => {
+      writeHermesRunSettingsDraft({
+        reasoningEffort: hermesSettingsReasoning.value || "",
+        serviceTier: hermesSettingsServiceTier?.value || ""
+      });
+      renderHermesRunSettings();
+    });
+    hermesSettingsServiceTier?.addEventListener("change", () => {
+      writeHermesRunSettingsDraft({
+        reasoningEffort: hermesSettingsReasoning?.value || "",
+        serviceTier: hermesSettingsServiceTier.value || ""
+      });
+      renderHermesRunSettings();
+    });
   hermesJobsClose?.addEventListener("click", () => setHermesJobsOpen(false));
   hermesJobsBackdrop?.addEventListener("click", () => setHermesJobsOpen(false));
   hermesJobsRefresh?.addEventListener("click", loadHermesJobs);

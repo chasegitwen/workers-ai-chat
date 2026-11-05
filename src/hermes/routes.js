@@ -9,6 +9,7 @@ import { getHermesCapabilitiesPanel } from "./capabilitiesPanel.js";
 import { createHermesClient } from "./client.js";
 import {
   HERMES_INSTANCES,
+  ORACLE_HERMES_INSTANCE_ID,
   describeHermesUpstream,
   hermesCatalogVisible,
   hermesExecutionEnabled,
@@ -16,6 +17,7 @@ import {
 } from "./config.js";
 import { HermesError, publicError } from "./errors.js";
 import { HERMES_APPROVAL_POLICY } from "./permissions.js";
+import { buildHermesRunSettingsPanel } from "./settings.js";
 import { sanitizeHermesClarifyPrompt } from "./clarifications.js";
 import {
   assertConversationAccess,
@@ -100,6 +102,27 @@ async function handleCatalog(env, url, options) {
   } catch (err) {
     return jsonResponse({ ...base, catalog: null, stale: false, catalogError: publicError(err) });
   }
+}
+
+async function handleRunSettings(env, url, { fetchImpl } = {}) {
+  const instanceId = String(url.searchParams.get("instance_id") || ORACLE_HERMES_INSTANCE_ID).trim() || ORACLE_HERMES_INSTANCE_ID;
+  if (!hermesInstance(instanceId)) {
+    throw new HermesError("hermes_unknown_instance", "Unknown Hermes instance", { httpStatus: 400 });
+  }
+  const { catalog, stale, source, error } = await getHermesCatalog(env, instanceId, { fetchImpl });
+  const panel = buildHermesRunSettingsPanel({ catalog, capabilities: catalog?.capabilities });
+  return jsonResponse({
+    ok: true,
+    instanceId,
+    stale: Boolean(stale),
+    source: source || null,
+    catalogError: error ? publicError(error) : null,
+    settings: panel,
+    approvalPolicy: {
+      policy: HERMES_APPROVAL_POLICY,
+      writable: false
+    }
+  });
 }
 
 async function handleCapabilitiesPanel(env, url, options) {
@@ -286,6 +309,10 @@ export async function handleHermes(request, env, url, ctx, options = {}) {
 
     if (url.pathname === "/api/hermes/capabilities-panel" && request.method === "GET") {
       return await handleCapabilitiesPanel(env, url, routeOptions);
+    }
+
+    if (url.pathname === "/api/hermes/run-settings" && request.method === "GET") {
+      return await handleRunSettings(env, url, routeOptions);
     }
 
     const jobsResponse = await handleHermesJobs(request, env, url, {

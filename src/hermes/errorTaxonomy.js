@@ -126,6 +126,9 @@ export function classifyHermesError(input = {}) {
   if (has(ADAPTER_CODES, [/(?:^|_)d1_(?:error|unavailable|failed)$/, /adapter_(?:error|failed)$/])) {
     return result("worker_d1_adapter", "confirmed", "An observed error code identifies the Worker, D1, or adapter layer.", "Inspect Worker/D1 adapter diagnostics; retry only after persistence and adapter health are confirmed.");
   }
+  if (status === "completed") {
+    return result("unrecognized", "confirmed", "The stored run status records successful completion.", "No fault action is required.", { kind: "outcome", isFault: false });
+  }
   return result("unrecognized", "inferred",
     codes.length || statusDetail ? "No documented taxonomy mapping matched the preserved code." : "No code, timeline tool failure, or classified run state was observed.",
     "Preserve the original facts and inspect manually; do not retry solely from this classification.");

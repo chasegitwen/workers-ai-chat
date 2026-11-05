@@ -6,6 +6,7 @@ import { safeCode, safeMessage, HermesError, publicError } from "./errors.js";
 import { buildHermesErrorRecord, parseErrorCategory } from "./errorTaxonomy.js";
 import { HERMES_ACTIVE_STATUSES } from "./status.js";
 import { publicHermesRun, readRunById, syncHermesRun } from "./runs.js";
+import { pruneHermesDiagnosticPayloads } from "./persistence.js";
 
 const WINDOW_MS = Object.freeze({
   "24h": 24 * 60 * 60 * 1000,
@@ -27,7 +28,7 @@ const FILTER_STATUSES = Object.freeze({
 const DIAGNOSTIC_COLUMNS = `id, owner_username, project_id, conversation_id, instance_id,
   upstream_run_id, upstream_session_id, model_mode, requested_provider, requested_model,
   actual_provider, actual_model, route_source, status, upstream_status, status_detail,
-  error_code, error_message, last_event_seq, timeline_json, submitted_at, completed_at,
+  error_code, error_message, last_event_seq, timeline_json, diagnostics_json, diagnostics_updated_at, submitted_at, completed_at,
   created_at, updated_at`;
 
 function parseWindow(value) {
@@ -118,6 +119,36 @@ function selectPrimaryError(records, status) {
   return records[0] || null;
 }
 
+function storedDiagnosticSummary(row) {
+  if (!row?.diagnostics_json) return null;
+  try {
+    const value = JSON.parse(row.diagnostics_json);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const category = parseErrorCategory(value.category);
+    const out = {
+      ...(category ? { category } : {}),
+      categoryConfidence: value.categoryConfidence === "confirmed" ? "confirmed" : "inferred",
+      isFault: value.isFault === true,
+      kind: safeCode(value.kind) || "fault",
+      status: safeCode(value.status) || row.status,
+      sourceLayer: ["browser", "worker", "hermes"].includes(value.sourceLayer) ? value.sourceLayer : "worker",
+      summary: safeMessage(value.summary || "", [], 1000),
+      occurredAt: Number.isFinite(Number(value.occurredAt)) ? Number(value.occurredAt) : null,
+      updatedAt: Number.isFinite(Number(value.updatedAt)) ? Number(value.updatedAt) : Number(row.diagnostics_updated_at) || null,
+      runId: row.id
+    };
+    const originalCode = safeCode(value.originalCode);
+    const statusDetail = safeMessage(value.statusDetail || "", [], 160);
+    const sessionId = safeMessage(value.sessionId || "", [], 256);
+    if (originalCode) out.originalCode = originalCode;
+    if (statusDetail) out.statusDetail = statusDetail;
+    if (sessionId) out.sessionId = sessionId;
+    return out;
+  } catch (err) {
+    return null;
+  }
+}
+
 function diagnosticRun(row, { detail = false, now = Date.now() } = {}) {
   const startedAt = Number(row.submitted_at || row.created_at) || null;
   const terminal = ["completed", "failed", "cancelled", "interrupted", "rejected", "abandoned"].includes(row.status);
@@ -128,6 +159,7 @@ function diagnosticRun(row, { detail = false, now = Date.now() } = {}) {
   const errors = diagnosticsErrors(row, timeline);
   const errorCode = safeCode(row.error_code);
   const errorMessage = safeMessage(row.error_message || "", [], 300);
+  const persistedSummary = storedDiagnosticSummary(row);
   return {
     id: row.id,
     startedAt,
@@ -145,6 +177,7 @@ function diagnosticRun(row, { detail = false, now = Date.now() } = {}) {
     error: errorCode || errorMessage ? { code: errorCode || "hermes_run_error", message: errorMessage } : null,
     primaryError: selectPrimaryError(errors, row.status),
     errors,
+    persistedSummary,
     dataSource: detail ? "D1 persisted run; Hermes authoritative sync when applicable" : "D1 persisted Hermes runs",
     updatedAt: Number(row.updated_at) || null,
     timelineCoverage: timeline.coverage,
@@ -153,6 +186,7 @@ function diagnosticRun(row, { detail = false, now = Date.now() } = {}) {
 }
 
 async function listDiagnostics(env, url, owner) {
+  await pruneHermesDiagnosticPayloads(env, { limit: 50 });
   const window = parseWindow(url.searchParams.get("window"));
   const filters = parseStatusFilters(url);
   const limit = integerParam(url, "limit", 30, 1, 100);

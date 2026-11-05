@@ -49,6 +49,10 @@ import {
   sqlStatusList
 } from "./status.js";
 import { mergeHermesTimeline, sanitizeHermesTimelineEvent, timelineEventsFromSnapshot } from "./timeline.js";
+import {
+  persistHermesDiagnosticSummary,
+  serializeCappedTimeline
+} from "./persistence.js";
 
 const CLIENT_REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
 const ACTIVE_SQL = sqlStatusList(HERMES_ACTIVE_STATUSES);
@@ -59,7 +63,7 @@ const RUN_COLUMNS = `id, owner_username, project_id, conversation_id, instance_i
   request_fingerprint, upstream_idempotency_key, upstream_request_json, upstream_run_id, upstream_session_id,
   admission_id, execution_generation, model_mode, requested_provider, requested_model, actual_provider,
   actual_model, route_source, status, upstream_status, status_detail, error_code, error_message, holds_slot,
-  last_event_seq, timeline_json, user_message_id, assistant_message_id, usage_json, cancel_requested_at, submitted_at,
+  last_event_seq, timeline_json, diagnostics_json, diagnostics_updated_at, user_message_id, assistant_message_id, usage_json, cancel_requested_at, submitted_at,
   completed_at, approval_request_id, approval_generation, approval_json, approval_response_pending,
   approval_response_started_at, clarify_request_id, clarify_generation, clarify_json,
   clarify_response_pending, clarify_response_started_at, created_at, updated_at`;
@@ -292,12 +296,18 @@ export async function requireOwnedHermesRun(env, { runId, owner, projectId }) {
 }
 
 // Conditional update that never touches a terminal run. Returns the number of changed rows.
-async function updateActiveRun(db, id, fields, { fromStatuses = HERMES_ACTIVE_STATUSES } = {}) {
+async function updateActiveRun(env, id, fields, { fromStatuses = HERMES_ACTIVE_STATUSES } = {}) {
+  const db = env.DB;
   const keys = Object.keys(fields);
   const sql = "UPDATE hermes_runs SET " + keys.map(key => key + " = ?").join(", ")
     + ", updated_at = ? WHERE id = ? AND status IN (" + sqlStatusList(fromStatuses) + ")";
   const result = await db.prepare(sql).bind(...keys.map(key => fields[key]), Date.now(), id).run();
-  return result?.meta?.changes || 0;
+  const changed = result?.meta?.changes || 0;
+  if (changed && (fields.error_code || [
+    "completed", "failed", "rejected", "cancelled", "interrupted", "abandoned", "unknown",
+    "submission_unknown", "cancel_requested", "waiting_for_approval", "waiting_for_clarification"
+  ].includes(fields.status))) await persistHermesDiagnosticSummary(env, id);
+  return changed;
 }
 
 function terminalFields(status, extra = {}) {
@@ -503,7 +513,7 @@ async function postRun(env, row, { fetchImpl, fromStatuses, reconcile = false })
     // A refused reconcile says nothing about the original POST, which may have created the run:
     // the outcome stays unknown and the slot stays held.
     if (error.ambiguous || reconcile) {
-      await updateActiveRun(db, row.id, {
+      await updateActiveRun(env, row.id, {
         status: "submission_unknown",
         status_detail: error.code,
         error_code: error.code,
@@ -511,7 +521,7 @@ async function postRun(env, row, { fetchImpl, fromStatuses, reconcile = false })
       }, { fromStatuses });
       log("submit_unknown", { run_id: row.id, code: error.code, upstream_status: error.upstreamStatus });
     } else {
-      await updateActiveRun(db, row.id, terminalFields("rejected", {
+      await updateActiveRun(env, row.id, terminalFields("rejected", {
         status_detail: error.upstreamCode || error.code,
         error_code: error.code,
         error_message: error.message
@@ -522,7 +532,7 @@ async function postRun(env, row, { fetchImpl, fromStatuses, reconcile = false })
   }
   const upstreamRunId = String(response.body?.run_id || "");
   if (!isHermesRunId(upstreamRunId)) {
-    await updateActiveRun(db, row.id, {
+    await updateActiveRun(env, row.id, {
       status: "submission_unknown",
       status_detail: "hermes_bad_response",
       error_code: "hermes_bad_response",
@@ -534,7 +544,7 @@ async function postRun(env, row, { fetchImpl, fromStatuses, reconcile = false })
   const mapped = mapHermesUpstreamStatus(upstreamStatus);
   // A replayed key may already report a terminal status; the GET snapshot settles that, so
   // only non-terminal states are taken from the submit response.
-  await updateActiveRun(db, row.id, {
+  await updateActiveRun(env, row.id, {
     upstream_run_id: upstreamRunId,
     upstream_status: upstreamStatus || null,
     status: mapped && !isHermesTerminal(mapped) ? mapped : "queued",
@@ -599,6 +609,7 @@ async function finalizeCompleted(env, row, snapshot) {
     row.id
   ));
   await db.batch(statements);
+  await persistHermesDiagnosticSummary(env, row.id);
   log("completed", { run_id: row.id, has_output: Boolean(output), actual_model: runtime?.model || "" });
 }
 
@@ -653,7 +664,7 @@ async function applySnapshot(env, row, snapshot) {
     clarify_response_started_at: sameClarifyClaim ? row.clarify_response_started_at : null
   };
   if (!mapped) {
-    await updateActiveRun(db, row.id, { ...common, status_detail: "unrecognized_upstream_status" });
+    await updateActiveRun(env, row.id, { ...common, status_detail: "unrecognized_upstream_status" });
     return;
   }
   if (mapped === "completed") {
@@ -661,8 +672,8 @@ async function applySnapshot(env, row, snapshot) {
     return;
   }
   if (mapped === "failed") {
-    const message = safeMessage(snapshot?.error || "Hermes run failed");
-    await updateActiveRun(db, row.id, terminalFields("failed", {
+    const message = safeMessage(snapshot?.error?.message || snapshot?.error || "Hermes run failed");
+    await updateActiveRun(env, row.id, terminalFields("failed", {
       ...common,
       status_detail: safeCode(snapshot?.turn_exit_reason) || (snapshot?.partial ? "partial" : null),
       error_code: "hermes_run_failed",
@@ -676,14 +687,14 @@ async function applySnapshot(env, row, snapshot) {
   if (mapped === "cancelled") {
     // Authority mode reports an interrupted outcome as cancelled; flag it when the user
     // never asked to cancel so the UI does not claim a user cancellation.
-    await updateActiveRun(db, row.id, terminalFields("cancelled", {
+    await updateActiveRun(env, row.id, terminalFields("cancelled", {
       ...common,
       status_detail: row.cancel_requested_at ? "cancelled_by_user" : "cancelled_upstream_without_request"
     }));
     return;
   }
   if (mapped === "interrupted") {
-    await updateActiveRun(db, row.id, terminalFields("interrupted", {
+    await updateActiveRun(env, row.id, terminalFields("interrupted", {
       ...common,
       status_detail: "upstream_interrupted",
       error_code: "hermes_run_interrupted",
@@ -692,7 +703,7 @@ async function applySnapshot(env, row, snapshot) {
     return;
   }
   if (mapped === "unknown") {
-    await updateActiveRun(db, row.id, {
+    await updateActiveRun(env, row.id, {
       ...common,
       status: "unknown",
       status_detail: "upstream_unknown",
@@ -703,7 +714,7 @@ async function applySnapshot(env, row, snapshot) {
   }
   // Non-terminal. A pending local cancel stays visible until upstream confirms.
   const status = row.status === "cancel_requested" && mapped !== "stopping" ? "cancel_requested" : mapped;
-  await updateActiveRun(db, row.id, { ...common, status, status_detail: null });
+  await updateActiveRun(env, row.id, { ...common, status, status_detail: null });
 }
 
 export async function syncHermesRun(env, row, { fetchImpl } = {}) {
@@ -711,7 +722,7 @@ export async function syncHermesRun(env, row, { fetchImpl } = {}) {
   if (!row || isHermesTerminal(row.status)) return { run: row, syncError: null };
   if (["reserving", "submitting"].includes(row.status)) {
     if (Date.now() - Number(row.updated_at || 0) > HERMES_STALE_SUBMIT_MS) {
-      await updateActiveRun(db, row.id, {
+      await updateActiveRun(env, row.id, {
         status: "submission_unknown",
         status_detail: "worker_interrupted",
         error_code: "hermes_submission_unknown",
@@ -728,7 +739,7 @@ export async function syncHermesRun(env, row, { fetchImpl } = {}) {
     await applySnapshot(env, row, response.body);
   } catch (err) {
     if (err instanceof HermesError && err.code === "hermes_run_not_found") {
-      await updateActiveRun(db, row.id, {
+      await updateActiveRun(env, row.id, {
         status: "unknown",
         status_detail: "upstream_not_found",
         error_code: "hermes_run_not_found",
@@ -756,7 +767,7 @@ export async function cancelHermesRun(env, row, { fetchImpl } = {}) {
         ? "Submission outcome is unknown; there is no Hermes run id to stop"
         : "Submission is still in progress", { httpStatus: 409 });
   }
-  await updateActiveRun(db, row.id, {
+  await updateActiveRun(env, row.id, {
     status: "cancel_requested",
     cancel_requested_at: row.cancel_requested_at || Date.now()
   }, { fromStatuses: ["queued", "running", "waiting_for_approval", "waiting_for_clarification", "stopping", "cancel_requested"] });
@@ -767,14 +778,14 @@ export async function cancelHermesRun(env, row, { fetchImpl } = {}) {
     const fresh = await readRunById(db, row.id);
     const mapped = mapHermesUpstreamStatus(response.body?.status);
     if (mapped && mapped !== "stopping") await applySnapshot(env, fresh, response.body);
-    else await updateActiveRun(db, row.id, { status: "stopping", upstream_status: "stopping", status_detail: null });
+    else await updateActiveRun(env, row.id, { status: "stopping", upstream_status: "stopping", status_detail: null });
   } catch (err) {
     cancelError = publicError(err);
     log("stop_failed", { run_id: row.id, code: err?.code || "error" });
     if (err?.code === "hermes_unknown_execution") {
-      await updateActiveRun(db, row.id, { status: "unknown", status_detail: "upstream_unknown" });
+      await updateActiveRun(env, row.id, { status: "unknown", status_detail: "upstream_unknown" });
     } else if (err?.ambiguous) {
-      await updateActiveRun(db, row.id, { status_detail: "stop_unconfirmed" });
+      await updateActiveRun(env, row.id, { status_detail: "stop_unconfirmed" });
     } else {
       // e.g. run_not_active: let the authoritative GET decide.
       await syncHermesRun(env, await readRunById(db, row.id), { fetchImpl });
@@ -958,7 +969,7 @@ export async function reconcileHermesRun(env, row, { fetchImpl } = {}) {
   if (!allowed.ok) {
     throw new HermesError(allowed.code, "Reconcile requires durable Hermes idempotency within its retention window", { httpStatus: 409 });
   }
-  const changed = await updateActiveRun(env.DB, row.id, { status: "submitting", status_detail: "reconcile" },
+  const changed = await updateActiveRun(env, row.id, { status: "submitting", status_detail: "reconcile" },
     { fromStatuses: ["submission_unknown"] });
   if (!changed) throw new HermesError("hermes_invalid_state", "Run state changed; refresh and retry", { httpStatus: 409 });
   log("reconcile", { run_id: row.id });
@@ -990,9 +1001,16 @@ export async function listHermesRuns(env, { owner, projectId, conversationId, li
 
 export async function recordHermesEventSeq(env, runId, seq) {
   if (!Number.isInteger(seq) || seq < 0) return;
-  await env.DB.prepare(
-    "UPDATE hermes_runs SET last_event_seq = ? WHERE id = ? AND last_event_seq < ?"
-  ).bind(seq, runId, seq).run();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await env.DB.prepare(
+        "UPDATE hermes_runs SET last_event_seq = ? WHERE id = ? AND last_event_seq < ?"
+      ).bind(seq, runId, seq).run();
+      return;
+    } catch (err) {
+      if (attempt === 1) console.warn("[hermes] event_seq_write_failed", { run_id: runId });
+    }
+  }
 }
 
 export async function recordHermesTimelineEvents(env, runId, events) {
@@ -1008,10 +1026,13 @@ export async function recordHermesTimelineEvents(env, runId, events) {
       try { current = row.timeline_json ? JSON.parse(row.timeline_json) : []; } catch (err) { current = []; }
       const timeline = mergeHermesTimeline(current, safeEvents);
       await env.DB.prepare("UPDATE hermes_runs SET timeline_json = ?, updated_at = ? WHERE id = ?")
-        .bind(JSON.stringify(timeline), Date.now(), runId).run();
+        .bind(serializeCappedTimeline(timeline), Date.now(), runId).run();
       return;
     } catch (err) {
-      if (attempt === 1) throw err;
+      if (attempt === 1) {
+        console.warn("[hermes] timeline_write_failed", { run_id: runId });
+        return;
+      }
     }
   }
 }

@@ -15,12 +15,16 @@ import { handleSearchWeb } from "./api/searchWeb.js";
 import { handleSettings } from "./api/settings.js";
 import { handleOpenClawBridgeEventStream } from "./api/openclawBridgeEvents.js";
 import { handleHermes } from "./hermes/routes.js";
+import { pruneHermesDiagnosticPayloads } from "./hermes/persistence.js";
 import { htmlPage } from "./frontend/page.js";
 import { requireAuth } from "./lib/auth.js";
 import { getEnabledModels } from "./providers/config.js";
 import { corsHeaders, jsonResponse } from "./utils/response.js";
 
 export default {
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(pruneHermesDiagnosticPayloads(env));
+  },
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 

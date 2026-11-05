@@ -18,6 +18,13 @@ import { errorFromUpstream, redactSecrets } from "../src/hermes/errors.js";
 import { getHermesRuntimeHealth, normalizeHermesHealthProbe } from "../src/hermes/health.js";
 import { createSseParser } from "../src/hermes/sse.js";
 import { sanitizeHermesTimelineEvent } from "../src/hermes/timeline.js";
+import {
+  persistHermesDiagnosticSummary,
+  pruneHermesDiagnosticPayloads,
+  HERMES_DIAGNOSTICS_MAX_BYTES,
+  HERMES_TIMELINE_MAX_BYTES
+} from "../src/hermes/persistence.js";
+import { recordHermesEventSeq, recordHermesTimelineEvents } from "../src/hermes/runs.js";
 import { MOCK_API_KEY, MockHermes, hermesEnv, sseBody, sseFrame } from "./helpers/mockHermes.js";
 
 // Runs against local Miniflare D1 with the repository migrations (remoteBindings is off in
@@ -155,6 +162,33 @@ function dbWithFailingTimelineWrites(failures = Number.POSITIVE_INFINITY) {
               if (remaining > 0) {
                 remaining -= 1;
                 throw new Error("simulated timeline write failure");
+              }
+              return bound.run();
+            }
+          };
+        }
+      };
+    },
+    batch(statements) {
+      return env.DB.batch(statements);
+    }
+  };
+}
+
+function dbWithFailingWrites(pattern, failures = Number.POSITIVE_INFINITY) {
+  let remaining = failures;
+  return {
+    prepare(sql) {
+      const statement = env.DB.prepare(sql);
+      if (!pattern.test(sql)) return statement;
+      return {
+        bind(...values) {
+          const bound = statement.bind(...values);
+          return {
+            async run() {
+              if (remaining > 0) {
+                remaining -= 1;
+                throw new Error("simulated D1 write failure");
               }
               return bound.run();
             }
@@ -621,7 +655,7 @@ describe("Hermes run submission and completion", () => {
     const response = await getRun(run.id, { envExtra: { DB: dbWithFailingTimelineWrites() } });
 
     expect(response.json.run).toMatchObject({ status: "completed", terminal: true, timeline: [] });
-    expect(logs.some(args => args[0] === "[hermes] timeline_write_failed" && args[1]?.path === "snapshot")).toBe(true);
+    expect(logs.some(args => args[0] === "[hermes] timeline_write_failed" && args[1]?.run_id === run.id)).toBe(true);
     const rows = await messages(run.conversationId);
     expect(rows.filter(row => row.role === "assistant").map(row => row.content)).toEqual(["authoritative answer"]);
     expect(await slotHolder()).toBeNull();
@@ -878,7 +912,7 @@ describe("Hermes SSE proxy, disconnect and resume", () => {
     expect(stream.text).toContain("\"event\":\"tool.completed\"");
     expect(stream.text).toContain("answer continues");
     expect(stream.text).toContain("hermes.stream_closed");
-    expect(logs.some(args => args[0] === "[hermes] timeline_write_failed" && args[1]?.path === "sse")).toBe(true);
+    expect(logs.some(args => args[0] === "[hermes] timeline_write_failed" && args[1]?.run_id === run.id)).toBe(true);
     expect((await getRun(run.id)).json.run).toMatchObject({ status: "running", timeline: [] });
   });
 
@@ -1343,6 +1377,121 @@ describe("Hermes user and project isolation", () => {
 });
 
 describe("Hermes run diagnostics", () => {
+  it("applies the additive diagnostic migration and index", async () => {
+    const columns = await env.DB.prepare("PRAGMA table_info(hermes_runs)").all();
+    expect(columns.results.map(column => column.name)).toEqual(expect.arrayContaining([
+      "diagnostics_json", "diagnostics_updated_at"
+    ]));
+    const indexes = await env.DB.prepare("PRAGMA index_list(hermes_runs)").all();
+    expect(indexes.results.map(index => index.name)).toContain("idx_hermes_runs_diagnostics_updated");
+  });
+
+  it("persists compact summaries only for meaningful transitions", async () => {
+    const created = await submit();
+    const run = created.json.run;
+    await recordHermesTimelineEvents(testEnv(), run.id, [{
+      event:"tool.completed", tool:"terminal", error:false, result:"ordinary tick", seq:1
+    }]);
+    expect((await env.DB.prepare("SELECT diagnostics_json FROM hermes_runs WHERE id = ?").bind(run.id).first()).diagnostics_json).toBeNull();
+
+    mock.run(upstreamRunId(run)).status = "failed";
+    mock.run(upstreamRunId(run)).error = { code:"model_failed", message:"token=private-value" };
+    const failed = await getRun(run.id);
+    expect(failed.json.run.status).toBe("failed");
+    const stored = await env.DB.prepare(
+      "SELECT diagnostics_json, diagnostics_updated_at FROM hermes_runs WHERE id = ?"
+    ).bind(run.id).first();
+    const summary = JSON.parse(stored.diagnostics_json);
+    expect(summary).toMatchObject({ runId:run.id, status:"failed", isFault:true, sourceLayer:"hermes" });
+    expect(stored.diagnostics_updated_at).toEqual(expect.any(Number));
+    expect(new TextEncoder().encode(stored.diagnostics_json).byteLength).toBeLessThanOrEqual(HERMES_DIAGNOSTICS_MAX_BYTES);
+    expect(stored.diagnostics_json).not.toContain("private-value");
+
+    const list = await call("GET", "/api/hermes/diagnostics/runs?window=24h");
+    expect(list.json.runs.find(item => item.id === run.id).persistedSummary).toMatchObject({ status:"failed" });
+  });
+
+  it("stores waiting and normal cancellation as non-fault summaries", async () => {
+    const waiting = await insertDiagnosticRun({ status:"waiting_for_approval", statusDetail:"approval_required" });
+    const cancelled = await insertDiagnosticRun({ status:"cancelled", statusDetail:"cancelled_by_user" });
+    expect(await persistHermesDiagnosticSummary(testEnv(), waiting)).toBe(true);
+    expect(await persistHermesDiagnosticSummary(testEnv(), waiting)).toBe(false);
+    await persistHermesDiagnosticSummary(testEnv(), cancelled);
+    const rows = await env.DB.prepare(
+      "SELECT id, diagnostics_json FROM hermes_runs WHERE id IN (?, ?) ORDER BY id"
+    ).bind(waiting, cancelled).all();
+    const summaries = Object.fromEntries(rows.results.map(row => [row.id, JSON.parse(row.diagnostics_json)]));
+    expect(summaries[waiting]).toMatchObject({ kind:"waiting", isFault:false, category:"user_cancel_or_approval" });
+    expect(summaries[cancelled]).toMatchObject({ kind:"cancel", isFault:false, category:"user_cancel_or_approval" });
+  });
+
+  it("persists unknown execution facts without inventing a retry", async () => {
+    const id = await insertDiagnosticRun({
+      status:"unknown", statusDetail:"upstream_not_found", errorCode:"hermes_run_not_found",
+      errorMessage:"Hermes no longer knows this run"
+    });
+    expect(await persistHermesDiagnosticSummary(testEnv(), id)).toBe(true);
+    const row = await env.DB.prepare("SELECT diagnostics_json FROM hermes_runs WHERE id = ?").bind(id).first();
+    expect(JSON.parse(row.diagnostics_json)).toMatchObject({
+      status:"unknown", category:"unknown_execution", isFault:true, originalCode:"hermes_run_not_found"
+    });
+  });
+
+  it("keeps timeline, event-sequence, and diagnostic writes fail-soft", async () => {
+    const id = await insertDiagnosticRun({ status:"failed", errorCode:"model_failed", errorMessage:"failed" });
+    await expect(recordHermesTimelineEvents({ DB:dbWithFailingTimelineWrites() }, id,
+      [{ event:"tool.completed", tool:"terminal", error:true, result:"failed", seq:4 }])).resolves.toBeUndefined();
+    await expect(recordHermesEventSeq({ DB:dbWithFailingWrites(/^UPDATE hermes_runs SET last_event_seq/) }, id, 4)).resolves.toBeUndefined();
+    await expect(persistHermesDiagnosticSummary({ DB:dbWithFailingWrites(/^UPDATE hermes_runs SET diagnostics_json/) }, id)).resolves.toBe(false);
+
+    const active = (await submit()).json.run;
+    mock.run(upstreamRunId(active)).status = "failed";
+    const response = await getRun(active.id, {
+      envExtra:{ DB:dbWithFailingWrites(/^UPDATE hermes_runs SET diagnostics_json/) }
+    });
+    expect(response.json.run).toMatchObject({ status:"failed", terminal:true });
+    expect(await slotHolder()).toBeNull();
+  });
+
+  it("caps serialized timelines by dropping oldest events", async () => {
+    const id = await insertDiagnosticRun({ status:"completed" });
+    const events = Array.from({ length:50 }, (_, seq) => ({
+      event:"tool.completed", tool:"terminal", error:false, result:"x".repeat(1000), seq
+    }));
+    await recordHermesTimelineEvents(testEnv(), id, events);
+    const row = await env.DB.prepare("SELECT timeline_json FROM hermes_runs WHERE id = ?").bind(id).first();
+    const timeline = JSON.parse(row.timeline_json);
+    expect(new TextEncoder().encode(row.timeline_json).byteLength).toBeLessThanOrEqual(HERMES_TIMELINE_MAX_BYTES);
+    expect(timeline.length).toBeLessThan(50);
+    expect(timeline.at(-1).seq).toBe(49);
+    expect(timeline[0].seq).toBeGreaterThan(0);
+  });
+
+  it("prunes only old bulky payloads in a bounded batch and keeps row skeletons", async () => {
+    const now = Date.now();
+    const old = await insertDiagnosticRun({
+      status:"failed", createdAt:now - 31 * 24 * 60 * 60 * 1000,
+      completedAt:now - 31 * 24 * 60 * 60 * 1000,
+      timelineJson:JSON.stringify([{ event:"tool.completed", tool:"terminal", error:true, seq:1 }]),
+      errorCode:"tool_failed"
+    });
+    const recent = await insertDiagnosticRun({
+      status:"failed", createdAt:now - 1000, completedAt:now - 500,
+      timelineJson:JSON.stringify([{ event:"tool.completed", tool:"terminal", error:true, seq:2 }]),
+      errorCode:"tool_failed"
+    });
+    await persistHermesDiagnosticSummary(testEnv(), old);
+    await persistHermesDiagnosticSummary(testEnv(), recent);
+    expect(await pruneHermesDiagnosticPayloads(testEnv(), { now, limit:1 })).toBe(1);
+    const rows = await env.DB.prepare(
+      "SELECT id, timeline_json, diagnostics_json, diagnostics_updated_at FROM hermes_runs WHERE id IN (?, ?)"
+    ).bind(old, recent).all();
+    const byId = Object.fromEntries(rows.results.map(row => [row.id, row]));
+    expect(byId[old]).toMatchObject({ id:old, timeline_json:null, diagnostics_json:null, diagnostics_updated_at:null });
+    expect(byId[recent].timeline_json).not.toBeNull();
+    expect(byId[recent].diagnostics_json).not.toBeNull();
+  });
+
   it("lists only owned runs newest-first and applies time windows", async () => {
     const now = Date.now();
     const newest = await insertDiagnosticRun({ owner:"alice", status:"failed", createdAt:now - 1000 });

@@ -185,7 +185,11 @@ async function handleEvents(request, env, row, url, options) {
         const safe = sanitizeEvent(frame);
         if (!safe) continue;
         if (["tool.started", "tool.completed", "subagent.start", "subagent.complete"].includes(safe.event)) {
-          await recordHermesTimelineEvents(env, row.id, [safe]);
+          try {
+            await recordHermesTimelineEvents(env, row.id, [safe]);
+          } catch (err) {
+            console.warn("[hermes] timeline_write_failed", { run_id: row.id, path: "sse" });
+          }
         }
         await write(formatSseFrame(safe, Number.isInteger(frame.seq) ? frame.seq : null));
         if (safe.terminal) sawTerminal = true;

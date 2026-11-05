@@ -32,8 +32,13 @@ export function redactSecrets(text, secrets = []) {
     if (value.length >= 4) out = out.split(value).join("[redacted]");
   }
   return out
+    .replace(/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/gi, "[redacted private key]")
+    .replace(/(\bAuthorization\s*[:=]\s*Basic)\s+[A-Za-z0-9+/_=-]+/gi, "$1 [redacted]")
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
     .replace(/HermesRoom\s+[A-Za-z0-9._~+/=-]+/gi, "HermesRoom [redacted]")
+    .replace(/\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted jwt]")
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/:@]+:[^\s/@]+@/gi, "$1[redacted]@")
+    .replace(/\b(?:ghp_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,}|AKIA[A-Z0-9]{16}|xox[bp]-[A-Za-z0-9-]{8,}|sk_(?:live|test)_[A-Za-z0-9_-]{8,})\b/g, "[redacted token]")
     .replace(/\b(sk|pk|rk)-[A-Za-z0-9_-]{8,}/g, "[redacted]")
     .replace(/("?(?:api[_-]?key|access[_-]?key|private[_-]?key|token|secret|password|authorization|cookie|set-cookie|session|client[_-]?secret|cf-access-client-secret)"?\s*[:=]\s*)("[^"]*"|[^\s,;}]+)/gi, "$1[redacted]");
 }

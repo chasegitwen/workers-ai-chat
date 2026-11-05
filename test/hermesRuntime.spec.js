@@ -11,6 +11,7 @@ import {
 import { resolveHermesUpstream } from "../src/hermes/config.js";
 import { errorFromUpstream, redactSecrets } from "../src/hermes/errors.js";
 import { createSseParser } from "../src/hermes/sse.js";
+import { sanitizeHermesTimelineEvent } from "../src/hermes/timeline.js";
 import { MOCK_API_KEY, MockHermes, hermesEnv, sseBody, sseFrame } from "./helpers/mockHermes.js";
 
 // Runs against local Miniflare D1 with the repository migrations (remoteBindings is off in
@@ -81,8 +82,8 @@ function submit(extra = {}, options = {}) {
   return call("POST", "/api/hermes/runs", { body: submitBody(extra), ...options });
 }
 
-function getRun(id, { project = "default", user = "admin" } = {}) {
-  return call("GET", "/api/hermes/runs/" + id + "?project_id=" + project, { user });
+function getRun(id, { project = "default", user = "admin", envExtra = {} } = {}) {
+  return call("GET", "/api/hermes/runs/" + id + "?project_id=" + project, { user, envExtra });
 }
 
 function action(id, name, { project = "default", user = "admin", body = {} } = {}) {
@@ -119,6 +120,33 @@ function expectNoSecrets(text) {
   for (const secret of [MOCK_API_KEY, "access-secret-value-xyz", "access-id.access"]) {
     expect(text).not.toContain(secret);
   }
+}
+
+function dbWithFailingTimelineWrites(failures = Number.POSITIVE_INFINITY) {
+  let remaining = failures;
+  return {
+    prepare(sql) {
+      const statement = env.DB.prepare(sql);
+      if (!/^UPDATE hermes_runs SET timeline_json/.test(sql)) return statement;
+      return {
+        bind(...values) {
+          const bound = statement.bind(...values);
+          return {
+            async run() {
+              if (remaining > 0) {
+                remaining -= 1;
+                throw new Error("simulated timeline write failure");
+              }
+              return bound.run();
+            }
+          };
+        }
+      };
+    },
+    batch(statements) {
+      return env.DB.batch(statements);
+    }
+  };
 }
 
 describe("Hermes catalog and provider selection", () => {
@@ -215,6 +243,21 @@ describe("Hermes run submission and completion", () => {
     expect(rows.map(row => row.role)).toEqual(["user", "assistant"]);
     expect(rows[1]).toMatchObject({ id: "hermes-assistant-" + run.id, content: "Creep forces arise from ..." });
     expect(JSON.parse(rows[1].metadata)).toMatchObject({ runtime: "hermes", runtime_id: "oracle-hermes", model: "MiniMax-M3", provider: "minimax" });
+  });
+
+  it("applies an authoritative snapshot when its timeline persistence fails", async () => {
+    const run = (await submit()).json.run;
+    const upstream = mock.run(upstreamRunId(run));
+    upstream.timeline = [{ event: "tool.completed", seq: 3, tool: "terminal", result_preview: "result" }];
+    mock.complete(upstreamRunId(run), "authoritative answer");
+
+    const response = await getRun(run.id, { envExtra: { DB: dbWithFailingTimelineWrites() } });
+
+    expect(response.json.run).toMatchObject({ status: "completed", terminal: true, timeline: [] });
+    expect(logs.some(args => args[0] === "[hermes] timeline_write_failed" && args[1]?.path === "snapshot")).toBe(true);
+    const rows = await messages(run.conversationId);
+    expect(rows.filter(row => row.role === "assistant").map(row => row.content)).toEqual(["authoritative answer"]);
+    expect(await slotHolder()).toBeNull();
   });
 
   it("omits provider/model for the Agent default and reuses the conversation's Hermes session", async () => {
@@ -451,6 +494,25 @@ describe("Hermes SSE proxy, disconnect and resume", () => {
     const stream = await call("GET", "/api/hermes/runs/" + run.id + "/events?project_id=default");
     expect(stream.text).toContain("hermes.stream_unavailable");
     expect((await getRun(run.id)).json.run.status).toBe("running");
+  });
+
+  it("continues forwarding SSE events when timeline persistence fails", async () => {
+    const run = (await submit()).json.run;
+    mock.run(upstreamRunId(run)).status = "running";
+    mock.onEvents = () => new Response(sseBody([
+      sseFrame(0, { event: "tool.completed", tool: "terminal", result_preview: "still forwarded" }),
+      sseFrame(1, { event: "message.delta", delta: "answer continues" })
+    ]), { headers: { "Content-Type": "text/event-stream" } });
+
+    const stream = await call("GET", "/api/hermes/runs/" + run.id + "/events?project_id=default", {
+      envExtra: { DB: dbWithFailingTimelineWrites() }
+    });
+
+    expect(stream.text).toContain("\"event\":\"tool.completed\"");
+    expect(stream.text).toContain("answer continues");
+    expect(stream.text).toContain("hermes.stream_closed");
+    expect(logs.some(args => args[0] === "[hermes] timeline_write_failed" && args[1]?.path === "sse")).toBe(true);
+    expect((await getRun(run.id)).json.run).toMatchObject({ status: "running", timeline: [] });
   });
 
   it("parses split chunks, CRLF and comment frames", () => {
@@ -816,6 +878,42 @@ describe("Hermes disabled and existing features", () => {
 });
 
 describe("Hermes secret handling", () => {
+  it("redacts private keys, JWTs, URL credentials, common token prefixes and Basic auth", () => {
+    const secrets = [
+      "-----BEGIN RSA PRIVATE KEY-----\nprivate-material\n-----END RSA PRIVATE KEY-----",
+      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.signature_value",
+      "postgres://dbuser:dbpass@database.example/app",
+      "https://webuser:webpass@example.com/path",
+      "ghp_1234567890abcdef",
+      "github_pat_1234567890_ABCDEF",
+      "AKIA1234567890ABCDEF",
+      "xoxb-12345678-abcdefghijkl",
+      "xoxp-12345678-abcdefghijkl",
+      "sk_live_1234567890abcdef",
+      "sk_test_1234567890abcdef",
+      "Authorization: Basic dXNlcjpwYXNz"
+    ];
+
+    const redacted = redactSecrets(secrets.join("\n"));
+
+    for (const leaked of ["private-material", "eyJhbGci", "dbuser", "dbpass", "webuser", "webpass",
+      "ghp_", "github_pat_", "AKIA", "xoxb-", "xoxp-", "sk_live_", "sk_test_", "dXNlcjpwYXNz"]) {
+      expect(redacted).not.toContain(leaked);
+    }
+  });
+
+  it("redacts tool results before retaining the bounded preview", () => {
+    const secret = "github_pat_1234567890_ABCDEF";
+    const event = sanitizeHermesTimelineEvent("tool.completed", {
+      tool: "terminal",
+      result_preview: "prefix " + secret + " " + "x".repeat(700)
+    }, 1);
+
+    expect(event.result).toHaveLength(500);
+    expect(event.result).not.toContain(secret);
+    expect(event.result).toContain("[redacted token]");
+  });
+
   it("redacts upstream error text and never logs credentials", async () => {
     mock.onCreate = () => new Response(JSON.stringify({
       error: { message: "bad key Bearer " + MOCK_API_KEY + " api_key=\"zzz\"", type: "invalid_request_error", code: "bad" }

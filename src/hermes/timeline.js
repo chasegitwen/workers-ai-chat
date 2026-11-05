@@ -13,9 +13,8 @@ function previewValue(value, limit) {
   else {
     try { text = JSON.stringify(value); } catch (err) { text = String(value); }
   }
-  // Bound before and after redaction. Upstream already truncates these fields, but the
-  // adapter treats every event as untrusted and never persists an unbounded value.
-  return safeMessage(text.slice(0, 2000), [], limit);
+  // Redact before truncation so a credential spanning the preview boundary cannot leak.
+  return safeMessage(text, [], limit);
 }
 
 function safeDuration(value) {

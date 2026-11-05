@@ -546,7 +546,13 @@ async function finalizeCompleted(env, row, snapshot) {
 async function applySnapshot(env, row, snapshot) {
   const db = env.DB;
   const snapshotTimeline = timelineEventsFromSnapshot(snapshot);
-  if (snapshotTimeline.length) await recordHermesTimelineEvents(env, row.id, snapshotTimeline);
+  if (snapshotTimeline.length) {
+    try {
+      await recordHermesTimelineEvents(env, row.id, snapshotTimeline);
+    } catch (err) {
+      log("timeline_write_failed", { run_id: row.id, path: "snapshot" });
+    }
+  }
   const upstreamStatus = safeCode(snapshot?.status);
   const mapped = mapHermesUpstreamStatus(upstreamStatus);
   const admissionId = cleanText(snapshot?.admission_id, 160) || null;
@@ -835,13 +841,20 @@ export async function recordHermesTimelineEvents(env, runId, events) {
     .map(event => sanitizeHermesTimelineEvent(event?.event, event, event?.seq))
     .filter(Boolean);
   if (!safeEvents.length) return;
-  const row = await env.DB.prepare("SELECT timeline_json FROM hermes_runs WHERE id = ?").bind(runId).first();
-  if (!row) return;
-  let current = [];
-  try { current = row.timeline_json ? JSON.parse(row.timeline_json) : []; } catch (err) { current = []; }
-  const timeline = mergeHermesTimeline(current, safeEvents);
-  await env.DB.prepare("UPDATE hermes_runs SET timeline_json = ?, updated_at = ? WHERE id = ?")
-    .bind(JSON.stringify(timeline), Date.now(), runId).run();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const row = await env.DB.prepare("SELECT timeline_json FROM hermes_runs WHERE id = ?").bind(runId).first();
+      if (!row) return;
+      let current = [];
+      try { current = row.timeline_json ? JSON.parse(row.timeline_json) : []; } catch (err) { current = []; }
+      const timeline = mergeHermesTimeline(current, safeEvents);
+      await env.DB.prepare("UPDATE hermes_runs SET timeline_json = ?, updated_at = ? WHERE id = ?")
+        .bind(JSON.stringify(timeline), Date.now(), runId).run();
+      return;
+    } catch (err) {
+      if (attempt === 1) throw err;
+    }
+  }
 }
 
 export { readRunById, hermesCapabilities, sanitizeHermesApprovalPrompt };

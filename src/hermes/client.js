@@ -10,6 +10,7 @@ import { HermesError, errorFromUpstream, safeMessage } from "./errors.js";
 const RUN_ID_PATTERN = /^run_[A-Za-z0-9_-]{1,128}$/;
 const IDEMPOTENCY_KEY_PATTERN = /^[\x21-\x7e]{1,255}$/;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
+const JOB_ID_PATTERN = /^[a-f0-9]{12}$/;
 
 export function isHermesRunId(value) {
   return RUN_ID_PATTERN.test(String(value || ""));
@@ -21,6 +22,10 @@ export function isValidIdempotencyKey(value) {
 
 export function isHermesSessionId(value) {
   return SESSION_ID_PATTERN.test(String(value || ""));
+}
+
+export function isHermesJobId(value) {
+  return JOB_ID_PATTERN.test(String(value || ""));
 }
 
 async function readJson(response) {
@@ -112,6 +117,13 @@ export function createHermesClient(env, instanceId, { fetchImpl } = {}) {
     return "/api/sessions/" + encodeURIComponent(sessionId) + suffix;
   }
 
+  function jobPath(jobId, suffix = "") {
+    if (!isHermesJobId(jobId)) {
+      throw new HermesError("hermes_invalid_job_id", "Invalid Hermes job id", { httpStatus: 400 });
+    }
+    return "/api/jobs/" + encodeURIComponent(jobId) + suffix;
+  }
+
   return {
     instanceId,
     secrets,
@@ -141,6 +153,28 @@ export function createHermesClient(env, instanceId, { fetchImpl } = {}) {
       sessionPath(sessionId, "/messages") + "?include_compacted=" + (includeCompacted ? "true" : "false") + "&inline_images=false",
       { timeoutMs: HERMES_TIMEOUTS_MS.sessions }),
     forkSession: (sessionId, body) => request("POST", sessionPath(sessionId, "/fork"), {
+      body, timeoutMs: HERMES_TIMEOUTS_MS.sessions, mutating: true
+    }),
+    listJobs: ({ includeDisabled = true } = {}) => request("GET",
+      "/api/jobs?include_disabled=" + (includeDisabled ? "true" : "false"),
+      { timeoutMs: HERMES_TIMEOUTS_MS.sessions }),
+    createJob: body => request("POST", "/api/jobs", {
+      body, timeoutMs: HERMES_TIMEOUTS_MS.sessions, mutating: true
+    }),
+    getJob: jobId => request("GET", jobPath(jobId), { timeoutMs: HERMES_TIMEOUTS_MS.sessions }),
+    patchJob: (jobId, body) => request("PATCH", jobPath(jobId), {
+      body, timeoutMs: HERMES_TIMEOUTS_MS.sessions, mutating: true
+    }),
+    deleteJob: jobId => request("DELETE", jobPath(jobId), {
+      timeoutMs: HERMES_TIMEOUTS_MS.sessions, mutating: true
+    }),
+    pauseJob: jobId => request("POST", jobPath(jobId, "/pause"), {
+      timeoutMs: HERMES_TIMEOUTS_MS.sessions, mutating: true
+    }),
+    resumeJob: jobId => request("POST", jobPath(jobId, "/resume"), {
+      timeoutMs: HERMES_TIMEOUTS_MS.sessions, mutating: true
+    }),
+    runJob: (jobId, body) => request("POST", jobPath(jobId, "/run"), {
       body, timeoutMs: HERMES_TIMEOUTS_MS.sessions, mutating: true
     }),
     createRun(bodyJson, idempotencyKey) {

@@ -39,6 +39,7 @@ import { createSseParser, formatSseFrame } from "./sse.js";
 import { isHermesTerminal, mapHermesUpstreamStatus } from "./status.js";
 import { sanitizeHermesTimelineEvent } from "./timeline.js";
 import { handleHermesWorkbench } from "./workbench.js";
+import { handleHermesJobs } from "./jobs.js";
 
 const RUN_ROUTE = /^\/api\/hermes\/runs\/(hrun_[a-f0-9]{32})(?:\/(events|cancel|approval|clarify|reconcile|resolve-unknown))?$/;
 const MAX_DELTA_CHARS = 8000;
@@ -286,6 +287,11 @@ export async function handleHermes(request, env, url, ctx, options = {}) {
     if (url.pathname === "/api/hermes/capabilities-panel" && request.method === "GET") {
       return await handleCapabilitiesPanel(env, url, routeOptions);
     }
+
+    const jobsResponse = await handleHermesJobs(request, env, url, {
+      owner, fetchImpl: options.fetchImpl
+    });
+    if (jobsResponse) return jobsResponse;
 
     const workbenchResponse = await handleHermesWorkbench(request, env, url, {
       owner, fetchImpl: options.fetchImpl

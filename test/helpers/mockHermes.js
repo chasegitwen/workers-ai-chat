@@ -34,6 +34,7 @@ export class MockHermes {
     this.calls = [];
     this.runs = new Map();
     this.sessions = new Map();
+    this.jobs = new Map();
     this.idempotency = new Map();
     this.seq = 0;
     this.durableIdempotency = durableIdempotency;
@@ -46,6 +47,7 @@ export class MockHermes {
     this.onClarify = null;
     this.onEvents = null;
     this.onSessions = null;
+    this.onJobs = null;
     this.capabilities = null;
     this.onSkills = null;
     this.onToolsets = null;
@@ -83,6 +85,8 @@ export class MockHermes {
         run_unknown_resolution: this.unknownResolution,
         session_list: true, session_create: true, session_get: true, session_patch: true,
         session_messages: true, session_fork: true,
+        job_list: true, job_create: true, job_get: true, job_patch: true,
+        job_delete: true, job_pause: true, job_resume: true, job_run: true,
         runs_idempotency: { supported: true, durable: this.durableIdempotency, retention_seconds: 86400 }
       },
       endpoints: {
@@ -93,7 +97,15 @@ export class MockHermes {
         session_get: { method: "GET", path: "/api/sessions/{id}" },
         session_patch: { method: "PATCH", path: "/api/sessions/{id}" },
         session_messages: { method: "GET", path: "/api/sessions/{id}/messages" },
-        session_fork: { method: "POST", path: "/api/sessions/{id}/fork" }
+        session_fork: { method: "POST", path: "/api/sessions/{id}/fork" },
+        job_list: { method: "GET", path: "/api/jobs" },
+        job_create: { method: "POST", path: "/api/jobs" },
+        job_get: { method: "GET", path: "/api/jobs/{id}" },
+        job_patch: { method: "PATCH", path: "/api/jobs/{id}" },
+        job_delete: { method: "DELETE", path: "/api/jobs/{id}" },
+        job_pause: { method: "POST", path: "/api/jobs/{id}/pause" },
+        job_resume: { method: "POST", path: "/api/jobs/{id}/resume" },
+        job_run: { method: "POST", path: "/api/jobs/{id}/run" }
       }
     };
   }
@@ -121,6 +133,20 @@ export class MockHermes {
     session.updated_at = Date.now() / 1000;
     if (body.input) session.messages.push({ role: "user", content: body.input, created_at: session.updated_at });
     return run;
+  }
+
+  newJob({ id, name = "Scheduled job", schedule = "0 9 * * *", prompt = "Run the job",
+    deliver = "local", skills = [], repeat = null, enabled = true, paused = false, state, next_run_at,
+    last_run_at = null, last_status = null, last_error = null } = {}) {
+    const jobId = id || crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+    const job = {
+      id: jobId, name, schedule, prompt, deliver, skills: [...skills], enabled: paused ? false : enabled,
+      state: state || ((enabled && !paused) ? "scheduled" : "paused"),
+      next_run_at: next_run_at ?? Date.now() / 1000 + 3600,
+      last_run_at, last_status, last_error, repeat
+    };
+    this.jobs.set(jobId, job);
+    return job;
   }
 
   run(runId) {
@@ -210,6 +236,59 @@ export class MockHermes {
         if (override) return override;
       }
       return json({ object: "list", platform: "api_server", data: this.toolsets });
+    }
+
+    if (url.pathname === "/api/jobs") {
+      if (this.onJobs) {
+        const override = await this.onJobs(call);
+        if (override) return override;
+      }
+      if (method === "GET") {
+        const includeDisabled = url.searchParams.get("include_disabled") === "true";
+        return json({ jobs: [...this.jobs.values()].filter(job => includeDisabled || job.enabled !== false) });
+      }
+      if (method === "POST") {
+        if (typeof call.body?.name !== "string" || !call.body.name.trim()
+          || typeof call.body?.schedule !== "string" || typeof call.body?.prompt !== "string") {
+          return err(400, "invalid_params", "name and schedule are required");
+        }
+        const job = this.newJob(call.body);
+        return json({ job }, 201);
+      }
+    }
+
+    const jobMatch = url.pathname.match(/^\/api\/jobs\/([a-f0-9]{12})(?:\/(pause|resume|run))?$/);
+    if (jobMatch) {
+      if (this.onJobs) {
+        const override = await this.onJobs(call);
+        if (override) return override;
+      }
+      const [, id, action] = jobMatch;
+      const job = this.jobs.get(id);
+      if (!job) return err(404, "job_not_found", "Job not found");
+      if (!action && method === "GET") return json({ job });
+      if (!action && method === "PATCH") {
+        Object.assign(job, call.body);
+        if (call.body?.enabled !== undefined) job.state = call.body.enabled ? "scheduled" : "paused";
+        return json({ job });
+      }
+      if (!action && method === "DELETE") {
+        this.jobs.delete(id);
+        return json({ ok: true });
+      }
+      if (action === "pause" && method === "POST") {
+        Object.assign(job, { enabled: false, state: "paused" });
+        return json({ job });
+      }
+      if (action === "resume" && method === "POST") {
+        Object.assign(job, { enabled: true, state: "scheduled" });
+        return json({ job });
+      }
+      if (action === "run" && method === "POST") {
+        Object.assign(job, { last_run_at: Date.now() / 1000, last_status: "ok", last_error: null });
+        if (call.body?.prompt) job.last_prompt_override = call.body.prompt;
+        return json({ job });
+      }
     }
 
     if (url.pathname === "/api/sessions") {

@@ -154,6 +154,19 @@ describe("Hermes frontend", () => {
     expect(html.indexOf('id="hermesWorkbenchToggle"')).toBeGreaterThan(html.indexOf('id="hermesRouteControls"'));
   });
 
+  it("renders the Hermes-only Jobs entry and explicit delete confirmation", () => {
+    const html = htmlPage();
+    expect(html).toContain('id="hermesJobsToggle"');
+    expect(html).toContain('id="hermesJobsDrawer" class="hermesWorkbenchDrawer"');
+    expect(html).toContain("Hermes Jobs · scheduled jobs and last-run results");
+    expect(html).toContain("仅搜索名称、ID 和计划元数据，不搜索提示词");
+    expect(html.indexOf('id="hermesJobsToggle"')).toBeGreaterThan(html.indexOf('id="hermesRouteControls"'));
+    const deletion = lastDeclaration(pageScript(), "deleteHermesJob");
+    expect(deletion).toContain("删除任务不可撤销");
+    expect(deletion).toContain("if(!confirm(");
+    expect(deletion).toContain('"DELETE"');
+  });
+
   it("sorts workbench sessions newest first before rendering", () => {
     const source = lastDeclaration(pageScript(), "renderHermesWorkbench");
     expect(source).toContain("sort((a,b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))");

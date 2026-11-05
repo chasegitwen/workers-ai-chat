@@ -1696,7 +1696,9 @@ body.dark .projectRuntimeItem{
 .hermesWorkbenchActions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.hermesWorkbenchActions button,.hermesWorkbenchActions select,.hermesWorkbenchProjects button,.hermesWorkbenchToolbar button{border:1px solid var(--border,#d9dee8);border-radius:7px;background:transparent;color:inherit;padding:6px 9px;cursor:pointer}
 .hermesWorkbenchHistory{margin-top:10px;border-top:1px solid var(--border,#d9dee8);padding-top:8px}.hermesWorkbenchMessage{margin:7px 0;padding:8px;border-radius:7px;background:rgba(127,127,127,.08);white-space:pre-wrap;overflow-wrap:anywhere}.hermesWorkbenchMessage b{display:block;font-size:12px;margin-bottom:4px}
 .hermesWorkbenchTitleForm{border:1px solid var(--primary);border-radius:10px;padding:10px;margin-bottom:10px}.hermesWorkbenchTitleForm label{display:block;font-size:12px;margin-bottom:6px}.hermesWorkbenchTitleForm input{width:100%;min-height:38px;border:1px solid var(--border);border-radius:8px;background:inherit;color:inherit;padding:7px 9px;font:inherit}.hermesWorkbenchTitleForm div{display:flex;justify-content:flex-end;gap:6px;margin-top:8px}
+.hermesJobsToolbar{grid-template-columns:minmax(0,1fr) auto auto auto}.hermesJobsEditor{padding:12px 16px;border-bottom:1px solid var(--border,#d9dee8);display:grid;grid-template-columns:1fr 1fr;gap:9px}.hermesJobsEditor label{display:flex;flex-direction:column;gap:4px;font-size:12px}.hermesJobsEditor .wide{grid-column:1/-1}.hermesJobsEditor input,.hermesJobsEditor textarea{font:inherit;border:1px solid var(--border,#d9dee8);border-radius:8px;padding:8px;background:inherit;color:inherit;min-width:0}.hermesJobsEditor textarea{min-height:92px;resize:vertical}.hermesJobsEditorActions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px}.hermesJobsEditorActions button{font:inherit;border:1px solid var(--border,#d9dee8);border-radius:7px;background:transparent;color:inherit;padding:7px 11px;cursor:pointer}.hermesJobsPrompt,.hermesJobsResult{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto;margin:8px 0 0;padding:8px;border-radius:7px;background:rgba(127,127,127,.08)}
 @media(max-width:640px){.hermesWorkbenchToolbar{grid-template-columns:1fr 1fr}.hermesWorkbenchToolbar input{grid-column:1/-1}.hermesWorkbenchDrawer{width:100vw}.hermesWorkbenchHeader{padding:12px}.hermesWorkbenchBody{padding:10px 12px 24px}}
+@media(max-width:640px){.hermesJobsToolbar{grid-template-columns:1fr 1fr}.hermesJobsEditor{grid-template-columns:1fr}.hermesJobsEditor .wide,.hermesJobsEditorActions{grid-column:1}}
 
 .contextSection{
   display:flex;
@@ -3554,6 +3556,33 @@ body.dark .toolErrorNotice{
   </div>
 </aside>
 
+<button id="hermesJobsBackdrop" class="hermesWorkbenchBackdrop" type="button" aria-label="关闭 Hermes 定时任务" hidden></button>
+<aside id="hermesJobsDrawer" class="hermesWorkbenchDrawer" aria-label="Hermes 定时任务" aria-hidden="true" hidden>
+  <div class="hermesWorkbenchHeader">
+    <div><h2>定时任务</h2><p>Hermes Jobs · scheduled jobs and last-run results</p></div>
+    <button id="hermesJobsClose" class="hermesWorkbenchClose" type="button" aria-label="关闭">&times;</button>
+  </div>
+  <div class="hermesWorkbenchToolbar hermesJobsToolbar">
+    <input id="hermesJobsSearch" type="search" autocomplete="off" placeholder="搜索名称、ID 或计划" aria-label="搜索任务名称、ID 或计划">
+    <button id="hermesJobsFilter" type="button" aria-pressed="false">活跃</button>
+    <button id="hermesJobsCreate" type="button">+ 新建</button>
+    <button id="hermesJobsRefresh" type="button">刷新</button>
+  </div>
+  <form id="hermesJobsEditor" class="hermesJobsEditor" hidden>
+    <label>名称<input id="hermesJobName" maxlength="200" required></label>
+    <label>计划<input id="hermesJobSchedule" maxlength="500" placeholder="0 9 * * * 或 documented natural schedule" required></label>
+    <label class="wide">提示词<textarea id="hermesJobPrompt" maxlength="5000" required></textarea></label>
+    <label>Deliver<input id="hermesJobDeliver" maxlength="160" value="local"></label>
+    <label>Skills（逗号分隔）<input id="hermesJobSkills" maxlength="1000"></label>
+    <label>Repeat（可选）<input id="hermesJobRepeat" type="number" min="1" step="1"></label>
+    <div class="hermesJobsEditorActions"><button id="hermesJobsEditorCancel" type="button">取消</button><button type="submit">保存</button></div>
+  </form>
+  <div class="hermesWorkbenchBody">
+    <div id="hermesJobsStatus" class="hermesWorkbenchStatus">仅搜索名称、ID 和计划元数据，不搜索提示词。</div>
+    <div id="hermesJobsList"></div>
+  </div>
+</aside>
+
 <div class="app">
 
   <div class="topbar">
@@ -3669,7 +3698,7 @@ body.dark .toolErrorNotice{
         <label>Provider <select id="hermesProviderSelect" class="modelSelectNative" aria-label="Hermes Provider" aria-hidden="true" tabindex="-1"></select></label>
         <label id="hermesModelField" hidden>基础模型 <select id="hermesModelSelect" class="modelSelectNative" aria-label="Hermes 基础模型" aria-hidden="true" tabindex="-1"></select></label>
         <div class="openClawCatalogLine"><span id="hermesCatalogStatus"></span><button id="hermesCatalogRefresh" type="button">刷新目录</button></div>
-        <div class="hermesCapabilitiesLine"><button id="hermesCapabilitiesToggle" type="button" aria-expanded="false" aria-controls="hermesCapabilitiesPanel">能力</button><button id="hermesWorkbenchToggle" type="button" aria-expanded="false" aria-controls="hermesWorkbenchDrawer">会话 / 项目</button></div>
+        <div class="hermesCapabilitiesLine"><button id="hermesCapabilitiesToggle" type="button" aria-expanded="false" aria-controls="hermesCapabilitiesPanel">能力</button><button id="hermesWorkbenchToggle" type="button" aria-expanded="false" aria-controls="hermesWorkbenchDrawer">会话 / 项目</button><button id="hermesJobsToggle" type="button" aria-expanded="false" aria-controls="hermesJobsDrawer">定时任务</button></div>
         <section id="hermesCapabilitiesPanel" class="hermesCapabilitiesPanel" aria-label="Hermes 能力" hidden>
           <div class="hermesCapabilitiesToolbar">
             <input id="hermesCapabilitiesSearch" type="search" autocomplete="off" placeholder="搜索 Skills / Toolsets" aria-label="搜索 Hermes 能力">
@@ -14354,6 +14383,25 @@ var hermesWorkbenchProjectCreate = document.getElementById("hermesWorkbenchProje
 var hermesWorkbenchStatus = document.getElementById("hermesWorkbenchStatus");
 var hermesWorkbenchList = document.getElementById("hermesWorkbenchList");
 var hermesWorkbenchState = { open:false, loading:false, reloadPending:false, archived:false, sessions:[], projects:[], capabilities:null, error:null, searchTimer:null };
+var hermesJobsToggle = document.getElementById("hermesJobsToggle");
+var hermesJobsDrawer = document.getElementById("hermesJobsDrawer");
+var hermesJobsBackdrop = document.getElementById("hermesJobsBackdrop");
+var hermesJobsClose = document.getElementById("hermesJobsClose");
+var hermesJobsSearch = document.getElementById("hermesJobsSearch");
+var hermesJobsFilter = document.getElementById("hermesJobsFilter");
+var hermesJobsCreate = document.getElementById("hermesJobsCreate");
+var hermesJobsRefresh = document.getElementById("hermesJobsRefresh");
+var hermesJobsEditor = document.getElementById("hermesJobsEditor");
+var hermesJobsEditorCancel = document.getElementById("hermesJobsEditorCancel");
+var hermesJobName = document.getElementById("hermesJobName");
+var hermesJobSchedule = document.getElementById("hermesJobSchedule");
+var hermesJobPrompt = document.getElementById("hermesJobPrompt");
+var hermesJobDeliver = document.getElementById("hermesJobDeliver");
+var hermesJobSkills = document.getElementById("hermesJobSkills");
+var hermesJobRepeat = document.getElementById("hermesJobRepeat");
+var hermesJobsStatus = document.getElementById("hermesJobsStatus");
+var hermesJobsList = document.getElementById("hermesJobsList");
+var hermesJobsState = { open:false, loading:false, reloadPending:false, paused:false, jobs:[], capabilities:null, executionEnabled:true, available:true, error:null, editingId:"", searchTimer:null };
 var hermesRunMount = document.getElementById("hermesRunMount");
 var hermesRunStatus = document.getElementById("hermesRunStatus");
 var hermesRunStatusText = document.getElementById("hermesRunStatusText");
@@ -14944,6 +14992,181 @@ async function renameHermesWorkbenchProject(project){
     await hermesWorkbenchMutation("/api/hermes/projects/" + encodeURIComponent(project.id), "PATCH", { title:title.trim() });
     await loadHermesWorkbench();
   }catch(err){ setContextStatus("Hermes 项目重命名失败：" + hermesErrorText(err)); }
+}
+
+function setHermesJobsOpen(open){
+  hermesJobsState.open = Boolean(open);
+  if(hermesJobsDrawer){
+    hermesJobsDrawer.hidden = !hermesJobsState.open;
+    hermesJobsDrawer.setAttribute("aria-hidden", hermesJobsState.open ? "false" : "true");
+  }
+  if(hermesJobsBackdrop) hermesJobsBackdrop.hidden = !hermesJobsState.open;
+  hermesJobsToggle?.setAttribute("aria-expanded", hermesJobsState.open ? "true" : "false");
+  if(hermesJobsState.open){
+    loadHermesJobs();
+    setTimeout(() => hermesJobsSearch?.focus?.(), 0);
+  }
+}
+
+function hermesJobPaused(job){
+  return job?.enabled === false || String(job?.state || "").toLowerCase() === "paused";
+}
+
+function hermesJobTime(value){
+  return value ? new Date(Number(value)).toLocaleString() : "—";
+}
+
+function openHermesJobEditor(job){
+  if(!hermesJobsEditor) return;
+  hermesJobsState.editingId = job?.id || "";
+  hermesJobsEditor.hidden = false;
+  hermesJobName.value = job?.name || "";
+  hermesJobSchedule.value = job?.schedule || "";
+  hermesJobPrompt.value = job?.prompt || "";
+  hermesJobDeliver.value = job?.deliver || "local";
+  hermesJobSkills.value = Array.isArray(job?.skills) ? job.skills.join(", ") : "";
+  hermesJobRepeat.value = job?.repeat || "";
+  hermesJobName.focus();
+}
+
+function closeHermesJobEditor(){
+  hermesJobsState.editingId = "";
+  hermesJobsEditor?.reset?.();
+  if(hermesJobDeliver) hermesJobDeliver.value = "local";
+  if(hermesJobsEditor) hermesJobsEditor.hidden = true;
+}
+
+function renderHermesJobs(){
+  if(!hermesJobsList) return;
+  const capabilities = hermesJobsState.capabilities || {};
+  hermesJobsFilter.textContent = hermesJobsState.paused ? "暂停 / 禁用" : "活跃";
+  hermesJobsFilter.setAttribute("aria-pressed", hermesJobsState.paused ? "true" : "false");
+  hermesJobsCreate.hidden = !hermesJobsState.executionEnabled || capabilities.create === false;
+  if(hermesJobsState.loading) hermesJobsStatus.textContent = "Hermes 定时任务加载中…";
+  else if(hermesJobsState.error) hermesJobsStatus.textContent = "任务接口不可用：" + hermesErrorText(hermesJobsState.error);
+  else hermesJobsStatus.textContent = "共 " + hermesJobsState.jobs.length + " 个已授权任务 · 仅搜索名称、ID 和计划元数据。";
+  hermesJobsList.innerHTML = "";
+  const query = String(hermesJobsSearch?.value || "").trim().toLowerCase();
+  const jobs = hermesJobsState.jobs.filter(job => {
+    if(hermesJobPaused(job) !== hermesJobsState.paused) return false;
+    if(!query) return true;
+    return [job.name, job.id, job.schedule].some(value => String(value || "").toLowerCase().includes(query));
+  }).sort((a,b) => (Number(a.nextRunAt) || Number.MAX_SAFE_INTEGER) - (Number(b.nextRunAt) || Number.MAX_SAFE_INTEGER)
+    || (Number(b.lastRunAt) || 0) - (Number(a.lastRunAt) || 0));
+  jobs.forEach(job => {
+    const card = document.createElement("article");
+    card.className = "hermesWorkbenchCard";
+    card.dataset.jobId = job.id;
+    const header = document.createElement("div");
+    header.className = "hermesWorkbenchCardHeader";
+    const heading = document.createElement("strong");
+    heading.textContent = job.name || "未命名任务";
+    const state = document.createElement("span");
+    state.className = "hermesWorkbenchCardMeta";
+    state.textContent = job.state || (job.enabled === false ? "paused" : "scheduled");
+    header.append(heading, state);
+    const schedule = document.createElement("div");
+    schedule.className = "hermesWorkbenchCardMeta";
+    schedule.textContent = job.id + " · " + (job.schedule || "计划未知") + " · 下次 " + hermesJobTime(job.nextRunAt) + " · 上次 " + hermesJobTime(job.lastRunAt);
+    const delivery = document.createElement("div");
+    delivery.className = "hermesWorkbenchCardMeta";
+    delivery.textContent = "Deliver: " + (job.deliver || "local") + (job.skills?.length ? " · Skills: " + job.skills.join(", ") : "") + (job.repeat ? " · Repeat: " + job.repeat : "");
+    const promptText = document.createElement("div");
+    promptText.className = "hermesJobsPrompt";
+    promptText.textContent = job.prompt || "（无提示词）";
+    const actions = document.createElement("div");
+    actions.className = "hermesWorkbenchActions";
+    if(hermesJobsState.executionEnabled && capabilities.patch !== false) actions.append(hermesWorkbenchButton("编辑", () => openHermesJobEditor(job)));
+    if(hermesJobsState.executionEnabled && hermesJobPaused(job) && capabilities.resume !== false) actions.append(hermesWorkbenchButton("恢复", () => mutateHermesJob(job, "resume")));
+    if(hermesJobsState.executionEnabled && !hermesJobPaused(job) && capabilities.pause !== false) actions.append(hermesWorkbenchButton("暂停", () => mutateHermesJob(job, "pause")));
+    if(hermesJobsState.executionEnabled && capabilities.run !== false) actions.append(hermesWorkbenchButton("立即运行", () => runHermesJobNow(job)));
+    const result = document.createElement("div");
+    result.className = "hermesJobsResult";
+    result.hidden = true;
+    result.textContent = "上次运行：" + hermesJobTime(job.lastRunAt) + "\\n状态：" + (job.lastStatus || "尚无结果") + (job.lastError ? "\\n错误：" + job.lastError : "");
+    actions.append(hermesWorkbenchButton("上次结果", () => { result.hidden = !result.hidden; }));
+    if(hermesJobsState.executionEnabled && capabilities.delete !== false) actions.append(hermesWorkbenchButton("删除", () => deleteHermesJob(job), "需要输入任务 ID 确认"));
+    card.append(header, schedule, delivery, promptText, actions, result);
+    hermesJobsList.appendChild(card);
+  });
+  if(!jobs.length && !hermesJobsState.loading){
+    const empty = document.createElement("div");
+    empty.className = "hermesWorkbenchStatus";
+    empty.textContent = hermesJobsState.error ? "无法读取 Hermes Jobs API。" : (query ? "没有匹配的任务" : (hermesJobsState.paused ? "没有暂停或禁用任务" : "没有活跃任务"));
+    hermesJobsList.appendChild(empty);
+  }
+}
+
+async function loadHermesJobs(){
+  if(hermesJobsState.loading){ hermesJobsState.reloadPending = true; return; }
+  hermesJobsState.loading = true;
+  hermesJobsState.error = null;
+  renderHermesJobs();
+  try{
+    const res = await fetch("/api/hermes/jobs");
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok || !data.ok) throw data.error || { code:"hermes_jobs_unavailable", message:"任务接口不可用" };
+    hermesJobsState.jobs = Array.isArray(data.jobs) ? data.jobs : [];
+    hermesJobsState.capabilities = data.capabilities || null;
+    hermesJobsState.executionEnabled = data.executionEnabled !== false;
+    hermesJobsState.available = data.available !== false;
+    hermesJobsState.error = data.upstreamError || (data.available === false ? { code:"hermes_jobs_unavailable", message:"Hermes 未提供 Jobs API" } : null);
+  }catch(err){
+    hermesJobsState.jobs = [];
+    hermesJobsState.available = false;
+    hermesJobsState.error = err?.code ? err : { code:"network", message:err?.message || "网络错误" };
+  }finally{
+    hermesJobsState.loading = false;
+    renderHermesJobs();
+    if(hermesJobsState.reloadPending){ hermesJobsState.reloadPending = false; loadHermesJobs(); }
+  }
+}
+
+async function hermesJobsMutation(path, method, body){
+  const res = await fetch(path, {
+    method,
+    headers:{ "Content-Type":"application/json; charset=utf-8" },
+    body:body === undefined ? undefined : JSON.stringify(body)
+  });
+  const data = await res.json().catch(() => ({}));
+  if(!res.ok || !data.ok) throw data.error || { code:"hermes_jobs_failed", message:"任务操作失败" };
+  return data;
+}
+
+async function saveHermesJob(event){
+  event.preventDefault();
+  const payload = {
+    name:hermesJobName.value.trim(), schedule:hermesJobSchedule.value.trim(), prompt:hermesJobPrompt.value.trim(),
+    deliver:hermesJobDeliver.value.trim() || "local",
+    skills:hermesJobSkills.value.split(",").map(value => value.trim()).filter(Boolean)
+  };
+  if(hermesJobRepeat.value) payload.repeat = Number(hermesJobRepeat.value);
+  try{
+    const editingId = hermesJobsState.editingId;
+    await hermesJobsMutation(editingId ? "/api/hermes/jobs/" + encodeURIComponent(editingId) : "/api/hermes/jobs", editingId ? "PATCH" : "POST", payload);
+    closeHermesJobEditor();
+    await loadHermesJobs();
+  }catch(err){ setContextStatus("Hermes 任务保存失败：" + hermesErrorText(err)); }
+}
+
+async function mutateHermesJob(job, action){
+  try{
+    await hermesJobsMutation("/api/hermes/jobs/" + encodeURIComponent(job.id) + "/" + action, "POST", {});
+    await loadHermesJobs();
+  }catch(err){ setContextStatus("Hermes 任务操作失败：" + hermesErrorText(err)); }
+}
+
+async function runHermesJobNow(job){
+  if(!confirm("立即运行任务“" + (job.name || job.id) + "”？")) return;
+  await mutateHermesJob(job, "run");
+}
+
+async function deleteHermesJob(job){
+  if(!confirm("删除任务不可撤销。确认删除“" + (job.name || job.id) + "”（" + job.id + "）？")) return;
+  try{
+    await hermesJobsMutation("/api/hermes/jobs/" + encodeURIComponent(job.id), "DELETE");
+    await loadHermesJobs();
+  }catch(err){ setContextStatus("Hermes 任务删除失败：" + hermesErrorText(err)); }
 }
 
 function syncHermesKindButton(){
@@ -15716,7 +15939,11 @@ function initHermesUi(){
   hermesCapabilitiesRefresh?.addEventListener("click", () => loadHermesCapabilities(true));
   hermesCapabilitiesSearch?.addEventListener("input", renderHermesCapabilities);
   hermesCapabilitiesCategory?.addEventListener("change", renderHermesCapabilities);
-  hermesWorkbenchToggle?.addEventListener("click", () => setHermesWorkbenchOpen(!hermesWorkbenchState.open));
+  hermesWorkbenchToggle?.addEventListener("click", () => {
+    const opening = !hermesWorkbenchState.open;
+    if(opening) setHermesJobsOpen(false);
+    setHermesWorkbenchOpen(opening);
+  });
   hermesWorkbenchClose?.addEventListener("click", () => setHermesWorkbenchOpen(false));
   hermesWorkbenchBackdrop?.addEventListener("click", () => setHermesWorkbenchOpen(false));
   hermesWorkbenchRefresh?.addEventListener("click", loadHermesWorkbench);
@@ -15729,6 +15956,22 @@ function initHermesUi(){
     hermesWorkbenchState.searchTimer = setTimeout(loadHermesWorkbench, 250);
   });
   hermesWorkbenchProjectCreate?.addEventListener("click", createHermesWorkbenchProject);
+  hermesJobsToggle?.addEventListener("click", () => {
+    const opening = !hermesJobsState.open;
+    if(opening) setHermesWorkbenchOpen(false);
+    setHermesJobsOpen(opening);
+  });
+  hermesJobsClose?.addEventListener("click", () => setHermesJobsOpen(false));
+  hermesJobsBackdrop?.addEventListener("click", () => setHermesJobsOpen(false));
+  hermesJobsRefresh?.addEventListener("click", loadHermesJobs);
+  hermesJobsCreate?.addEventListener("click", () => openHermesJobEditor(null));
+  hermesJobsEditorCancel?.addEventListener("click", closeHermesJobEditor);
+  hermesJobsEditor?.addEventListener("submit", saveHermesJob);
+  hermesJobsFilter?.addEventListener("click", () => { hermesJobsState.paused = !hermesJobsState.paused; renderHermesJobs(); });
+  hermesJobsSearch?.addEventListener("input", () => {
+    clearTimeout(hermesJobsState.searchTimer);
+    hermesJobsState.searchTimer = setTimeout(renderHermesJobs, 150);
+  });
   hermesClarifySubmit?.addEventListener("click", submitHermesClarify);
   hermesRunCollapseBtn?.addEventListener("click", () => {
     const currentState = hermesPanelStateOverride || hermesPanelState;

@@ -307,9 +307,20 @@ describe("Hermes read-only capabilities panel", () => {
       error: {
         code: "hermes_upstream_error",
         upstreamStatus: 500,
-        message: expect.stringContaining("Known Hermes upstream v0.22.x GET /v1/skills defect")
+        knownIssue: "hermes_skills_enumerate_v022",
+        message: expect.stringContaining("Suspected Hermes upstream v0.22.x GET /v1/skills defect")
       }
     });
+    mock.onSkills = () => new Response(JSON.stringify({
+      error: { message: "skills storage unavailable", type: "server_error" }
+    }), { status: 500, headers: { "Content-Type": "application/json" } });
+    const other = await call("GET", "/api/hermes/capabilities-panel");
+    expect(other.json.skills.error).toMatchObject({
+      code: "hermes_upstream_error",
+      upstreamStatus: 500,
+      message: "skills storage unavailable"
+    });
+    expect(other.json.skills.error.knownIssue).toBeUndefined();
     expect(response.json.toolsets).toMatchObject({ status: "available" });
     expect(response.json.toolsets.items).toHaveLength(mock.toolsets.length);
   });

@@ -88,7 +88,8 @@ function clarifyKnownSkillsEnumerationError(error) {
   if (error?.upstreamStatus !== 500 || !/Failed to enumerate skills/i.test(error.message || "")) return error;
   return {
     ...error,
-    message: "Known Hermes upstream v0.22.x GET /v1/skills defect (HTTP 500); not a Worker/Access authentication failure; Toolsets are unaffected"
+    knownIssue: "hermes_skills_enumerate_v022",
+    message: "Suspected Hermes upstream v0.22.x GET /v1/skills defect (HTTP 500 Failed to enumerate skills); not a Worker/Access authentication failure"
   };
 }
 

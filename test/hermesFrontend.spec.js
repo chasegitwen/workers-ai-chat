@@ -181,11 +181,17 @@ describe("Hermes frontend", () => {
     const { api } = sandbox();
     const known = { status: "error", items: [], error: {
       code: "hermes_upstream_error", upstreamStatus: 500,
-      message: "Known Hermes upstream v0.22.x GET /v1/skills defect (HTTP 500)"
+      knownIssue: "hermes_skills_enumerate_v022",
+      message: "Suspected Hermes upstream v0.22.x GET /v1/skills defect (HTTP 500)"
     } };
-    expect(api.hermesCapabilitySectionText(known, "Skills")).toContain("Hermes 上游已知缺陷");
+    expect(api.hermesCapabilitySectionText(known, "Skills")).toContain("疑似 Hermes 上游缺陷");
     expect(api.hermesCapabilitySectionText(known, "Skills")).toContain("不是 Worker/Access 鉴权失败");
+    expect(api.hermesCapabilitySectionText(known, "Skills")).not.toContain("Toolsets 不受影响");
     expect(api.hermesCapabilitySectionText(known, "Toolsets")).toContain("加载失败");
+    const other = { status: "error", items: [], error: {
+      code: "hermes_upstream_error", upstreamStatus: 500, message: "skills storage unavailable"
+    } };
+    expect(api.hermesCapabilitySectionText(other, "Skills")).toContain("加载失败");
   });
 
   it("switches the selector to Hermes and hides model/OpenClaw controls", () => {

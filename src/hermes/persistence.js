@@ -19,10 +19,23 @@ function byteLength(value) {
 
 export function serializeCappedTimeline(events, maxBytes = HERMES_TIMELINE_MAX_BYTES) {
   const retained = Array.isArray(events) ? [...events] : [];
+  let truncated = false;
   let json = JSON.stringify(retained);
   while (retained.length && byteLength(json) > maxBytes) {
-    retained.shift();
+    truncated = true;
+    // Drop ordinary events first; keep a single truncation marker if present.
+    const dropAt = retained.findIndex(event => event?.event !== "diagnostics.timeline_truncated");
+    if (dropAt < 0) break;
+    retained.splice(dropAt, 1);
     json = JSON.stringify(retained);
+  }
+  if (truncated && !retained.some(event => event?.event === "diagnostics.timeline_truncated")) {
+    retained.unshift({ event: "diagnostics.timeline_truncated" });
+    json = JSON.stringify(retained);
+    while (retained.length > 1 && byteLength(json) > maxBytes) {
+      retained.splice(1, 1);
+      json = JSON.stringify(retained);
+    }
   }
   return json;
 }
@@ -38,7 +51,39 @@ function latestToolFailure(row) {
   }
 }
 
+function countToolFailures(row) {
+  if (!row?.timeline_json) return 0;
+  try {
+    const timeline = JSON.parse(row.timeline_json);
+    if (!Array.isArray(timeline)) return 0;
+    return timeline.filter(event => event?.event === "tool.completed" && event.error === true).length;
+  } catch (err) {
+    return 0;
+  }
+}
+
 function compactRecord(row, now) {
+  const toolFailureCount = countToolFailures(row);
+  // M2: a completed run is not a fault even if intermediate tools failed and recovered.
+  if (row.status === "completed") {
+    return {
+      category: "unrecognized",
+      categoryConfidence: "confirmed",
+      isFault: false,
+      kind: "completed",
+      status: "completed",
+      ...(row.status_detail ? { statusDetail: safeMessage(row.status_detail, [], 160) } : {}),
+      sourceLayer: row.upstream_run_id ? "hermes" : "worker",
+      summary: toolFailureCount
+        ? ("Run completed successfully after " + toolFailureCount + " intermediate tool failure(s).")
+        : "Run completed successfully.",
+      occurredAt: Number(row.completed_at || row.updated_at || now) || now,
+      updatedAt: now,
+      runId: row.id,
+      toolFailureCount,
+      ...(row.upstream_session_id ? { sessionId: String(row.upstream_session_id).slice(0, 256) } : {})
+    };
+  }
   const toolFailure = latestToolFailure(row);
   const record = buildHermesErrorRecord({
     occurredAt: Number(row.completed_at || row.updated_at || now) || now,
@@ -46,10 +91,11 @@ function compactRecord(row, now) {
     runId: row.id,
     sessionId: row.upstream_session_id || undefined,
     originalCode: row.error_code || undefined,
-    summary: toolFailure?.result || row.error_message || row.status_detail || row.status,
+    summary: row.error_message || row.status_detail || row.status,
     status: row.status,
     statusDetail: row.status_detail,
-    timelineToolError: Boolean(toolFailure),
+    // Only treat tool failure as the classifier when the run did not complete successfully.
+    timelineToolError: Boolean(toolFailure) && row.status !== "completed",
     timelineSeq: toolFailure?.seq,
     tool: toolFailure?.tool,
     ambiguous: row.status === "submission_unknown"
@@ -67,6 +113,7 @@ function compactRecord(row, now) {
     occurredAt: record.occurredAt,
     updatedAt: now,
     runId: row.id,
+    toolFailureCount,
     ...(row.upstream_session_id ? { sessionId: String(row.upstream_session_id).slice(0, 256) } : {})
   };
 }
@@ -93,7 +140,7 @@ export function serializeDiagnosticSummary(summary, maxBytes = HERMES_DIAGNOSTIC
     while (text && byteLength(json) > maxBytes) {
       const nextLength = Math.max(0, Math.floor(text.length * 0.75));
       text = text.slice(0, nextLength);
-      capped[key] = text ? text + "…" : "[truncated to size cap]";
+      capped[key] = text ? text + "..." : "[truncated to size cap]";
       json = JSON.stringify(capped);
     }
   }
@@ -144,7 +191,7 @@ export async function pruneHermesDiagnosticPayloads(env, { now = Date.now(), lim
        WHERE id IN (
          SELECT id FROM hermes_runs
          WHERE COALESCE(completed_at, updated_at, created_at) < ?
-           AND (timeline_json IS NOT NULL OR diagnostics_json IS NOT NULL OR diagnostics_updated_at IS NOT NULL)
+           AND (timeline_json IS NOT NULL OR diagnostics_json IS NOT NULL)
          ORDER BY COALESCE(completed_at, updated_at, created_at) ASC
          LIMIT ?
        )`

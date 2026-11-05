@@ -30,6 +30,7 @@ function safeTool(value) {
 export function sanitizeHermesTimelineEvent(eventName, data = {}, seq = null) {
   const event = String(eventName || data.event || "");
   const out = { event, seq: Number.isInteger(seq) ? seq : (Number.isInteger(data.seq) ? data.seq : null) };
+  if (event === "diagnostics.timeline_truncated") return { event: "diagnostics.timeline_truncated", seq: null };
   if (event === "tool.started") {
     out.tool = safeTool(data.tool);
     out.preview = previewValue(data.args_preview ?? data.preview ?? data.args, ARG_PREVIEW_LIMIT);

@@ -343,7 +343,7 @@ export async function handleHermes(request, env, url, ctx, options = {}) {
     }
 
     const diagnosticsResponse = await handleHermesDiagnostics(request, env, url, {
-      owner, fetchImpl: options.fetchImpl
+      owner, fetchImpl: options.fetchImpl, ctx: routeOptions.ctx
     });
     if (diagnosticsResponse) return jsonResponse(await diagnosticsResponse);
 

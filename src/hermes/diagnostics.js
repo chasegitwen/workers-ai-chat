@@ -63,9 +63,14 @@ function timelineInfo(row) {
   try {
     const parsed = JSON.parse(row.timeline_json);
     if (!Array.isArray(parsed)) return { timeline: [], coverage: "expired_or_missing" };
-    const timeline = publicHermesRun(row)?.timeline || [];
-    if (!timeline.length) return { timeline: [], coverage: "empty" };
-    return { timeline, coverage: timeline.length >= 50 ? "truncated" : "available" };
+    const timeline = (publicHermesRun(row)?.timeline || [])
+      .filter(event => event?.event !== "diagnostics.timeline_truncated");
+    const rawTruncated = parsed.some(event => event?.event === "diagnostics.timeline_truncated");
+    if (!timeline.length && !rawTruncated) return { timeline: [], coverage: "empty" };
+    return {
+      timeline,
+      coverage: (rawTruncated || timeline.length >= 50) ? "truncated" : "available"
+    };
   } catch (err) {
     return { timeline: [], coverage: "expired_or_missing" };
   }
@@ -185,8 +190,17 @@ function diagnosticRun(row, { detail = false, now = Date.now() } = {}) {
   };
 }
 
+let lastOpportunisticPruneAt = 0;
+const OPPORTUNISTIC_PRUNE_INTERVAL_MS = 60 * 1000;
+
 async function listDiagnostics(env, url, owner) {
-  await pruneHermesDiagnosticPayloads(env, { limit: 50 });
+  // M1: throttle opportunistic retention so most list GETs pay zero prune cost,
+  // and always await when it does run (Vitest isolated storage cannot outlive the request).
+  const now = Date.now();
+  if (now - lastOpportunisticPruneAt >= OPPORTUNISTIC_PRUNE_INTERVAL_MS) {
+    lastOpportunisticPruneAt = now;
+    await pruneHermesDiagnosticPayloads(env, { limit: 50 });
+  }
   const window = parseWindow(url.searchParams.get("window"));
   const filters = parseStatusFilters(url);
   const limit = integerParam(url, "limit", 30, 1, 100);
@@ -261,7 +275,7 @@ async function diagnosticsDetail(env, runId, owner, { fetchImpl } = {}) {
   };
 }
 
-export async function handleHermesDiagnostics(request, env, url, { owner, fetchImpl } = {}) {
+export async function handleHermesDiagnostics(request, env, url, { owner, fetchImpl, ctx } = {}) {
   if (url.pathname === "/api/hermes/diagnostics/runs") {
     if (request.method !== "GET") return null;
     return listDiagnostics(env, url, owner);

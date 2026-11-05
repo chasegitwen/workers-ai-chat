@@ -1453,7 +1453,7 @@ describe("Hermes run diagnostics", () => {
     expect(await slotHolder()).toBeNull();
   });
 
-  it("caps serialized timelines by dropping oldest events", async () => {
+  it("caps serialized timelines by dropping oldest events and marks truncation", async () => {
     const id = await insertDiagnosticRun({ status:"completed" });
     const events = Array.from({ length:50 }, (_, seq) => ({
       event:"tool.completed", tool:"terminal", error:false, result:"x".repeat(1000), seq
@@ -1462,9 +1462,37 @@ describe("Hermes run diagnostics", () => {
     const row = await env.DB.prepare("SELECT timeline_json FROM hermes_runs WHERE id = ?").bind(id).first();
     const timeline = JSON.parse(row.timeline_json);
     expect(new TextEncoder().encode(row.timeline_json).byteLength).toBeLessThanOrEqual(HERMES_TIMELINE_MAX_BYTES);
+    expect(timeline[0]).toMatchObject({ event:"diagnostics.timeline_truncated" });
     expect(timeline.length).toBeLessThan(50);
     expect(timeline.at(-1).seq).toBe(49);
-    expect(timeline[0].seq).toBeGreaterThan(0);
+    const detail = await call("GET", "/api/hermes/diagnostics/runs/" + id);
+    expect(detail.json.run.timelineCoverage).toBe("truncated");
+    expect(detail.json.run.timeline.every(event => event.event !== "diagnostics.timeline_truncated")).toBe(true);
+  });
+
+  it("records completed runs as non-fault even after intermediate tool failures", async () => {
+    const id = await insertDiagnosticRun({
+      status:"completed",
+      completedAt:Date.now(),
+      timelineJson:JSON.stringify([
+        { event:"tool.completed", tool:"terminal", error:true, result:"boom-secret", seq:1 },
+        { event:"tool.completed", tool:"terminal", error:false, result:"recovered", seq:2 }
+      ])
+    });
+    expect(await persistHermesDiagnosticSummary(testEnv(), id)).toBe(true);
+    const row = await env.DB.prepare("SELECT diagnostics_json FROM hermes_runs WHERE id = ?").bind(id).first();
+    const summary = JSON.parse(row.diagnostics_json);
+    expect(summary).toMatchObject({ status:"completed", isFault:false, kind:"completed", toolFailureCount:1 });
+    expect(summary.category).not.toBe("tool_execution");
+    expect(row.diagnostics_json).not.toContain("boom-secret");
+  });
+
+  it("uses a prune predicate that matches the retention index shape", async () => {
+    const plan = await env.DB.prepare(
+      "EXPLAIN QUERY PLAN SELECT id FROM hermes_runs WHERE COALESCE(completed_at, updated_at, created_at) < ? AND (timeline_json IS NOT NULL OR diagnostics_json IS NOT NULL) ORDER BY COALESCE(completed_at, updated_at, created_at) ASC LIMIT ?"
+    ).bind(Date.now(), 1).all();
+    const detail = (plan.results || []).map(row => String(row.detail || "")).join(" | ");
+    expect(detail).toMatch(/idx_hermes_runs_diagnostics_updated/i);
   });
 
   it("prunes only old bulky payloads in a bounded batch and keeps row skeletons", async () => {

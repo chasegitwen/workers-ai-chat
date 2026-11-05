@@ -3,7 +3,7 @@
 
 import { ensureConversation } from "../api/history.js";
 import { createHermesClient, isHermesSessionId } from "./client.js";
-import { ORACLE_HERMES_INSTANCE_ID, hermesInstance } from "./config.js";
+import { ORACLE_HERMES_INSTANCE_ID, hermesExecutionEnabled, hermesInstance } from "./config.js";
 import { HermesError, publicError, redactSecrets } from "./errors.js";
 
 const PROJECT_ID_PATTERN = /^hproj_[a-f0-9]{32}$/;
@@ -168,24 +168,55 @@ function requireCapability(capabilities, name) {
   if (!capabilities[name]) throw new HermesError("hermes_session_capability_missing", "Hermes does not advertise this sessions operation", { httpStatus: 503 });
 }
 
-function messageContent(value, secrets) {
-  const raw = typeof value === "string" ? value : Array.isArray(value)
-    ? value.filter(item => item && (item.type === "text" || typeof item.text === "string")).map(item => item.text || "").join("\n")
-    : "";
-  return redactSecrets(raw, secrets).slice(0, 100000);
+const MESSAGE_CONTENT_LIMIT = Object.freeze({
+  user: 8000,
+  assistant: 8000,
+  tool: 500,
+  system: 0
+});
+const REDACTION_INPUT_LIMIT = 4000;
+
+function rawMessageText(value) {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value
+      .filter(item => item && (item.type === "text" || typeof item.text === "string"))
+      .map(item => item.text || "")
+      .join("\n");
+  }
+  return "";
+}
+
+// Bound before redaction (timeline policy): never ship unbounded tool/system payloads to the browser.
+function messageContent(value, secrets, role = "assistant") {
+  if (role === "system") return { content: "", omitted: true, truncated: false };
+  const limit = MESSAGE_CONTENT_LIMIT[role] ?? MESSAGE_CONTENT_LIMIT.assistant;
+  const raw = rawMessageText(value);
+  const bounded = raw.slice(0, Math.min(raw.length, REDACTION_INPUT_LIMIT));
+  const redacted = redactSecrets(bounded, secrets);
+  const truncated = raw.length > limit || raw.length > REDACTION_INPUT_LIMIT || redacted.length > limit;
+  return { content: redacted.slice(0, limit), omitted: false, truncated };
 }
 
 function sanitizeMessages(body, secrets) {
-  const source = Array.isArray(body) ? body : (Array.isArray(body?.messages) ? body.messages : (Array.isArray(body?.data) ? body.data : []));
-  return source.slice(0, MAX_EXPORT_MESSAGES).map((item, index) => ({
-    index,
-    role: ["user", "assistant", "system", "tool"].includes(item?.role) ? item.role : "assistant",
-    content: messageContent(item?.content ?? item?.text, secrets),
-    createdAt: upstreamTime(item),
-    toolName: redactSecrets(text(item?.tool_name || item?.name, 120), secrets) || null,
-    toolCallId: redactSecrets(text(item?.tool_call_id, 160), secrets) || null,
-    status: redactSecrets(text(item?.status, 80), secrets) || null
-  }));
+  const source = Array.isArray(body)
+    ? body
+    : (Array.isArray(body?.messages) ? body.messages : (Array.isArray(body?.data) ? body.data : []));
+  return source.slice(0, MAX_EXPORT_MESSAGES).map((item, index) => {
+    const role = ["user", "assistant", "system", "tool"].includes(item?.role) ? item.role : "assistant";
+    const content = messageContent(item?.content ?? item?.text, secrets, role);
+    return {
+      index,
+      role,
+      content: content.content,
+      contentOmitted: content.omitted || undefined,
+      truncated: content.truncated || undefined,
+      createdAt: upstreamTime(item),
+      toolName: role === "tool" ? (redactSecrets(text(item?.tool_name || item?.name, 120), secrets) || null) : null,
+      toolCallId: role === "tool" ? (redactSecrets(text(item?.tool_call_id, 160), secrets) || null) : null,
+      status: redactSecrets(text(item?.status, 80), secrets) || null
+    };
+  });
 }
 
 function markdownExport(session, messages) {
@@ -286,6 +317,9 @@ export async function handleHermesWorkbench(request, env, url, { owner, fetchImp
   }
 
   if (!id && request.method === "POST") {
+    if (!hermesExecutionEnabled(env)) {
+      throw new HermesError("hermes_execution_disabled", "Hermes execution is disabled", { httpStatus: 403 });
+    }
     const requestedInstance = instanceId(url.searchParams.get("instance_id") || ORACLE_HERMES_INSTANCE_ID);
     const client = createHermesClient(env, requestedInstance, { fetchImpl });
     const capabilities = await sessionCapabilities(client);
@@ -320,6 +354,9 @@ export async function handleHermesWorkbench(request, env, url, { owner, fetchImp
     if (!title && !hasProject) throw new HermesError("hermes_session_update_required", "A title or project assignment is required", { httpStatus: 400 });
     if (assignedProject) await requireOwnedProject(env.DB, owner, assignedProject);
     if (title) {
+      if (!hermesExecutionEnabled(env)) {
+        throw new HermesError("hermes_execution_disabled", "Hermes execution is disabled", { httpStatus: 403 });
+      }
       requireCapability(ownedCapabilities, "patch");
       await ownedClient.patchSession(id, { title });
     }
@@ -363,6 +400,9 @@ export async function handleHermesWorkbench(request, env, url, { owner, fetchImp
     return Response.json({ ok: true, sessionId: id, messages: sanitizeMessages(result.body, ownedClient.secrets) });
   }
   if (action === "fork" && request.method === "POST") {
+    if (!hermesExecutionEnabled(env)) {
+      throw new HermesError("hermes_execution_disabled", "Hermes execution is disabled", { httpStatus: 403 });
+    }
     requireCapability(ownedCapabilities, "fork");
     const title = text(body.title) || (owned.title ? owned.title + " (fork)" : "Forked session");
     const result = await ownedClient.forkSession(id, { title });
@@ -394,7 +434,15 @@ export async function handleHermesWorkbench(request, env, url, { owner, fetchImp
         conversationId = raced.conversation_id;
       }
     }
-    return Response.json({ ok: true, resume: { sessionId: id, conversationId, projectId: owned.conversationProjectId || coreProjectId, instanceId: owned.instanceId } });
+    const bound = await env.DB.prepare(
+      "SELECT conversation_id, project_id FROM hermes_conversation_bindings WHERE hermes_session_id = ? AND owner_username = ?"
+    ).bind(id, owner).first();
+    return Response.json({ ok: true, resume: {
+      sessionId: id,
+      conversationId: bound?.conversation_id || conversationId,
+      projectId: bound?.project_id || owned.conversationProjectId || coreProjectId,
+      instanceId: owned.instanceId
+    } });
   }
   if (action === "export" && request.method === "GET") {
     requireCapability(ownedCapabilities, "messages");
@@ -408,11 +456,11 @@ export async function handleHermesWorkbench(request, env, url, { owner, fetchImp
     const safeName = (session.title || "hermes-session").replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 80) || "hermes-session";
     if (format === "json") {
       return new Response(JSON.stringify({ session, messages }, null, 2), { headers: {
-        "Content-Type": "application/json; charset=utf-8", "Content-Disposition": `attachment; filename="${safeName}.json"`
+        "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "Content-Disposition": `attachment; filename="${safeName}.json"`
       } });
     }
     return new Response(markdownExport(session, messages), { headers: {
-      "Content-Type": "text/markdown; charset=utf-8", "Content-Disposition": `attachment; filename="${safeName}.md"`
+      "Content-Type": "text/markdown; charset=utf-8", "Cache-Control": "no-store", "Content-Disposition": `attachment; filename="${safeName}.md"`
     } });
   }
   if (action === "" || action) throw new HermesError("hermes_method_not_allowed", "Method not allowed", { httpStatus: 405 });

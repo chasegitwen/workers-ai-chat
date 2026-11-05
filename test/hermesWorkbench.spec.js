@@ -30,12 +30,12 @@ async function cookie(user) {
   return "wa_session=" + await createSession(user, testEnv());
 }
 
-async function call(method, path, { body, user = "admin" } = {}) {
+async function call(method, path, { body, user = "admin", envExtra = {} } = {}) {
   const response = await worker.fetch(new Request(ORIGIN + path, {
     method,
     headers: { Cookie: await cookie(user), ...(body ? { "Content-Type": "application/json" } : {}) },
     body: body ? JSON.stringify(body) : undefined
-  }), testEnv(), { waitUntil() {} });
+  }), testEnv(envExtra), { waitUntil() {} });
   const text = await response.text();
   let json = null;
   try { json = JSON.parse(text); } catch (err) { json = null; }
@@ -179,6 +179,101 @@ describe("Hermes sessions and projects workbench", () => {
     expect(denied.status).toBe(404);
     const list = await call("GET", "/api/hermes/projects", { user: "other" });
     expect(list.json.projects).toEqual([]);
+  });
+
+  it("bounds tool message content and omits system content in history", async () => {
+    const toolPayload = "TOOL_SECRET_" + "x".repeat(1200);
+    const session = await ownSession({
+      id: "session_bound_msgs",
+      messages: [
+        { role: "system", content: "SYSTEM_SHOULD_OMIT " + "y".repeat(200) },
+        { role: "user", content: "please run" },
+        { role: "tool", name: "terminal", content: toolPayload },
+        { role: "assistant", content: "done" }
+      ]
+    });
+    const result = await call("GET", `/api/hermes/sessions/${session.id}/messages`);
+    expect(result.status).toBe(200);
+    const byRole = Object.fromEntries(result.json.messages.map(item => [item.role, item]));
+    expect(byRole.system.content).toBe("");
+    expect(byRole.system.contentOmitted).toBe(true);
+    expect(byRole.tool.content.length).toBeLessThanOrEqual(500);
+    expect(byRole.tool.truncated).toBe(true);
+    expect(result.text).not.toContain("SYSTEM_SHOULD_OMIT");
+    expect(byRole.tool.content).not.toContain(toolPayload);
+    expect(byRole.user.content).toBe("please run");
+  });
+
+  it("blocks create, fork, and title rename when Hermes execution is disabled", async () => {
+    const session = await ownSession({ id: "session_exec_off" });
+    const before = mock.calls.length;
+    const disabled = { HERMES_EXECUTION_ENABLED: "0" };
+    const created = await call("POST", "/api/hermes/sessions", { body: { title: "Nope" }, envExtra: disabled });
+    expect(created.status).toBe(403);
+    expect(created.json.error.code).toBe("hermes_execution_disabled");
+    const forked = await call("POST", `/api/hermes/sessions/${session.id}/fork`, {
+      body: { title: "Nope fork" }, envExtra: disabled
+    });
+    expect(forked.status).toBe(403);
+    expect(forked.json.error.code).toBe("hermes_execution_disabled");
+    const renamed = await call("PATCH", `/api/hermes/sessions/${session.id}`, {
+      body: { title: "Nope rename" }, envExtra: disabled
+    });
+    expect(renamed.status).toBe(403);
+    expect(renamed.json.error.code).toBe("hermes_execution_disabled");
+    const mutating = mock.calls.slice(before).filter(item => ["POST", "PATCH", "DELETE"].includes(item.method));
+    expect(mutating).toEqual([]);
+  });
+
+  it("still allows local project assignment when Hermes execution is disabled", async () => {
+    const session = await ownSession({ id: "session_local_assign" });
+    const project = await call("POST", "/api/hermes/projects", { body: { title: "Local only" } });
+    const assigned = await call("PATCH", `/api/hermes/sessions/${session.id}`, {
+      body: { project_id: project.json.project.id },
+      envExtra: { HERMES_EXECUTION_ENABLED: "0" }
+    });
+    expect(assigned.status).toBe(200);
+    expect(assigned.json.session.projectId).toBe(project.json.project.id);
+    expect(mock.calls.some(item => item.method === "PATCH")).toBe(false);
+  });
+
+  it("exports with Cache-Control no-store and bounded tool content", async () => {
+    const session = await ownSession({
+      id: "session_export_bound",
+      title: "ExportBound",
+      messages: [
+        { role: "system", content: "sys-secret-should-omit" },
+        { role: "tool", name: "shell", content: "z".repeat(900) }
+      ]
+    });
+    const json = await call("GET", `/api/hermes/sessions/${session.id}/export?format=json`);
+    expect(json.status).toBe(200);
+    expect(json.headers.get("Cache-Control")).toBe("no-store");
+    expect(json.text).not.toContain("sys-secret-should-omit");
+    const body = JSON.parse(json.text);
+    const tool = body.messages.find(item => item.role === "tool");
+    expect(tool.content.length).toBeLessThanOrEqual(500);
+    expect(tool.truncated).toBe(true);
+    const system = body.messages.find(item => item.role === "system");
+    expect(system.content).toBe("");
+    expect(system.contentOmitted).toBe(true);
+  });
+
+  it("resume returns the bound conversation projectId after re-read", async () => {
+    const session = await ownSession({ id: "session_resume_bound" });
+    const project = await call("POST", "/api/hermes/projects", { body: { title: "Resume Project" } });
+    const projectId = project.json.project.id;
+    await env.DB.prepare(
+      "UPDATE hermes_conversation_bindings SET project_id = ? WHERE hermes_session_id = ?"
+    ).bind(projectId, session.id).run();
+    await env.DB.prepare(
+      "UPDATE conversations SET project_id = ? WHERE id = ?"
+    ).bind(projectId, session.conversationId).run();
+    const resumed = await call("POST", `/api/hermes/sessions/${session.id}/resume`, { body: {} });
+    expect(resumed.status).toBe(200);
+    expect(resumed.json.resume.sessionId).toBe(session.id);
+    expect(resumed.json.resume.conversationId).toBe(session.conversationId);
+    expect(resumed.json.resume.projectId).toBe(projectId);
   });
 
   it("assigns an owned session to an owned project through metadata only", async () => {

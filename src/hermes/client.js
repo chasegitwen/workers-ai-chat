@@ -143,9 +143,6 @@ export function createHermesClient(env, instanceId, { fetchImpl } = {}) {
     forkSession: (sessionId, body) => request("POST", sessionPath(sessionId, "/fork"), {
       body, timeoutMs: HERMES_TIMEOUTS_MS.sessions, mutating: true
     }),
-    deleteSession: sessionId => request("DELETE", sessionPath(sessionId), {
-      timeoutMs: HERMES_TIMEOUTS_MS.sessions, mutating: true
-    }),
     createRun(bodyJson, idempotencyKey) {
       if (!isValidIdempotencyKey(idempotencyKey)) {
         throw new HermesError("hermes_invalid_idempotency_key", "Invalid idempotency key", { httpStatus: 500 });

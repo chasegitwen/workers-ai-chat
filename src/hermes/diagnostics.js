@@ -3,6 +3,7 @@
 // GET /v1/runs/{id} path is authoritative and never submits or retries a run.
 
 import { safeCode, safeMessage, HermesError, publicError } from "./errors.js";
+import { buildHermesErrorRecord, parseErrorCategory } from "./errorTaxonomy.js";
 import { HERMES_ACTIVE_STATUSES } from "./status.js";
 import { publicHermesRun, readRunById, syncHermesRun } from "./runs.js";
 
@@ -69,6 +70,43 @@ function timelineInfo(row) {
   }
 }
 
+function diagnosticsErrors(row, timeline) {
+  const records = [];
+  for (const event of timeline.timeline) {
+    if (event?.event !== "tool.completed" || event.error !== true) continue;
+    records.push(buildHermesErrorRecord({
+      occurredAt: null,
+      sourceLayer: "hermes",
+      runId: row.id,
+      sessionId: row.upstream_session_id || undefined,
+      summary: event.result || ("Tool " + (event.tool || "tool") + " failed"),
+      status: row.status,
+      statusDetail: row.status_detail,
+      timelineToolError: true,
+      timelineSeq: event.seq,
+      tool: event.tool
+    }));
+  }
+  const statusNeedsRecord = [
+    "failed", "interrupted", "cancelled", "cancel_requested", "waiting_for_approval",
+    "waiting_for_clarification", "unknown", "submission_unknown"
+  ].includes(row.status);
+  if (row.error_code || row.error_message || statusNeedsRecord) {
+    records.push(buildHermesErrorRecord({
+      occurredAt: Number(row.completed_at || row.updated_at) || null,
+      sourceLayer: "worker",
+      runId: row.id,
+      sessionId: row.upstream_session_id || undefined,
+      originalCode: row.error_code,
+      summary: row.error_message || row.status_detail || row.status,
+      status: row.status,
+      statusDetail: row.status_detail,
+      ambiguous: row.status === "submission_unknown"
+    }));
+  }
+  return records;
+}
+
 function diagnosticRun(row, { detail = false, now = Date.now() } = {}) {
   const startedAt = Number(row.submitted_at || row.created_at) || null;
   const terminal = ["completed", "failed", "cancelled", "interrupted", "rejected", "abandoned"].includes(row.status);
@@ -76,6 +114,7 @@ function diagnosticRun(row, { detail = false, now = Date.now() } = {}) {
   const model = row.actual_model || row.requested_model || null;
   const provider = row.actual_provider || row.requested_provider || null;
   const timeline = timelineInfo(row);
+  const errors = diagnosticsErrors(row, timeline);
   const errorCode = safeCode(row.error_code);
   const errorMessage = safeMessage(row.error_message || "", [], 300);
   return {
@@ -93,6 +132,8 @@ function diagnosticRun(row, { detail = false, now = Date.now() } = {}) {
     upstreamSessionId: row.upstream_session_id || null,
     model: model ? { provider, id: model, source: row.actual_model ? "actual" : "requested" } : null,
     error: errorCode || errorMessage ? { code: errorCode || "hermes_run_error", message: errorMessage } : null,
+    primaryError: errors[0] || null,
+    errors,
     dataSource: detail ? "D1 persisted run; Hermes authoritative sync when applicable" : "D1 persisted Hermes runs",
     updatedAt: Number(row.updated_at) || null,
     timelineCoverage: timeline.coverage,
@@ -105,24 +146,51 @@ async function listDiagnostics(env, url, owner) {
   const filters = parseStatusFilters(url);
   const limit = integerParam(url, "limit", 30, 1, 100);
   const offset = integerParam(url, "offset", 0, 0, 100000);
+  const categoryRaw = url.searchParams.get("error_category") || url.searchParams.get("category") || "";
+  const category = parseErrorCategory(categoryRaw);
+  if (categoryRaw && !category) {
+    throw new HermesError("hermes_diagnostics_category_invalid", "Unsupported diagnostics error category", { httpStatus: 400 });
+  }
   const cutoff = Date.now() - WINDOW_MS[window];
   const statuses = [...new Set(filters.flatMap(filter => FILTER_STATUSES[filter]))];
   const statusSql = statuses.length ? " AND status IN (" + statuses.map(() => "?").join(", ") + ")" : "";
   const bindings = [owner, cutoff, ...statuses];
   const where = "owner_username = ? AND COALESCE(submitted_at, created_at) >= ?" + statusSql;
+  let rows;
+  let total;
+  if (category) {
+    const rowsResult = await env.DB.prepare("SELECT " + DIAGNOSTIC_COLUMNS + " FROM hermes_runs WHERE " + where
+      + " ORDER BY COALESCE(submitted_at, created_at) DESC, created_at DESC").bind(...bindings).all();
+    const classified = (rowsResult.results || []).map(row => diagnosticRun(row))
+      .filter(run => run.errors.some(error => error.category === category));
+    total = classified.length;
+    const page = classified.slice(offset, offset + limit);
+    return {
+      ok: true,
+      runs: page,
+      window,
+      filters,
+      errorCategory: category,
+      pagination: { limit, offset, total, hasMore: offset + page.length < total },
+      dataSource: "D1 persisted Hermes runs; taxonomy derived on read",
+      updatedAt: Date.now(),
+      emptyReason: total ? null : "No owned Hermes runs matched this error category in the selected window."
+    };
+  }
   const [rowsResult, countRow] = await Promise.all([
     env.DB.prepare("SELECT " + DIAGNOSTIC_COLUMNS + " FROM hermes_runs WHERE " + where
       + " ORDER BY COALESCE(submitted_at, created_at) DESC, created_at DESC LIMIT ? OFFSET ?")
       .bind(...bindings, limit, offset).all(),
     env.DB.prepare("SELECT COUNT(*) AS total FROM hermes_runs WHERE " + where).bind(...bindings).first()
   ]);
-  const rows = rowsResult.results || [];
-  const total = Number(countRow?.total) || 0;
+  rows = rowsResult.results || [];
+  total = Number(countRow?.total) || 0;
   return {
     ok: true,
     runs: rows.map(row => diagnosticRun(row)),
     window,
     filters,
+    errorCategory: null,
     pagination: { limit, offset, total, hasMore: offset + rows.length < total },
     dataSource: "D1 persisted Hermes runs",
     updatedAt: Date.now(),

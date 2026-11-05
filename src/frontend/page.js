@@ -1698,7 +1698,7 @@ body.dark .projectRuntimeItem{
 .hermesWorkbenchHistory{margin-top:10px;border-top:1px solid var(--border,#d9dee8);padding-top:8px}.hermesWorkbenchMessage{margin:7px 0;padding:8px;border-radius:7px;background:rgba(127,127,127,.08);white-space:pre-wrap;overflow-wrap:anywhere}.hermesWorkbenchMessage b{display:block;font-size:12px;margin-bottom:4px}
 .hermesWorkbenchTitleForm{border:1px solid var(--primary);border-radius:10px;padding:10px;margin-bottom:10px}.hermesWorkbenchTitleForm label{display:block;font-size:12px;margin-bottom:6px}.hermesWorkbenchTitleForm input{width:100%;min-height:38px;border:1px solid var(--border);border-radius:8px;background:inherit;color:inherit;padding:7px 9px;font:inherit}.hermesWorkbenchTitleForm div{display:flex;justify-content:flex-end;gap:6px;margin-top:8px}
 .hermesJobsToolbar{grid-template-columns:minmax(0,1fr) auto auto auto}.hermesJobsEditor{padding:12px 16px;border-bottom:1px solid var(--border,#d9dee8);display:grid;grid-template-columns:1fr 1fr;gap:9px}.hermesJobsEditor[hidden]{display:none}.hermesJobsEditor label{display:flex;flex-direction:column;gap:4px;font-size:12px}.hermesJobsEditor .wide{grid-column:1/-1}.hermesJobsEditor input,.hermesJobsEditor textarea{font:inherit;border:1px solid var(--border,#d9dee8);border-radius:8px;padding:8px;background:inherit;color:inherit;min-width:0}.hermesJobsEditor textarea{min-height:92px;resize:vertical}.hermesJobsEditorActions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px}.hermesJobsEditorActions button{font:inherit;border:1px solid var(--border,#d9dee8);border-radius:7px;background:transparent;color:inherit;padding:7px 11px;cursor:pointer}.hermesJobsPrompt,.hermesJobsResult{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto;margin:8px 0 0;padding:8px;border-radius:7px;background:rgba(127,127,127,.08)}
-.hermesDiagnosticsToolbar{grid-template-columns:auto 1fr auto}.hermesDiagnosticsWindows{display:flex;gap:5px;flex-wrap:wrap}.hermesDiagnosticsWindows button[aria-pressed="true"]{border-color:var(--primary);color:var(--primary);font-weight:600}.hermesDiagnosticsToolbar select{font:inherit;border:1px solid var(--border,#d9dee8);border-radius:8px;padding:7px 9px;background:inherit;color:inherit;min-height:36px}.hermesDiagnosticsDetail{margin-top:10px;border-top:1px solid var(--border,#d9dee8);padding-top:10px}.hermesDiagnosticsTimeline{margin:8px 0 0;padding-left:20px;font-size:12px;line-height:1.5}.hermesDiagnosticsError{margin-top:8px;padding:8px;border-radius:7px;background:rgba(190,24,93,.08);white-space:pre-wrap;overflow-wrap:anywhere}
+.hermesDiagnosticsToolbar{grid-template-columns:auto auto 1fr auto}.hermesDiagnosticsWindows{display:flex;gap:5px;flex-wrap:wrap}.hermesDiagnosticsWindows button[aria-pressed="true"]{border-color:var(--primary);color:var(--primary);font-weight:600}.hermesDiagnosticsToolbar select{font:inherit;border:1px solid var(--border,#d9dee8);border-radius:8px;padding:7px 9px;background:inherit;color:inherit;min-height:36px}.hermesDiagnosticsDetail{margin-top:10px;border-top:1px solid var(--border,#d9dee8);padding-top:10px}.hermesDiagnosticsTimeline{margin:8px 0 0;padding-left:20px;font-size:12px;line-height:1.5}.hermesDiagnosticsError{margin-top:8px;padding:8px;border-radius:7px;background:rgba(190,24,93,.08);white-space:pre-wrap;overflow-wrap:anywhere}.hermesDiagnosticsFacts{margin:6px 0;padding-left:20px;font-size:12px;line-height:1.5}.hermesDiagnosticsInference{margin-top:6px;padding:7px;border-left:3px solid #d97706;background:rgba(217,119,6,.08);font-size:12px}
 @media(max-width:640px){.hermesWorkbenchToolbar{grid-template-columns:1fr 1fr}.hermesWorkbenchToolbar input{grid-column:1/-1}.hermesWorkbenchDrawer{width:100vw}.hermesWorkbenchHeader{padding:12px}.hermesWorkbenchBody{padding:10px 12px 24px}}
 .hermesSettingsBody{display:flex;flex-direction:column;gap:12px}.hermesSettingsSection{border:1px solid var(--border,#d9dee8);border-radius:10px;padding:12px}.hermesSettingsSection h3{margin:0 0 8px;font-size:14px}.hermesSettingsLabel{display:flex;flex-direction:column;gap:6px;font-size:13px}.hermesSettingsLabel select{border:1px solid var(--border,#d9dee8);border-radius:8px;padding:7px 10px;background:inherit;color:inherit}.hermesSettingsHint,.hermesSettingsGap{font-size:12px;color:var(--muted,#667085);margin:6px 0 0;line-height:1.45}.hermesSettingsList{margin:0;padding-left:18px;font-size:12px;color:var(--muted,#667085);line-height:1.45}.hermesSettingsEffective{font-size:13px;line-height:1.5}@media(max-width:640px){.hermesJobsToolbar{grid-template-columns:1fr 1fr}.hermesJobsEditor{grid-template-columns:1fr}.hermesJobsEditor .wide,.hermesJobsEditorActions{grid-column:1}}
 
@@ -3596,6 +3596,13 @@ body.dark .toolErrorNotice{
       <option value="">全部状态</option><option value="failed">失败</option><option value="cancelled">取消</option>
       <option value="interrupted">中断</option><option value="unknown">未知</option><option value="stopping">停止中</option>
       <option value="success">成功</option><option value="active">进行中</option>
+    </select>
+    <select id="hermesDiagnosticsCategoryFilter" aria-label="筛选错误分类">
+      <option value="">全部错误分类</option><option value="provider_model">Provider / 模型</option>
+      <option value="tool_execution">工具执行</option><option value="network_timeout_sse">网络 / 超时 / SSE</option>
+      <option value="api_auth">API 认证授权</option><option value="runtime_unavailable">Runtime 不可用</option>
+      <option value="user_cancel_or_approval">取消 / 人工等待</option><option value="unknown_execution">执行结果未知</option>
+      <option value="worker_d1_adapter">Worker / D1 适配器</option><option value="unrecognized">未识别</option>
     </select>
     <div id="hermesDiagnosticsWindows" class="hermesDiagnosticsWindows" aria-label="诊断时间范围">
       <button type="button" data-window="24h" aria-pressed="true">24h</button><button type="button" data-window="7d" aria-pressed="false">7d</button><button type="button" data-window="30d" aria-pressed="false">30d</button>
@@ -14500,11 +14507,12 @@ var hermesDiagnosticsDrawer = document.getElementById("hermesDiagnosticsDrawer")
 var hermesDiagnosticsBackdrop = document.getElementById("hermesDiagnosticsBackdrop");
 var hermesDiagnosticsClose = document.getElementById("hermesDiagnosticsClose");
 var hermesDiagnosticsStatusFilter = document.getElementById("hermesDiagnosticsStatusFilter");
+var hermesDiagnosticsCategoryFilter = document.getElementById("hermesDiagnosticsCategoryFilter");
 var hermesDiagnosticsWindows = document.getElementById("hermesDiagnosticsWindows");
 var hermesDiagnosticsRefresh = document.getElementById("hermesDiagnosticsRefresh");
 var hermesDiagnosticsStatus = document.getElementById("hermesDiagnosticsStatus");
 var hermesDiagnosticsList = document.getElementById("hermesDiagnosticsList");
-var hermesDiagnosticsState = { open:false, loading:false, reloadPending:false, window:"24h", status:"", runs:[], detail:null, selectedId:"", error:null, detailError:null, syncError:null, dataSource:"D1 persisted Hermes runs", updatedAt:null, emptyReason:"", total:0, hasMore:false };
+var hermesDiagnosticsState = { open:false, loading:false, reloadPending:false, window:"24h", status:"", category:"", runs:[], detail:null, selectedId:"", error:null, detailError:null, syncError:null, dataSource:"D1 persisted Hermes runs", updatedAt:null, emptyReason:"", total:0, hasMore:false };
 var hermesRunMount = document.getElementById("hermesRunMount");
 var hermesRunStatus = document.getElementById("hermesRunStatus");
 var hermesRunStatusText = document.getElementById("hermesRunStatusText");
@@ -15406,6 +15414,12 @@ function hermesDiagnosticsTime(value){
   return value ? new Date(Number(value)).toLocaleString() : "未知";
 }
 
+const HERMES_DIAGNOSTIC_CATEGORY_LABELS = {
+  provider_model:"Provider / 模型", tool_execution:"工具执行", network_timeout_sse:"网络 / 超时 / SSE",
+  api_auth:"API 认证授权", runtime_unavailable:"Runtime 不可用", user_cancel_or_approval:"取消 / 人工等待",
+  unknown_execution:"执行结果未知", worker_d1_adapter:"Worker / D1 适配器", unrecognized:"未识别"
+};
+
 function hermesDiagnosticsDuration(value, running){
   if(!Number.isFinite(Number(value))) return "时长未知";
   const seconds = Math.max(0, Math.round(Number(value) / 1000));
@@ -15473,6 +15487,44 @@ function renderHermesDiagnosticsDetail(container, run){
     error.textContent = "关键错误：" + (run.error.code || "unknown") + (run.error.message ? " · " + run.error.message : "");
     detail.appendChild(error);
   }
+  const primary = run.primaryError || (Array.isArray(run.errors) ? run.errors[0] : null);
+  if(primary){
+    const classification = document.createElement("div");
+    classification.className = "hermesDiagnosticsError";
+    classification.textContent = "错误分类：" + (HERMES_DIAGNOSTIC_CATEGORY_LABELS[primary.category] || primary.category)
+      + " · 置信度：" + (primary.categoryConfidence === "confirmed" ? "已确认信号" : "推测");
+    detail.appendChild(classification);
+    const factsTitle = document.createElement("strong");
+    factsTitle.textContent = "已确认事实";
+    detail.appendChild(factsTitle);
+    const facts = document.createElement("ul");
+    facts.className = "hermesDiagnosticsFacts";
+    (Array.isArray(primary.facts) ? primary.facts : []).forEach(value => {
+      const item = document.createElement("li");
+      item.textContent = String(value);
+      facts.appendChild(item);
+    });
+    if(!facts.children.length){
+      const item = document.createElement("li");
+      item.textContent = "没有更多已确认字段";
+      facts.appendChild(item);
+    }
+    detail.appendChild(facts);
+    const inference = document.createElement("div");
+    inference.className = "hermesDiagnosticsInference";
+    inference.textContent = "推测原因：" + (primary.inference || "无；分类仅依据上述已确认信号，不推测根因。");
+    detail.appendChild(inference);
+    const suggestion = document.createElement("div");
+    suggestion.className = "hermesWorkbenchStatus";
+    suggestion.textContent = "建议：" + (primary.suggestion || "人工检查后再决定是否重试。");
+    detail.appendChild(suggestion);
+    if(primary.category === "unknown_execution"){
+      const warning = document.createElement("div");
+      warning.className = "hermesDiagnosticsError";
+      warning.textContent = "执行结果未知：请人工核对或 resolve-unknown；不要自动新建或 POST Run 重试。";
+      detail.appendChild(warning);
+    }
+  }
   const timeline = Array.isArray(run.timeline) ? run.timeline : [];
   if(timeline.length){
     const list = document.createElement("ol");
@@ -15501,6 +15553,7 @@ function renderHermesDiagnostics(){
   if(!hermesDiagnosticsList) return;
   hermesDiagnosticsWindows?.querySelectorAll?.("[data-window]").forEach(button => button.setAttribute("aria-pressed", button.dataset.window === hermesDiagnosticsState.window ? "true" : "false"));
   if(hermesDiagnosticsStatusFilter) hermesDiagnosticsStatusFilter.value = hermesDiagnosticsState.status;
+  if(hermesDiagnosticsCategoryFilter) hermesDiagnosticsCategoryFilter.value = hermesDiagnosticsState.category;
   if(hermesDiagnosticsState.loading) hermesDiagnosticsStatus.textContent = "诊断记录加载中…";
   else if(hermesDiagnosticsState.error) hermesDiagnosticsStatus.textContent = "诊断记录不可用：" + hermesErrorText(hermesDiagnosticsState.error);
   else {
@@ -15535,6 +15588,9 @@ function renderHermesDiagnostics(){
     const context = document.createElement("div");
     context.className = "hermesWorkbenchCardMeta";
     context.textContent = [run.instanceId, run.projectId, run.conversationId, run.model?.id].filter(Boolean).join(" · ");
+    const category = document.createElement("div");
+    category.className = "hermesWorkbenchCardMeta";
+    category.textContent = run.primaryError ? ("错误分类：" + (HERMES_DIAGNOSTIC_CATEGORY_LABELS[run.primaryError.category] || run.primaryError.category)) : "";
     const source = document.createElement("div");
     source.className = "hermesWorkbenchCardMeta";
     source.textContent = "数据源：" + (run.dataSource || hermesDiagnosticsState.dataSource) + " · 更新 " + hermesDiagnosticsTime(run.updatedAt);
@@ -15546,7 +15602,9 @@ function renderHermesDiagnostics(){
     }));
     card.append(header, timing);
     if(statusExtra.textContent) card.appendChild(statusExtra);
-    card.append(context, source, actions);
+    card.append(context);
+    if(category.textContent) card.appendChild(category);
+    card.append(source, actions);
     if(hermesDiagnosticsState.selectedId === run.id && hermesDiagnosticsState.detail) renderHermesDiagnosticsDetail(card, hermesDiagnosticsState.detail);
     hermesDiagnosticsList.appendChild(card);
   });
@@ -15566,6 +15624,7 @@ async function loadHermesDiagnostics(){
   try{
     const params = new URLSearchParams({ window:hermesDiagnosticsState.window, limit:"50", offset:"0" });
     if(hermesDiagnosticsState.status) params.set("status", hermesDiagnosticsState.status);
+    if(hermesDiagnosticsState.category) params.set("error_category", hermesDiagnosticsState.category);
     const res = await fetch("/api/hermes/diagnostics/runs?" + params.toString());
     const data = await res.json().catch(() => ({}));
     if(!res.ok || !data.ok) throw data.error || { code:"hermes_diagnostics_unavailable", message:"诊断记录不可用" };
@@ -16469,6 +16528,10 @@ function initHermesUi(){
     hermesDiagnosticsRefresh?.addEventListener("click", loadHermesDiagnostics);
     hermesDiagnosticsStatusFilter?.addEventListener("change", () => {
       hermesDiagnosticsState.status = hermesDiagnosticsStatusFilter.value || "";
+      loadHermesDiagnostics();
+    });
+    hermesDiagnosticsCategoryFilter?.addEventListener("change", () => {
+      hermesDiagnosticsState.category = hermesDiagnosticsCategoryFilter.value || "";
       loadHermesDiagnostics();
     });
     hermesDiagnosticsWindows?.addEventListener("click", event => {

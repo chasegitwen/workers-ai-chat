@@ -107,15 +107,15 @@ async function slotHolder() {
 }
 
 async function insertDiagnosticRun({ id, owner = "admin", status = "failed", createdAt = Date.now(), completedAt = null,
-  timelineJson = null, errorCode = null, errorMessage = null } = {}) {
+  timelineJson = null, errorCode = null, errorMessage = null, statusDetail = null } = {}) {
   const runId = id || "hrun_" + crypto.randomUUID().replace(/-/g, "");
   await env.DB.prepare(`INSERT INTO hermes_runs
     (id, owner_username, project_id, conversation_id, instance_id, agent_id, client_request_id,
-     request_fingerprint, upstream_idempotency_key, upstream_request_json, model_mode, status,
+     request_fingerprint, upstream_idempotency_key, upstream_request_json, model_mode, status, status_detail,
      error_code, error_message, last_event_seq, timeline_json, submitted_at, completed_at, created_at, updated_at)
-    VALUES (?, ?, 'default', ?, 'oracle-hermes', 'hermes-agent', ?, ?, ?, '{}', 'agent_default', ?, ?, ?, -1, ?, ?, ?, ?, ?)`)
+    VALUES (?, ?, 'default', ?, 'oracle-hermes', 'hermes-agent', ?, ?, ?, '{}', 'agent_default', ?, ?, ?, ?, -1, ?, ?, ?, ?, ?)`)
     .bind(runId, owner, "conv-" + runId, "request-" + runId, "fingerprint-" + runId,
-      "idem-" + runId, status, errorCode, errorMessage, timelineJson, createdAt, completedAt, createdAt, createdAt).run();
+      "idem-" + runId, status, statusDetail, errorCode, errorMessage, timelineJson, createdAt, completedAt, createdAt, createdAt).run();
   return runId;
 }
 
@@ -1240,6 +1240,51 @@ describe("Hermes run diagnostics", () => {
       expect.objectContaining({ method:"GET", path:"/v1/runs/" + upstreamRunId(local) })
     ]));
     expect(mock.calls.slice(callsBefore).every(item => item.method === "GET")).toBe(true);
+  });
+
+  it("enriches list and detail with facts-first error records", async () => {
+    const id = await insertDiagnosticRun({
+      status:"failed", errorCode:"hermes_unknown_model", errorMessage:"model unavailable token=private-value",
+      timelineJson:JSON.stringify([{ event:"tool.completed", tool:"terminal", error:true, result:"Authorization: Bearer secret-value", seq:7 }])
+    });
+    const list = await call("GET", "/api/hermes/diagnostics/runs?window=24h");
+    const run = list.json.runs.find(item => item.id === id);
+    expect(run.primaryError).toMatchObject({
+      category:"tool_execution", categoryConfidence:"confirmed", sourceLayer:"hermes"
+    });
+    expect(run.primaryError).not.toHaveProperty("originalCode");
+    expect(run.errors.map(error => error.category)).toEqual(["tool_execution", "provider_model"]);
+    expect(run.primaryError.facts).toContain("Timeline fact: tool.completed error=true");
+    expect(run.primaryError.inference).toBeNull();
+    expect(JSON.stringify(run)).not.toMatch(/private-value|secret-value/);
+
+    const detail = await call("GET", "/api/hermes/diagnostics/runs/" + id);
+    expect(detail.status).toBe(200);
+    expect(detail.json.run.errors).toHaveLength(2);
+  });
+
+  it("filters error categories after owner scoping and validates categories", async () => {
+    const ownTool = await insertDiagnosticRun({
+      owner:"alice", status:"failed",
+      timelineJson:JSON.stringify([{ event:"tool.completed", tool:"terminal", error:true, result:"failed", seq:1 }])
+    });
+    await insertDiagnosticRun({ owner:"alice", status:"failed", errorCode:"hermes_unknown_model" });
+    await insertDiagnosticRun({ owner:"bob", status:"failed", timelineJson:JSON.stringify([{ event:"tool.completed", tool:"terminal", error:true, seq:2 }]) });
+    const filtered = await call("GET", "/api/hermes/diagnostics/runs?window=24h&error_category=tool_execution", { user:"alice" });
+    expect(filtered.status).toBe(200);
+    expect(filtered.json.runs.map(run => run.id)).toEqual([ownTool]);
+    expect(filtered.json).toMatchObject({ errorCategory:"tool_execution", pagination:{ total:1 } });
+    expect((await call("GET", "/api/hermes/diagnostics/runs?category=made_up", { user:"alice" })).status).toBe(400);
+  });
+
+  it("keeps diagnostics paths read-only, including unknown outcomes", async () => {
+    const id = await insertDiagnosticRun({ status:"submission_unknown", errorCode:"hermes_submission_unknown" });
+    const before = mock.posts().length;
+    const list = await call("GET", "/api/hermes/diagnostics/runs?error_category=unknown_execution");
+    expect(list.json.runs.find(run => run.id === id).primaryError.suggestion).toMatch(/do not automatically create or POST/i);
+    expect((await call("POST", "/api/hermes/diagnostics/runs", { body:{} })).status).toBe(404);
+    expect((await call("POST", "/api/hermes/diagnostics/runs/" + id, { body:{} })).status).toBe(404);
+    expect(mock.posts()).toHaveLength(before);
   });
 
   it("requires auth, hides cross-user details, and validates queries", async () => {

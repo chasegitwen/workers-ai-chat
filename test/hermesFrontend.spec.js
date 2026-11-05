@@ -193,7 +193,23 @@ describe("Hermes frontend", () => {
       expect(html).toContain('<option value="' + value + '">');
     }
     for(const window of ["24h", "7d", "30d"]) expect(html).toContain('data-window="' + window + '"');
+    expect(html).toContain('id="hermesDiagnosticsCategoryFilter"');
+    for(const category of ["provider_model", "tool_execution", "network_timeout_sse", "api_auth", "runtime_unavailable", "user_cancel_or_approval", "unknown_execution", "worker_d1_adapter", "unrecognized"]){
+      expect(html).toContain('<option value="' + category + '">');
+    }
     expect(html.indexOf('id="hermesDiagnosticsToggle"')).toBeGreaterThan(html.indexOf('id="hermesJobsToggle"'));
+  });
+
+  it("shows facts, inference, suggestions, and the unknown-execution warning separately", () => {
+    const detail = lastDeclaration(pageScript(), "renderHermesDiagnosticsDetail");
+    expect(detail).toContain("已确认事实");
+    expect(detail).toContain("推测原因：");
+    expect(detail).toContain("建议：");
+    expect(detail).toContain('primary.category === "unknown_execution"');
+    expect(detail).toContain("不要自动新建或 POST Run 重试");
+    const load = lastDeclaration(pageScript(), "loadHermesDiagnostics");
+    expect(load).toContain('params.set("error_category", hermesDiagnosticsState.category)');
+    expect(load).not.toContain('method:"POST"');
   });
 
   it("sorts diagnostics newest-first and renders honest empty and missing-timeline copy", () => {

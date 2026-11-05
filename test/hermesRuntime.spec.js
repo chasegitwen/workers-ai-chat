@@ -193,6 +193,24 @@ describe("Hermes catalog and provider selection", () => {
     });
   });
 
+  it("preserves explicit false Clarify flags when inferring from run_clarify", () => {
+    const noResponse = mock.defaultCapabilities();
+    noResponse.features.run_clarify = true;
+    noResponse.features.run_clarify_response = false;
+    delete noResponse.features.clarify_events;
+    expect(normalizeHermesCapabilities(noResponse).features).toMatchObject({
+      run_clarify: true, run_clarify_response: false, clarify_events: true
+    });
+
+    const noEvents = mock.defaultCapabilities();
+    noEvents.features.run_clarify = true;
+    delete noEvents.features.run_clarify_response;
+    noEvents.features.clarify_events = false;
+    expect(normalizeHermesCapabilities(noEvents).features).toMatchObject({
+      run_clarify: true, run_clarify_response: true, clarify_events: false
+    });
+  });
+
   it("serves the catalog through the API without credentials and caches it", async () => {
     const first = await call("GET", "/api/hermes/catalog");
     expect(first.status).toBe(200);

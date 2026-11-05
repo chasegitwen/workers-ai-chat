@@ -932,6 +932,7 @@ export async function respondToHermesClarify(env, row, body, { fetchImpl } = {})
       }
     };
   } catch (err) {
+    // As with approvals, release only the local claim; a retry must re-read Hermes first.
     await env.DB.prepare(
       `UPDATE hermes_runs
           SET clarify_response_pending = 0, clarify_response_started_at = NULL, updated_at = ?

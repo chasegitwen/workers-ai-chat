@@ -41,8 +41,8 @@ export function normalizeHermesCapabilities(payload) {
   // Hermes may advertise Clarify as one aggregate run capability or as separate response/event
   // flags. Both forms are explicit declarations; absence of both continues to fail closed.
   if (out.run_clarify) {
-    out.run_clarify_response = true;
-    out.clarify_events = true;
+    if (features.run_clarify_response == null) out.run_clarify_response = true;
+    if (features.clarify_events == null) out.clarify_events = true;
   }
   const idem = features.runs_idempotency && typeof features.runs_idempotency === "object" ? features.runs_idempotency : {};
   const runsIdempotency = {

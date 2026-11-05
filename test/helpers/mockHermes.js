@@ -51,6 +51,7 @@ export class MockHermes {
     this.capabilities = null;
     this.onHealth = null;
     this.onHealthDetailed = null;
+    this.onCapabilities = null;
     this.onSkills = null;
     this.onToolsets = null;
     this.skills = [
@@ -268,7 +269,13 @@ export class MockHermes {
       }
       return json(this.defaultHealthDetailed());
     }
-    if (method === "GET" && url.pathname === "/v1/capabilities") return json(this.capabilities || this.defaultCapabilities());
+    if (method === "GET" && url.pathname === "/v1/capabilities") {
+      if (this.onCapabilities) {
+        const override = await this.onCapabilities(call);
+        if (override !== undefined) return override;
+      }
+      return json(this.capabilities || this.defaultCapabilities());
+    }
     if (method === "GET" && url.pathname === "/api/model/options") return json(this.modelOptions);
     if (method === "GET" && url.pathname === "/v1/skills") {
       if (this.onSkills) {

@@ -38,7 +38,7 @@ function normalizeCheck(name, value, secrets = []) {
   if (!CHECK_STATUSES.has(sourceStatus)) return null;
   const check = { status: sourceStatus === "retrying" ? "degraded" : sourceStatus };
   const detail = safeMessage(String(source.detail || (sourceStatus === "retrying" ? "retrying" : "")), secrets, 120)
-    .replace(/(^|\s)(?:[A-Za-z]:[\\/]|\/)[^\s,;]+/g, "$1[redacted path]");
+    .replace(/(^|[\s('"`])(?:[A-Za-z]:[\\/]|\/)[^\s,;'"`)]+/g, "$1[redacted path]");
   if (detail) check.detail = detail;
   if (name === "disk") {
     const usedPercent = finiteNumber(source.used_percent);
@@ -134,7 +134,15 @@ export function normalizeHermesHealthProbe(simpleBody, detailedBody, capabilitie
   }
   const checkValues = Object.values(result.checks);
   if (!checkValues.length || invalidCheck) {
-    result.backend = readinessStatus === "degraded" ? "degraded" : "unknown";
+    // Confirmed upstream degraded still wins over partial parse failure (M1).
+    if (readinessStatus === "degraded") {
+      result.backend = "degraded";
+      result.overallStatus = "degraded";
+      result.lastSuccessfulProbeAt = result.probedAt;
+    } else {
+      result.backend = "unknown";
+      result.overallStatus = "unknown";
+    }
     result.notes.push("One or more readiness checks could not be parsed.");
     return result;
   }

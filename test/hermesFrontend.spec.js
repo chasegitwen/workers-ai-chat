@@ -209,12 +209,13 @@ describe("Hermes frontend", () => {
     const start = html.indexOf('id="hermesRuntimeHealth"');
     const end = html.indexOf('<div class="hermesWorkbenchToolbar hermesDiagnosticsToolbar">', start);
     const panel = html.slice(start, end).toLowerCase();
-    for(const action of ["start gateway", "stop gateway", "restart gateway"]){
+    for(const action of ["start gateway", "stop gateway", "restart gateway", "update gateway", "gateway start", "gateway stop", "gateway restart", "gateway update", "启停", "重启", "更新按钮"]){
       expect(panel).not.toContain(action);
     }
     const load = lastDeclaration(pageScript(), "loadHermesRuntimeHealth");
     expect(load).toContain('/api/hermes/runtime-health?');
-    expect(load).toContain("< 30000");
+    expect(load).toContain("minIntervalMs");
+    expect(load).toContain("force ? 10000 : 30000");
     expect(load).not.toContain('method:"POST"');
     const render = lastDeclaration(pageScript(), "renderHermesRuntimeHealth");
     expect(render).toContain("lastSuccessfulProbeAt");

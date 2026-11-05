@@ -462,6 +462,69 @@ describe("Hermes runtime health panel", () => {
       checks: { session_store: { status: "unavailable" } }
     });
   });
+
+  it("keeps confirmed degraded when a readiness check is missing or unparsable", () => {
+    const detailed = mock.defaultHealthDetailed();
+    detailed.status = "degraded";
+    detailed.readiness.status = "degraded";
+    detailed.readiness.checks.state_db = { status: "degraded", detail: "open('/var/lib/hermes/state.db') failed" };
+    delete detailed.readiness.checks.disk;
+    const health = normalizeHermesHealthProbe(
+      { status: "ok", platform: "hermes-agent" }, detailed, mock.defaultCapabilities(), { probedAt: 99 }
+    );
+    expect(health).toMatchObject({ overallStatus: "degraded", backend: "degraded" });
+    expect(health.checks.state_db.detail).toContain("[redacted path]");
+    expect(JSON.stringify(health)).not.toContain("/var/lib/hermes/state.db");
+  });
+
+  it("marks detailed auth/timeout failures unavailable even if simple health succeeded", async () => {
+    mock.onHealthDetailed = () => new Response(JSON.stringify({ error: "unauthorized" }), {
+      status: 401, headers: { "Content-Type": "application/json" }
+    });
+    const unauthorized = await call("GET", "/api/hermes/runtime-health");
+    expect(unauthorized.status).toBe(200);
+    expect(unauthorized.json.health).toMatchObject({
+      overallStatus: "unavailable", connectivity: "unavailable", backend: "unavailable"
+    });
+
+    mock.onHealthDetailed = async () => {
+      throw Object.assign(new Error("timeout"), { name: "AbortError" });
+    };
+    // Network/timeout path via getHermesRuntimeHealth fetchImpl override
+    const timedOut = await getHermesRuntimeHealth(testEnv(), "oracle-hermes", {
+      fetchImpl: async (url) => {
+        if (String(url).includes("/health/detailed")) {
+          const err = new Error("The operation was aborted");
+          err.name = "AbortError";
+          throw err;
+        }
+        if (String(url).includes("/health") && !String(url).includes("detailed")) {
+          return new Response(JSON.stringify({ status: "ok", platform: "hermes-agent", version: "0.22.5" }), {
+            status: 200, headers: { "Content-Type": "application/json" }
+          });
+        }
+        throw new Error("unexpected " + url);
+      },
+      now: 55
+    });
+    expect(timedOut.overallStatus).toBe("unavailable");
+    expect(timedOut.dataSource).toEqual(["GET /health"]);
+  });
+
+  it("does not change readiness classification when capabilities fails", async () => {
+    mock.onCapabilities = () => new Response("boom", { status: 500 });
+    const response = await call("GET", "/api/hermes/runtime-health");
+    expect(response.json.health.overallStatus).toBe("healthy");
+    expect(response.json.health.notes.join(" ")).toMatch(/Capabilities/i);
+  });
+
+  it("returns unavailable for unconfigured instance credentials and rejects unknown instance", async () => {
+    const missing = await call("GET", "/api/hermes/runtime-health", { envExtra: { HERMES_ORACLE_API_KEY: "" } });
+    expect(missing.status).toBe(200);
+    expect(missing.json.health.overallStatus).toBe("unavailable");
+    const unknown = await call("GET", "/api/hermes/runtime-health?instance_id=not-a-real-instance");
+    expect(unknown.status).toBe(400);
+  });
 });
 
 describe("Hermes run settings payload wiring", () => {

@@ -1695,6 +1695,87 @@ describe("Hermes run diagnostics", () => {
     expect(response.json.runs.map(run => run.id)).not.toContain(other);
     expect(response.json.gaps).toContain("session_runs_capped");
   });
+
+  it("redacts secrets from timeline/persisted summary and keeps healthy export fields compact", async () => {
+    const timelineJson = JSON.stringify([
+      { event: "tool.started", seq: 1, tool: "terminal", preview: "Authorization: Bearer timeline-secret-token999 token=timeline-private" },
+      { event: "diagnostics.timeline_truncated" },
+      { event: "tool.completed", seq: 2, tool: "terminal", error: true, result: "token=timeline-result-secret" }
+    ]);
+    const id = await insertDiagnosticRun({
+      owner: "alice", status: "failed", errorCode: "tool_failed",
+      errorMessage: "failed", timelineJson
+    });
+    const now = Date.now();
+    await env.DB.prepare(
+      "UPDATE hermes_runs SET diagnostics_json = ?, diagnostics_updated_at = ? WHERE id = ?"
+    ).bind(JSON.stringify({
+      category: "tool_execution", categoryConfidence: "confirmed", isFault: true, kind: "fault",
+      summary: "Bearer summary-secret-token888 token=summary-private", status: "failed",
+      sourceLayer: "hermes", occurredAt: now, updatedAt: now, runId: id
+    }), now, id).run();
+
+    mock.onCapabilities = async () => {
+      throw new Error("capabilities should not be called for export health");
+    };
+    const response = await call("GET", "/api/hermes/diagnostics/runs/" + id + "/export?format=json", { user: "alice" });
+    expect(response.status).toBe(200);
+    expect(response.json.gaps).toEqual(expect.arrayContaining(["timeline_truncated"]));
+    expect(response.text).not.toMatch(/timeline-secret-token999|timeline-private|timeline-result-secret|summary-secret-token888|summary-private/);
+    expect(response.json.runtimeHealth).toEqual(expect.objectContaining({
+      overallStatus: expect.any(String),
+      checkedAt: expect.anything(),
+      lastSuccessAt: expect.anything(),
+      backend: expect.any(String),
+      notes: expect.any(Array)
+    }));
+    expect(Object.keys(response.json.runtimeHealth).sort()).toEqual([
+      "backend", "checkedAt", "lastSuccessAt", "notes", "overallStatus"
+    ]);
+    expect(mock.calls.some(item => item.path === "/v1/capabilities")).toBe(false);
+    expect(mock.calls.some(item => item.path.startsWith("/v1/runs/"))).toBe(false);
+  });
+
+  it("budgets hung health probes so export still returns quickly", async () => {
+    const id = await insertDiagnosticRun({ owner: "alice", status: "completed", completedAt: Date.now(), timelineJson: "[]" });
+    mock.onHealth = () => new Promise(() => {});
+    mock.onHealthDetailed = () => new Promise(() => {});
+    const started = Date.now();
+    const response = await call("GET", "/api/hermes/diagnostics/runs/" + id + "/export?format=json", { user: "alice" });
+    const elapsed = Date.now() - started;
+    expect(response.status).toBe(200);
+    expect(response.json.runtimeHealth).toBeNull();
+    expect(response.json.gaps).toContain("runtime_health_unavailable");
+    expect(elapsed).toBeLessThan(8000);
+  });
+
+  it("rejects invalid export format and session ids with 400", async () => {
+    const id = await insertDiagnosticRun({ owner: "alice" });
+    expect((await call("GET", "/api/hermes/diagnostics/runs/" + id + "/export?format=xml", { user: "alice" })).status).toBe(400);
+    expect((await call("GET", "/api/hermes/diagnostics/sessions/" + encodeURIComponent("../nope") + "/export", { user: "alice" })).status).toBe(400);
+  });
+
+  it("marks in-flight exports as status_not_refreshed without persisted_summary_absent", async () => {
+    const id = await insertDiagnosticRun({ owner: "alice", status: "running", timelineJson: "[]" });
+    const response = await call("GET", "/api/hermes/diagnostics/runs/" + id + "/export?format=json", { user: "alice" });
+    expect(response.status).toBe(200);
+    expect(response.json.runs[0].durationRunning).toBe(true);
+    expect(response.json.gaps).toContain("status_not_refreshed");
+    expect(response.json.gaps).not.toContain("persisted_summary_absent");
+  });
+
+  it("requires auth for session export and hides diagnostics export when Hermes is disabled", async () => {
+    const id = await insertDiagnosticRun({ owner: "alice" });
+    await env.DB.prepare("UPDATE hermes_runs SET upstream_session_id = ? WHERE id = ?").bind("session-auth-check", id).run();
+    const unauth = await worker.fetch(
+      new Request(ORIGIN + "/api/hermes/diagnostics/sessions/session-auth-check/export"),
+      testEnv(),
+      {}
+    );
+    expect(unauth.status).toBe(401);
+    const off = { HERMES_CATALOG_VISIBLE: "", HERMES_EXECUTION_ENABLED: "1" };
+    expect((await call("GET", "/api/hermes/diagnostics/runs/" + id + "/export", { user: "alice", envExtra: off })).status).toBe(404);
+  });
 });
 
 describe("Hermes disabled and existing features", () => {

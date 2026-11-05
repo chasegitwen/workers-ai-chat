@@ -181,7 +181,9 @@ function unavailableResult(instanceId, probedAt, err, dataSource = []) {
   };
 }
 
-export async function getHermesRuntimeHealth(env, instanceId, { fetchImpl, now = Date.now() } = {}) {
+export async function getHermesRuntimeHealth(env, instanceId, {
+  fetchImpl, now = Date.now(), includeCapabilities = true
+} = {}) {
   const probedAt = Number(now) || Date.now();
   const client = createHermesClient(env, instanceId, { fetchImpl });
   let simple;
@@ -194,17 +196,23 @@ export async function getHermesRuntimeHealth(env, instanceId, { fetchImpl, now =
   let detailed;
   let capabilities = null;
   try {
-    const responses = await Promise.allSettled([client.getHealthDetailed(), client.getCapabilities()]);
-    if (responses[0].status === "rejected") {
-      return unavailableResult(instanceId, probedAt, responses[0].reason, ["GET /health"]);
+    if (includeCapabilities) {
+      const responses = await Promise.allSettled([client.getHealthDetailed(), client.getCapabilities()]);
+      if (responses[0].status === "rejected") {
+        return unavailableResult(instanceId, probedAt, responses[0].reason, ["GET /health"]);
+      }
+      detailed = responses[0].value.body;
+      if (responses[1].status === "fulfilled") capabilities = responses[1].value.body;
+    } else {
+      detailed = (await client.getHealthDetailed()).body;
     }
-    detailed = responses[0].value.body;
-    if (responses[1].status === "fulfilled") capabilities = responses[1].value.body;
   } catch (err) {
     return unavailableResult(instanceId, probedAt, err, ["GET /health"]);
   }
   const result = normalizeHermesHealthProbe(simple, detailed, capabilities, { instanceId, probedAt, secrets: client.secrets });
-  if (!capabilities) result.notes.push("Capabilities summary was unavailable; readiness classification is unchanged.");
+  if (includeCapabilities && !capabilities) {
+    result.notes.push("Capabilities summary was unavailable; readiness classification is unchanged.");
+  }
   return result;
 }
 

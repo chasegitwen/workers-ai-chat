@@ -297,11 +297,24 @@ function exportFilename(scopeId, format, now = Date.now()) {
   return `hermes-diagnostics-${safeId}-${utc}.${format}`;
 }
 
+const EXPORT_HEALTH_BUDGET_MS = 3000;
+
 async function runtimeHealthForExport(env, instanceId, fetchImpl) {
+  // M1: export must not wait on full panel probe (health+detailed+capabilities up to ~17–19s).
+  // Skip capabilities and hard-budget the wait; a hung upstream must not block the D1 export.
+  let timer = null;
   try {
-    return compactRuntimeHealth(await getHermesRuntimeHealth(env, instanceId, { fetchImpl }));
+    const health = await Promise.race([
+      getHermesRuntimeHealth(env, instanceId, { fetchImpl, includeCapabilities: false }),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("hermes_export_health_budget")), EXPORT_HEALTH_BUDGET_MS);
+      })
+    ]);
+    return compactRuntimeHealth(health);
   } catch (err) {
     return null;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -310,7 +323,8 @@ function diagnosticsExportResponse(payload, format, scopeId) {
   return new Response(body, { headers: {
     "Content-Type": format === "json" ? "application/json; charset=utf-8" : "text/markdown; charset=utf-8",
     "Content-Disposition": `attachment; filename="${exportFilename(scopeId, format)}"`,
-    "Cache-Control": "no-store"
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff"
   } });
 }
 

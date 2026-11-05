@@ -77,6 +77,7 @@ function sanitizeRun(run) {
     statusDetail: safeIdentifier(run?.statusDetail, 160),
     startedAt: boundedNumber(run?.startedAt),
     durationMs: boundedNumber(run?.durationMs),
+    durationRunning: run?.durationRunning === true,
     instanceId: safeIdentifier(run?.instanceId, 160),
     projectId: safeIdentifier(run?.projectId, 160),
     conversationId: safeIdentifier(run?.conversationId, 160),
@@ -112,7 +113,9 @@ export function buildDiagnosticsExport({ scope, owner, runs, runtimeHealth = nul
     if (run.timelineCoverage === "expired_or_missing") gaps.add("timeline_expired_or_missing");
     if (run.timelineCoverage === "empty") gaps.add("timeline_empty");
     if (run.timelineCoverage === "truncated") gaps.add("timeline_truncated");
-    if (!run.persistedSummary) gaps.add("persisted_summary_absent");
+    // M3/L4: active/in-flight runs are D1 snapshots without sync; do not treat missing summary as a fault gap.
+    if (run.durationRunning) gaps.add("status_not_refreshed");
+    else if (!run.persistedSummary) gaps.add("persisted_summary_absent");
   }
   if (!runtimeHealth) gaps.add("runtime_health_unavailable");
   if (runsCapped) gaps.add("session_runs_capped");
@@ -164,7 +167,7 @@ export function diagnosticsExportMarkdown(payload) {
       `- Upstream status / 上游状态: ${mdText(run.upstreamStatus || "unknown")}`,
       `- Status detail / 状态详情: ${mdText(run.statusDetail || "none")}`,
       `- Started / 开始: ${mdTime(run.startedAt)}`,
-      `- Duration ms / 时长: ${run.durationMs == null ? "unknown" : run.durationMs}`,
+      `- Duration ms / 时长: ${run.durationMs == null ? "unknown" : run.durationMs}${run.durationRunning ? " (still running / 仍在进行，未刷新权威状态)" : ""}`,
       `- Instance: ${mdText(run.instanceId || "unknown")}`,
       `- Project: ${mdText(run.projectId || "unknown")}`,
       `- Conversation: ${mdText(run.conversationId || "unknown")}`,

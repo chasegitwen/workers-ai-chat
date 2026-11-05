@@ -42,6 +42,7 @@ import { isHermesTerminal, mapHermesUpstreamStatus } from "./status.js";
 import { sanitizeHermesTimelineEvent } from "./timeline.js";
 import { handleHermesWorkbench } from "./workbench.js";
 import { handleHermesJobs } from "./jobs.js";
+import { handleHermesDiagnostics } from "./diagnostics.js";
 
 const RUN_ROUTE = /^\/api\/hermes\/runs\/(hrun_[a-f0-9]{32})(?:\/(events|cancel|approval|clarify|reconcile|resolve-unknown))?$/;
 const MAX_DELTA_CHARS = 8000;
@@ -315,6 +316,11 @@ export async function handleHermes(request, env, url, ctx, options = {}) {
     if (url.pathname === "/api/hermes/run-settings" && request.method === "GET") {
       return await handleRunSettings(env, url, routeOptions);
     }
+
+    const diagnosticsResponse = await handleHermesDiagnostics(request, env, url, {
+      owner, fetchImpl: options.fetchImpl
+    });
+    if (diagnosticsResponse) return jsonResponse(await diagnosticsResponse);
 
     const jobsResponse = await handleHermesJobs(request, env, url, {
       owner, fetchImpl: options.fetchImpl

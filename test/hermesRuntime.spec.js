@@ -106,6 +106,19 @@ async function slotHolder() {
   return env.DB.prepare("SELECT id, status FROM hermes_runs WHERE holds_slot = 1").first();
 }
 
+async function insertDiagnosticRun({ id, owner = "admin", status = "failed", createdAt = Date.now(), completedAt = null,
+  timelineJson = null, errorCode = null, errorMessage = null } = {}) {
+  const runId = id || "hrun_" + crypto.randomUUID().replace(/-/g, "");
+  await env.DB.prepare(`INSERT INTO hermes_runs
+    (id, owner_username, project_id, conversation_id, instance_id, agent_id, client_request_id,
+     request_fingerprint, upstream_idempotency_key, upstream_request_json, model_mode, status,
+     error_code, error_message, last_event_seq, timeline_json, submitted_at, completed_at, created_at, updated_at)
+    VALUES (?, ?, 'default', ?, 'oracle-hermes', 'hermes-agent', ?, ?, ?, '{}', 'agent_default', ?, ?, ?, -1, ?, ?, ?, ?, ?)`)
+    .bind(runId, owner, "conv-" + runId, "request-" + runId, "fingerprint-" + runId,
+      "idem-" + runId, status, errorCode, errorMessage, timelineJson, createdAt, completedAt, createdAt, createdAt).run();
+  return runId;
+}
+
 // The only way to release a slot whose remote outcome is unknown: an operator runs this guarded
 // statement manually after confirming on the Hermes side that the run does not exist or has stopped.
 async function releaseSlotAsOperator(id) {
@@ -1164,6 +1177,79 @@ describe("Hermes user and project isolation", () => {
   it("requires authentication", async () => {
     const response = await worker.fetch(new Request(ORIGIN + "/api/hermes/catalog"), testEnv(), {});
     expect(response.status).toBe(401);
+  });
+});
+
+describe("Hermes run diagnostics", () => {
+  it("lists only owned runs newest-first and applies time windows", async () => {
+    const now = Date.now();
+    const newest = await insertDiagnosticRun({ owner:"alice", status:"failed", createdAt:now - 1000 });
+    const older = await insertDiagnosticRun({ owner:"alice", status:"completed", createdAt:now - 2000, completedAt:now - 1500 });
+    await insertDiagnosticRun({ owner:"bob", status:"failed", createdAt:now - 500 });
+    await insertDiagnosticRun({ owner:"alice", status:"interrupted", createdAt:now - 8 * 24 * 60 * 60 * 1000 });
+
+    const day = await call("GET", "/api/hermes/diagnostics/runs?window=24h", { user:"alice" });
+    expect(day.status).toBe(200);
+    expect(day.json.runs.map(run => run.id)).toEqual([newest, older]);
+    expect(day.json.runs.every(run => run.dataSource === "D1 persisted Hermes runs")).toBe(true);
+    expect(day.json.pagination).toMatchObject({ total:2, offset:0, hasMore:false });
+
+    const month = await call("GET", "/api/hermes/diagnostics/runs?window=30d&limit=2&offset=2", { user:"alice" });
+    expect(month.json.pagination).toMatchObject({ total:3, limit:2, offset:2, hasMore:false });
+    expect(month.json.runs).toHaveLength(1);
+  });
+
+  it.each([
+    ["failed", "failed"], ["cancelled", "cancelled"], ["interrupted", "interrupted"],
+    ["unknown", "unknown"], ["success", "completed"], ["stopping", "stopping"]
+  ])("maps the %s filter to authoritative %s rows", async (filter, status) => {
+    const expected = await insertDiagnosticRun({ status });
+    await insertDiagnosticRun({ status:status === "failed" ? "completed" : "failed" });
+    const response = await call("GET", "/api/hermes/diagnostics/runs?window=24h&status=" + filter);
+    expect(response.status).toBe(200);
+    expect(response.json.runs.map(run => run.id)).toEqual([expected]);
+  });
+
+  it("returns honest empty reasons and flags missing, empty, and persisted timelines", async () => {
+    const missing = await insertDiagnosticRun({ status:"failed", errorCode:"tool_failed", errorMessage:"token=secret-value" });
+    const empty = await insertDiagnosticRun({ status:"cancelled", timelineJson:"[]" });
+    const available = await insertDiagnosticRun({ status:"completed", timelineJson:JSON.stringify([{ event:"tool.completed", tool:"terminal", error:false, result:"ok", seq:1 }]) });
+    const list = await call("GET", "/api/hermes/diagnostics/runs?window=24h");
+    expect(list.json.runs.find(run => run.id === missing).timelineCoverage).toBe("expired_or_missing");
+    expect(list.json.runs.find(run => run.id === empty).timelineCoverage).toBe("empty");
+    expect(list.json.runs.find(run => run.id === available).timelineCoverage).toBe("available");
+    expect(JSON.stringify(list.json)).not.toContain("secret-value");
+
+    const none = await call("GET", "/api/hermes/diagnostics/runs?window=24h&status=interrupted");
+    expect(none.json.runs).toEqual([]);
+    expect(none.json.emptyReason).toMatch(/No owned Hermes runs matched/);
+  });
+
+  it("detail sync performs one authoritative GET and never submits or retries", async () => {
+    const created = await submit();
+    const local = created.json.run;
+    mock.run(upstreamRunId(local)).status = "failed";
+    mock.run(upstreamRunId(local)).error = { code:"model_failed", message:"provider failed" };
+    const postsBefore = mock.posts().length;
+    const callsBefore = mock.calls.length;
+    const detail = await call("GET", "/api/hermes/diagnostics/runs/" + local.id);
+    expect(detail.status).toBe(200);
+    expect(detail.json.run).toMatchObject({ id:local.id, status:"failed", timelineCoverage:"expired_or_missing" });
+    expect(mock.posts()).toHaveLength(postsBefore);
+    expect(mock.calls.slice(callsBefore)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method:"GET", path:"/v1/runs/" + upstreamRunId(local) })
+    ]));
+    expect(mock.calls.slice(callsBefore).every(item => item.method === "GET")).toBe(true);
+  });
+
+  it("requires auth, hides cross-user details, and validates queries", async () => {
+    const id = await insertDiagnosticRun({ owner:"alice" });
+    const unauth = await worker.fetch(new Request(ORIGIN + "/api/hermes/diagnostics/runs"), testEnv(), {});
+    expect(unauth.status).toBe(401);
+    expect((await call("GET", "/api/hermes/diagnostics/runs/" + id, { user:"bob" })).status).toBe(404);
+    expect((await call("GET", "/api/hermes/diagnostics/runs?window=1h", { user:"alice" })).status).toBe(400);
+    expect((await call("GET", "/api/hermes/diagnostics/runs?status=made_up", { user:"alice" })).status).toBe(400);
+    expect((await call("GET", "/api/hermes/diagnostics/runs", { user:"alice", envExtra:{ HERMES_CATALOG_VISIBLE:"" } })).status).toBe(404);
   });
 });
 

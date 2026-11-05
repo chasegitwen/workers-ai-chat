@@ -184,6 +184,41 @@ describe("Hermes frontend", () => {
     expect(draft).toContain("service_tier");
   });
 
+  it("renders the Hermes-only diagnostics drawer with status and window filters", () => {
+    const html = htmlPage();
+    expect(html).toContain('id="hermesDiagnosticsToggle"');
+    expect(html).toContain('id="hermesDiagnosticsDrawer" class="hermesWorkbenchDrawer"');
+    expect(html).toContain("Hermes Run Diagnostics · 只读，不会重试或重新执行");
+    for(const value of ["failed", "cancelled", "interrupted", "unknown", "stopping", "success"]){
+      expect(html).toContain('<option value="' + value + '">');
+    }
+    for(const window of ["24h", "7d", "30d"]) expect(html).toContain('data-window="' + window + '"');
+    expect(html.indexOf('id="hermesDiagnosticsToggle"')).toBeGreaterThan(html.indexOf('id="hermesJobsToggle"'));
+  });
+
+  it("sorts diagnostics newest-first and renders honest empty and missing-timeline copy", () => {
+    const render = lastDeclaration(pageScript(), "renderHermesDiagnostics");
+    expect(render).toContain("Number(b.startedAt)");
+    expect(render).toContain("emptyReason");
+    expect(render).toContain("所选时间范围内没有已持久化的运行历史");
+    const detail = lastDeclaration(pageScript(), "renderHermesDiagnosticsDetail");
+    expect(detail).toContain("事件缓存约数分钟后可能过期");
+    const coverage = lastDeclaration(pageScript(), "hermesDiagnosticsCoverageText");
+    expect(coverage).toContain("不能据此判断没有错误");
+    expect(coverage).toContain("可能截断");
+  });
+
+  it("gates diagnostic jumps on reliable links and keeps drawers mutually exclusive", () => {
+    const detail = lastDeclaration(pageScript(), "renderHermesDiagnosticsDetail");
+    expect(detail).toContain("if(run.conversationId)");
+    expect(detail).toContain("if(run.relatedJob?.id)");
+    const script = pageScript();
+    expect(script).toContain('if(opening){ setHermesWorkbenchOpen(false); setHermesJobsOpen(false); setHermesSettingsOpen(false); }\n      setHermesDiagnosticsOpen(opening);');
+    const load = lastDeclaration(script, "loadHermesDiagnosticsDetail");
+    expect(load).toContain('/api/hermes/diagnostics/runs/');
+    expect(load).not.toContain('method:"POST"');
+  });
+
   it("hides Hermes workbench drawers and jobs editor when the hidden attribute is set", () => {
     const html = htmlPage();
     expect(html).toContain(".hermesWorkbenchBackdrop[hidden],.hermesWorkbenchDrawer[hidden]{display:none}");

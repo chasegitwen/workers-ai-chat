@@ -1698,6 +1698,7 @@ body.dark .projectRuntimeItem{
 .hermesWorkbenchHistory{margin-top:10px;border-top:1px solid var(--border,#d9dee8);padding-top:8px}.hermesWorkbenchMessage{margin:7px 0;padding:8px;border-radius:7px;background:rgba(127,127,127,.08);white-space:pre-wrap;overflow-wrap:anywhere}.hermesWorkbenchMessage b{display:block;font-size:12px;margin-bottom:4px}
 .hermesWorkbenchTitleForm{border:1px solid var(--primary);border-radius:10px;padding:10px;margin-bottom:10px}.hermesWorkbenchTitleForm label{display:block;font-size:12px;margin-bottom:6px}.hermesWorkbenchTitleForm input{width:100%;min-height:38px;border:1px solid var(--border);border-radius:8px;background:inherit;color:inherit;padding:7px 9px;font:inherit}.hermesWorkbenchTitleForm div{display:flex;justify-content:flex-end;gap:6px;margin-top:8px}
 .hermesJobsToolbar{grid-template-columns:minmax(0,1fr) auto auto auto}.hermesJobsEditor{padding:12px 16px;border-bottom:1px solid var(--border,#d9dee8);display:grid;grid-template-columns:1fr 1fr;gap:9px}.hermesJobsEditor[hidden]{display:none}.hermesJobsEditor label{display:flex;flex-direction:column;gap:4px;font-size:12px}.hermesJobsEditor .wide{grid-column:1/-1}.hermesJobsEditor input,.hermesJobsEditor textarea{font:inherit;border:1px solid var(--border,#d9dee8);border-radius:8px;padding:8px;background:inherit;color:inherit;min-width:0}.hermesJobsEditor textarea{min-height:92px;resize:vertical}.hermesJobsEditorActions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px}.hermesJobsEditorActions button{font:inherit;border:1px solid var(--border,#d9dee8);border-radius:7px;background:transparent;color:inherit;padding:7px 11px;cursor:pointer}.hermesJobsPrompt,.hermesJobsResult{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto;margin:8px 0 0;padding:8px;border-radius:7px;background:rgba(127,127,127,.08)}
+.hermesDiagnosticsToolbar{grid-template-columns:auto 1fr auto}.hermesDiagnosticsWindows{display:flex;gap:5px;flex-wrap:wrap}.hermesDiagnosticsWindows button[aria-pressed="true"]{border-color:var(--primary);color:var(--primary);font-weight:600}.hermesDiagnosticsToolbar select{font:inherit;border:1px solid var(--border,#d9dee8);border-radius:8px;padding:7px 9px;background:inherit;color:inherit;min-height:36px}.hermesDiagnosticsDetail{margin-top:10px;border-top:1px solid var(--border,#d9dee8);padding-top:10px}.hermesDiagnosticsTimeline{margin:8px 0 0;padding-left:20px;font-size:12px;line-height:1.5}.hermesDiagnosticsError{margin-top:8px;padding:8px;border-radius:7px;background:rgba(190,24,93,.08);white-space:pre-wrap;overflow-wrap:anywhere}
 @media(max-width:640px){.hermesWorkbenchToolbar{grid-template-columns:1fr 1fr}.hermesWorkbenchToolbar input{grid-column:1/-1}.hermesWorkbenchDrawer{width:100vw}.hermesWorkbenchHeader{padding:12px}.hermesWorkbenchBody{padding:10px 12px 24px}}
 .hermesSettingsBody{display:flex;flex-direction:column;gap:12px}.hermesSettingsSection{border:1px solid var(--border,#d9dee8);border-radius:10px;padding:12px}.hermesSettingsSection h3{margin:0 0 8px;font-size:14px}.hermesSettingsLabel{display:flex;flex-direction:column;gap:6px;font-size:13px}.hermesSettingsLabel select{border:1px solid var(--border,#d9dee8);border-radius:8px;padding:7px 10px;background:inherit;color:inherit}.hermesSettingsHint,.hermesSettingsGap{font-size:12px;color:var(--muted,#667085);margin:6px 0 0;line-height:1.45}.hermesSettingsList{margin:0;padding-left:18px;font-size:12px;color:var(--muted,#667085);line-height:1.45}.hermesSettingsEffective{font-size:13px;line-height:1.5}@media(max-width:640px){.hermesJobsToolbar{grid-template-columns:1fr 1fr}.hermesJobsEditor{grid-template-columns:1fr}.hermesJobsEditor .wide,.hermesJobsEditorActions{grid-column:1}}
 
@@ -3584,6 +3585,29 @@ body.dark .toolErrorNotice{
   </div>
 </aside>
 
+<button id="hermesDiagnosticsBackdrop" class="hermesWorkbenchBackdrop" type="button" aria-label="关闭 Hermes 运行诊断" hidden></button>
+<aside id="hermesDiagnosticsDrawer" class="hermesWorkbenchDrawer" aria-label="Hermes 运行诊断" aria-hidden="true" hidden>
+  <div class="hermesWorkbenchHeader">
+    <div><h2>诊断</h2><p>Hermes Run Diagnostics · 只读，不会重试或重新执行</p></div>
+    <button id="hermesDiagnosticsClose" class="hermesWorkbenchClose" type="button" aria-label="关闭">&times;</button>
+  </div>
+  <div class="hermesWorkbenchToolbar hermesDiagnosticsToolbar">
+    <select id="hermesDiagnosticsStatusFilter" aria-label="筛选运行状态">
+      <option value="">全部状态</option><option value="failed">失败</option><option value="cancelled">取消</option>
+      <option value="interrupted">中断</option><option value="unknown">未知</option><option value="stopping">停止中</option>
+      <option value="success">成功</option><option value="active">进行中</option>
+    </select>
+    <div id="hermesDiagnosticsWindows" class="hermesDiagnosticsWindows" aria-label="诊断时间范围">
+      <button type="button" data-window="24h" aria-pressed="true">24h</button><button type="button" data-window="7d" aria-pressed="false">7d</button><button type="button" data-window="30d" aria-pressed="false">30d</button>
+    </div>
+    <button id="hermesDiagnosticsRefresh" type="button">刷新</button>
+  </div>
+  <div class="hermesWorkbenchBody">
+    <div id="hermesDiagnosticsStatus" class="hermesWorkbenchStatus">数据源：D1 持久化 Hermes Runs。</div>
+    <div id="hermesDiagnosticsList"></div>
+  </div>
+</aside>
+
 <button id="hermesSettingsBackdrop" class="hermesWorkbenchBackdrop" type="button" aria-label="关闭 Hermes 运行设置" hidden></button>
 <aside id="hermesSettingsDrawer" class="hermesWorkbenchDrawer" aria-label="Hermes 运行设置" aria-hidden="true" hidden>
   <div class="hermesWorkbenchHeader">
@@ -3750,7 +3774,7 @@ body.dark .toolErrorNotice{
         <label>Provider <select id="hermesProviderSelect" class="modelSelectNative" aria-label="Hermes Provider" aria-hidden="true" tabindex="-1"></select></label>
         <label id="hermesModelField" hidden>基础模型 <select id="hermesModelSelect" class="modelSelectNative" aria-label="Hermes 基础模型" aria-hidden="true" tabindex="-1"></select></label>
         <div class="openClawCatalogLine"><span id="hermesCatalogStatus"></span><button id="hermesCatalogRefresh" type="button">刷新目录</button></div>
-        <div class="hermesCapabilitiesLine"><button id="hermesCapabilitiesToggle" type="button" aria-expanded="false" aria-controls="hermesCapabilitiesPanel">能力</button><button id="hermesWorkbenchToggle" type="button" aria-expanded="false" aria-controls="hermesWorkbenchDrawer">会话 / 项目</button><button id="hermesJobsToggle" type="button" aria-expanded="false" aria-controls="hermesJobsDrawer">定时任务</button><button id="hermesSettingsToggle" type="button" aria-expanded="false" aria-controls="hermesSettingsDrawer">设置</button></div>
+        <div class="hermesCapabilitiesLine"><button id="hermesCapabilitiesToggle" type="button" aria-expanded="false" aria-controls="hermesCapabilitiesPanel">能力</button><button id="hermesWorkbenchToggle" type="button" aria-expanded="false" aria-controls="hermesWorkbenchDrawer">会话 / 项目</button><button id="hermesJobsToggle" type="button" aria-expanded="false" aria-controls="hermesJobsDrawer">定时任务</button><button id="hermesDiagnosticsToggle" type="button" aria-expanded="false" aria-controls="hermesDiagnosticsDrawer">诊断</button><button id="hermesSettingsToggle" type="button" aria-expanded="false" aria-controls="hermesSettingsDrawer">设置</button></div>
         <section id="hermesCapabilitiesPanel" class="hermesCapabilitiesPanel" aria-label="Hermes 能力" hidden>
           <div class="hermesCapabilitiesToolbar">
             <input id="hermesCapabilitiesSearch" type="search" autocomplete="off" placeholder="搜索 Skills / Toolsets" aria-label="搜索 Hermes 能力">
@@ -14471,6 +14495,16 @@ var hermesJobRepeat = document.getElementById("hermesJobRepeat");
 var hermesJobsStatus = document.getElementById("hermesJobsStatus");
 var hermesJobsList = document.getElementById("hermesJobsList");
 var hermesJobsState = { open:false, loading:false, reloadPending:false, paused:false, jobs:[], capabilities:null, executionEnabled:true, available:true, error:null, editingId:"", searchTimer:null };
+var hermesDiagnosticsToggle = document.getElementById("hermesDiagnosticsToggle");
+var hermesDiagnosticsDrawer = document.getElementById("hermesDiagnosticsDrawer");
+var hermesDiagnosticsBackdrop = document.getElementById("hermesDiagnosticsBackdrop");
+var hermesDiagnosticsClose = document.getElementById("hermesDiagnosticsClose");
+var hermesDiagnosticsStatusFilter = document.getElementById("hermesDiagnosticsStatusFilter");
+var hermesDiagnosticsWindows = document.getElementById("hermesDiagnosticsWindows");
+var hermesDiagnosticsRefresh = document.getElementById("hermesDiagnosticsRefresh");
+var hermesDiagnosticsStatus = document.getElementById("hermesDiagnosticsStatus");
+var hermesDiagnosticsList = document.getElementById("hermesDiagnosticsList");
+var hermesDiagnosticsState = { open:false, loading:false, reloadPending:false, window:"24h", status:"", runs:[], detail:null, selectedId:"", error:null, dataSource:"D1 persisted Hermes runs", updatedAt:null, emptyReason:"" };
 var hermesRunMount = document.getElementById("hermesRunMount");
 var hermesRunStatus = document.getElementById("hermesRunStatus");
 var hermesRunStatusText = document.getElementById("hermesRunStatusText");
@@ -15350,6 +15384,185 @@ async function loadHermesJobs(){
   }
 }
 
+function setHermesDiagnosticsOpen(open){
+  hermesDiagnosticsState.open = Boolean(open);
+  if(hermesDiagnosticsDrawer){
+    hermesDiagnosticsDrawer.hidden = !hermesDiagnosticsState.open;
+    hermesDiagnosticsDrawer.setAttribute("aria-hidden", hermesDiagnosticsState.open ? "false" : "true");
+  }
+  if(hermesDiagnosticsBackdrop) hermesDiagnosticsBackdrop.hidden = !hermesDiagnosticsState.open;
+  hermesDiagnosticsToggle?.setAttribute("aria-expanded", hermesDiagnosticsState.open ? "true" : "false");
+  if(hermesDiagnosticsState.open) loadHermesDiagnostics();
+}
+
+function hermesDiagnosticsCoverageText(coverage){
+  if(coverage === "available") return "已持久化";
+  if(coverage === "truncated") return "已持久化（仅保留最近事件，可能截断）";
+  if(coverage === "empty") return "已持久化为空";
+  return "时间线不可用：事件缓存可能已过期，或历史未持久化；不能据此判断没有错误";
+}
+
+function hermesDiagnosticsTime(value){
+  return value ? new Date(Number(value)).toLocaleString() : "未知";
+}
+
+function hermesDiagnosticsDuration(value, running){
+  if(!Number.isFinite(Number(value))) return "时长未知";
+  const seconds = Math.max(0, Math.round(Number(value) / 1000));
+  const text = seconds < 60 ? seconds + " 秒" : Math.floor(seconds / 60) + " 分 " + (seconds % 60) + " 秒";
+  return running ? text + "（截至刷新时）" : text;
+}
+
+function hermesDiagnosticsTimelineText(event){
+  const label = event?.event || "event";
+  const target = event?.tool || event?.goal || "";
+  const summary = event?.error ? (event.result || "工具执行错误") : (event?.result || event?.summary || event?.preview || "");
+  return [label, target, summary].filter(Boolean).join(" · ");
+}
+
+async function jumpHermesDiagnosticConversation(run){
+  if(!run?.conversationId) return;
+  setHermesDiagnosticsOpen(false);
+  if(run.projectId) activeProjectId = run.projectId;
+  await loadConversationMessages(run.conversationId);
+}
+
+function jumpHermesDiagnosticJob(run){
+  if(!run?.relatedJob?.id) return;
+  setHermesDiagnosticsOpen(false);
+  setHermesJobsOpen(true);
+  setTimeout(() => hermesJobsList?.querySelector?.('[data-job-id="' + CSS.escape(run.relatedJob.id) + '"]')?.scrollIntoView?.({ block:"center" }), 0);
+}
+
+function renderHermesDiagnosticsDetail(container, run){
+  const detail = document.createElement("div");
+  detail.className = "hermesDiagnosticsDetail";
+  const coverage = document.createElement("div");
+  coverage.className = "hermesWorkbenchCardMeta";
+  coverage.textContent = "时间线覆盖：" + hermesDiagnosticsCoverageText(run.timelineCoverage);
+  detail.appendChild(coverage);
+  if(run.error){
+    const error = document.createElement("div");
+    error.className = "hermesDiagnosticsError";
+    error.textContent = "关键错误：" + (run.error.code || "unknown") + (run.error.message ? " · " + run.error.message : "");
+    detail.appendChild(error);
+  }
+  const timeline = Array.isArray(run.timeline) ? run.timeline : [];
+  if(timeline.length){
+    const list = document.createElement("ol");
+    list.className = "hermesDiagnosticsTimeline";
+    timeline.forEach(event => {
+      const item = document.createElement("li");
+      item.textContent = hermesDiagnosticsTimelineText(event);
+      list.appendChild(item);
+    });
+    detail.appendChild(list);
+  }else{
+    const missing = document.createElement("div");
+    missing.className = "hermesWorkbenchStatus";
+    missing.textContent = run.timelineCoverage === "empty" ? "已持久化的时间线为空。" : "没有可显示的持久化时间线；上游事件缓存约数分钟后可能过期。";
+    detail.appendChild(missing);
+  }
+  const actions = document.createElement("div");
+  actions.className = "hermesWorkbenchActions";
+  if(run.conversationId) actions.append(hermesWorkbenchButton("跳转会话", () => jumpHermesDiagnosticConversation(run)));
+  if(run.relatedJob?.id) actions.append(hermesWorkbenchButton("跳转 Job", () => jumpHermesDiagnosticJob(run)));
+  if(actions.children.length) detail.appendChild(actions);
+  container.appendChild(detail);
+}
+
+function renderHermesDiagnostics(){
+  if(!hermesDiagnosticsList) return;
+  hermesDiagnosticsWindows?.querySelectorAll?.("[data-window]").forEach(button => button.setAttribute("aria-pressed", button.dataset.window === hermesDiagnosticsState.window ? "true" : "false"));
+  if(hermesDiagnosticsStatusFilter) hermesDiagnosticsStatusFilter.value = hermesDiagnosticsState.status;
+  if(hermesDiagnosticsState.loading) hermesDiagnosticsStatus.textContent = "诊断记录加载中…";
+  else if(hermesDiagnosticsState.error) hermesDiagnosticsStatus.textContent = "诊断记录不可用：" + hermesErrorText(hermesDiagnosticsState.error);
+  else hermesDiagnosticsStatus.textContent = "数据源：" + hermesDiagnosticsState.dataSource + " · 最后更新：" + hermesDiagnosticsTime(hermesDiagnosticsState.updatedAt) + " · 共 " + hermesDiagnosticsState.runs.length + " 条";
+  hermesDiagnosticsList.innerHTML = "";
+  const runs = [...hermesDiagnosticsState.runs].sort((a,b) => (Number(b.startedAt) || 0) - (Number(a.startedAt) || 0));
+  runs.forEach(run => {
+    const card = document.createElement("article");
+    card.className = "hermesWorkbenchCard";
+    card.dataset.runId = run.id;
+    const header = document.createElement("div");
+    header.className = "hermesWorkbenchCardHeader";
+    const title = document.createElement("strong");
+    title.textContent = run.id;
+    const status = document.createElement("span");
+    status.className = "hermesWorkbenchCardMeta";
+    status.textContent = HERMES_STATUS_LABELS[run.status] || run.status;
+    header.append(title, status);
+    const timing = document.createElement("div");
+    timing.className = "hermesWorkbenchCardMeta";
+    timing.textContent = hermesDiagnosticsTime(run.startedAt) + " · " + hermesDiagnosticsDuration(run.durationMs, run.durationRunning);
+    const context = document.createElement("div");
+    context.className = "hermesWorkbenchCardMeta";
+    context.textContent = [run.instanceId, run.projectId, run.conversationId, run.model?.id].filter(Boolean).join(" · ");
+    const source = document.createElement("div");
+    source.className = "hermesWorkbenchCardMeta";
+    source.textContent = "数据源：" + (run.dataSource || hermesDiagnosticsState.dataSource) + " · 更新 " + hermesDiagnosticsTime(run.updatedAt);
+    const actions = document.createElement("div");
+    actions.className = "hermesWorkbenchActions";
+    actions.append(hermesWorkbenchButton(hermesDiagnosticsState.selectedId === run.id ? "收起详情" : "查看详情", () => {
+      if(hermesDiagnosticsState.selectedId === run.id){ hermesDiagnosticsState.selectedId = ""; hermesDiagnosticsState.detail = null; renderHermesDiagnostics(); }
+      else loadHermesDiagnosticsDetail(run.id);
+    }));
+    card.append(header, timing, context, source, actions);
+    if(hermesDiagnosticsState.selectedId === run.id && hermesDiagnosticsState.detail) renderHermesDiagnosticsDetail(card, hermesDiagnosticsState.detail);
+    hermesDiagnosticsList.appendChild(card);
+  });
+  if(!runs.length && !hermesDiagnosticsState.loading){
+    const empty = document.createElement("div");
+    empty.className = "hermesWorkbenchStatus";
+    empty.textContent = hermesDiagnosticsState.error ? "无法读取诊断历史。" : (hermesDiagnosticsState.emptyReason || "所选时间范围内没有已持久化的运行历史。");
+    hermesDiagnosticsList.appendChild(empty);
+  }
+}
+
+async function loadHermesDiagnostics(){
+  if(hermesDiagnosticsState.loading){ hermesDiagnosticsState.reloadPending = true; return; }
+  hermesDiagnosticsState.loading = true;
+  hermesDiagnosticsState.error = null;
+  renderHermesDiagnostics();
+  try{
+    const params = new URLSearchParams({ window:hermesDiagnosticsState.window, limit:"50", offset:"0" });
+    if(hermesDiagnosticsState.status) params.set("status", hermesDiagnosticsState.status);
+    const res = await fetch("/api/hermes/diagnostics/runs?" + params.toString());
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok || !data.ok) throw data.error || { code:"hermes_diagnostics_unavailable", message:"诊断记录不可用" };
+    hermesDiagnosticsState.runs = Array.isArray(data.runs) ? data.runs : [];
+    hermesDiagnosticsState.dataSource = data.dataSource || "D1 persisted Hermes runs";
+    hermesDiagnosticsState.updatedAt = data.updatedAt || Date.now();
+    hermesDiagnosticsState.emptyReason = data.emptyReason || "";
+    hermesDiagnosticsState.selectedId = "";
+    hermesDiagnosticsState.detail = null;
+  }catch(err){
+    hermesDiagnosticsState.runs = [];
+    hermesDiagnosticsState.error = err?.code ? err : { code:"network", message:err?.message || "网络错误" };
+  }finally{
+    hermesDiagnosticsState.loading = false;
+    renderHermesDiagnostics();
+    if(hermesDiagnosticsState.reloadPending){ hermesDiagnosticsState.reloadPending = false; loadHermesDiagnostics(); }
+  }
+}
+
+async function loadHermesDiagnosticsDetail(runId){
+  hermesDiagnosticsState.selectedId = runId;
+  hermesDiagnosticsState.detail = null;
+  renderHermesDiagnostics();
+  try{
+    const res = await fetch("/api/hermes/diagnostics/runs/" + encodeURIComponent(runId));
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok || !data.ok) throw data.error || { code:"hermes_diagnostics_unavailable", message:"运行详情不可用" };
+    if(hermesDiagnosticsState.selectedId === runId) hermesDiagnosticsState.detail = data.run;
+    const index = hermesDiagnosticsState.runs.findIndex(run => run.id === runId);
+    if(index >= 0 && data.run) hermesDiagnosticsState.runs[index] = { ...hermesDiagnosticsState.runs[index], ...data.run };
+    if(data.syncError) setContextStatus("权威状态刷新失败，显示最近持久化状态：" + hermesErrorText(data.syncError));
+  }catch(err){
+    if(hermesDiagnosticsState.selectedId === runId) hermesDiagnosticsState.detail = { ...hermesDiagnosticsState.runs.find(run => run.id === runId), timeline:[], timelineCoverage:"expired_or_missing", error:err };
+  }finally{ renderHermesDiagnostics(); }
+}
+
 async function hermesJobsMutation(path, method, body){
   const res = await fetch(path, {
     method,
@@ -16171,7 +16384,7 @@ function initHermesUi(){
   hermesCapabilitiesCategory?.addEventListener("change", renderHermesCapabilities);
   hermesWorkbenchToggle?.addEventListener("click", () => {
     const opening = !hermesWorkbenchState.open;
-    if(opening){ setHermesJobsOpen(false); setHermesSettingsOpen(false); }
+    if(opening){ setHermesJobsOpen(false); setHermesDiagnosticsOpen(false); setHermesSettingsOpen(false); }
     setHermesWorkbenchOpen(opening);
   });
   hermesWorkbenchClose?.addEventListener("click", () => setHermesWorkbenchOpen(false));
@@ -16188,12 +16401,30 @@ function initHermesUi(){
   hermesWorkbenchProjectCreate?.addEventListener("click", createHermesWorkbenchProject);
   hermesJobsToggle?.addEventListener("click", () => {
       const opening = !hermesJobsState.open;
-      if(opening){ setHermesWorkbenchOpen(false); setHermesSettingsOpen(false); }
+      if(opening){ setHermesWorkbenchOpen(false); setHermesDiagnosticsOpen(false); setHermesSettingsOpen(false); }
       setHermesJobsOpen(opening);
+    });
+    hermesDiagnosticsToggle?.addEventListener("click", () => {
+      const opening = !hermesDiagnosticsState.open;
+      if(opening){ setHermesWorkbenchOpen(false); setHermesJobsOpen(false); setHermesSettingsOpen(false); }
+      setHermesDiagnosticsOpen(opening);
+    });
+    hermesDiagnosticsClose?.addEventListener("click", () => setHermesDiagnosticsOpen(false));
+    hermesDiagnosticsBackdrop?.addEventListener("click", () => setHermesDiagnosticsOpen(false));
+    hermesDiagnosticsRefresh?.addEventListener("click", loadHermesDiagnostics);
+    hermesDiagnosticsStatusFilter?.addEventListener("change", () => {
+      hermesDiagnosticsState.status = hermesDiagnosticsStatusFilter.value || "";
+      loadHermesDiagnostics();
+    });
+    hermesDiagnosticsWindows?.addEventListener("click", event => {
+      const button = event.target?.closest?.("[data-window]");
+      if(!button) return;
+      hermesDiagnosticsState.window = button.dataset.window;
+      loadHermesDiagnostics();
     });
     hermesSettingsToggle?.addEventListener("click", () => {
       const opening = !hermesSettingsState.open;
-      if(opening){ setHermesWorkbenchOpen(false); setHermesJobsOpen(false); }
+      if(opening){ setHermesWorkbenchOpen(false); setHermesJobsOpen(false); setHermesDiagnosticsOpen(false); }
       setHermesSettingsOpen(opening);
     });
     hermesSettingsClose?.addEventListener("click", () => setHermesSettingsOpen(false));

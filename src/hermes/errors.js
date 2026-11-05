@@ -32,7 +32,7 @@ export function redactSecrets(text, secrets = []) {
     if (value.length >= 4) out = out.split(value).join("[redacted]");
   }
   return out
-    .replace(/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/gi, "[redacted private key]")
+    .replace(/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/gi, "[redacted private key]")
     .replace(/(\bAuthorization\s*[:=]\s*Basic)\s+[A-Za-z0-9+/_=-]+/gi, "$1 [redacted]")
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
     .replace(/HermesRoom\s+[A-Za-z0-9._~+/=-]+/gi, "HermesRoom [redacted]")

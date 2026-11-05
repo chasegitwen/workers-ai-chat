@@ -914,6 +914,28 @@ describe("Hermes secret handling", () => {
     expect(event.result).toContain("[redacted token]");
   });
 
+  it("redacts a truncated private key that has no END marker", () => {
+    const event = sanitizeHermesTimelineEvent("tool.completed", {
+      tool: "terminal",
+      result_preview: "prefix -----BEGIN RSA PRIVATE KEY-----\nprivate-material"
+    }, 1);
+
+    expect(event.result).toBe("prefix [redacted private key]");
+    expect(event.result).not.toContain("private-material");
+  });
+
+  it("redacts a secret crossing the retained preview boundary before truncation", () => {
+    const secret = "github_pat_1234567890_ABCDEF";
+    const event = sanitizeHermesTimelineEvent("tool.completed", {
+      tool: "terminal",
+      result_preview: "x".repeat(489) + " " + secret + " trailing output"
+    }, 1);
+
+    expect(event.result).toHaveLength(500);
+    expect(event.result).not.toContain(secret);
+    expect(event.result).toContain("[redacted");
+  });
+
   it("redacts upstream error text and never logs credentials", async () => {
     mock.onCreate = () => new Response(JSON.stringify({
       error: { message: "bad key Bearer " + MOCK_API_KEY + " api_key=\"zzz\"", type: "invalid_request_error", code: "bad" }

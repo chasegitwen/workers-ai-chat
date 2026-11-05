@@ -5,6 +5,7 @@ import { safeCode, safeMessage } from "./errors.js";
 export const HERMES_TIMELINE_LIMIT = 50;
 const RESULT_PREVIEW_LIMIT = 500;
 const ARG_PREVIEW_LIMIT = 300;
+const REDACTION_INPUT_LIMIT = 16 * 1024;
 
 function previewValue(value, limit) {
   if (value === null || value === undefined) return "";
@@ -13,8 +14,9 @@ function previewValue(value, limit) {
   else {
     try { text = JSON.stringify(value); } catch (err) { text = String(value); }
   }
-  // Redact before truncation so a credential spanning the preview boundary cannot leak.
-  return safeMessage(text, [], limit);
+  // Bound regex work, then redact before the final preview truncation so a credential
+  // spanning the retained preview boundary cannot leak.
+  return safeMessage(text.slice(0, REDACTION_INPUT_LIMIT), [], limit);
 }
 
 function safeDuration(value) {

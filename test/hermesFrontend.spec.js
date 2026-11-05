@@ -184,6 +184,19 @@ describe("Hermes frontend", () => {
     expect(draft).toContain("service_tier");
   });
 
+  it("hides Hermes workbench drawers and jobs editor when the hidden attribute is set", () => {
+    const html = htmlPage();
+    expect(html).toContain(".hermesWorkbenchBackdrop[hidden],.hermesWorkbenchDrawer[hidden]{display:none}");
+    expect(html).toContain(".hermesJobsEditor[hidden]{display:none}");
+    expect(html).toContain('id="hermesWorkbenchDrawer" class="hermesWorkbenchDrawer" aria-label="Hermes 会话与项目" aria-hidden="true" hidden>');
+    expect(html).toContain('id="hermesJobsDrawer" class="hermesWorkbenchDrawer" aria-label="Hermes 定时任务" aria-hidden="true" hidden>');
+    expect(html).toContain('id="hermesSettingsDrawer" class="hermesWorkbenchDrawer" aria-label="Hermes 运行设置" aria-hidden="true" hidden>');
+    expect(html).toContain('id="hermesWorkbenchBackdrop" class="hermesWorkbenchBackdrop" type="button" aria-label="关闭 Hermes 会话与项目" hidden>');
+    expect(html).toContain('id="hermesJobsBackdrop" class="hermesWorkbenchBackdrop" type="button" aria-label="关闭 Hermes 定时任务" hidden>');
+    expect(html).toContain('id="hermesSettingsBackdrop" class="hermesWorkbenchBackdrop" type="button" aria-label="关闭 Hermes 运行设置" hidden>');
+    expect(html).toContain('id="hermesJobsEditor" class="hermesJobsEditor" hidden>');
+  });
+
   it("includes model_options on Hermes submit when settings override", async () => {
     const { api, fetches, stored } = sandbox();
     stored.set("hermesRunSettings.v1", JSON.stringify({ reasoningEffort: "high", serviceTier: "priority" }));

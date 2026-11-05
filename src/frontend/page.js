@@ -15490,8 +15490,10 @@ function renderHermesDiagnosticsDetail(container, run){
   const primary = run.primaryError || (Array.isArray(run.errors) ? run.errors[0] : null);
   if(primary){
     const classification = document.createElement("div");
-    classification.className = "hermesDiagnosticsError";
+    classification.className = primary.isFault === false ? "hermesWorkbenchStatus" : "hermesDiagnosticsError";
+    const kindLabel = primary.kind === "waiting" ? "等待中（非故障）" : (primary.kind === "cancel" ? "取消（非故障）" : (primary.isFault === false ? "非故障" : "故障信号"));
     classification.textContent = "错误分类：" + (HERMES_DIAGNOSTIC_CATEGORY_LABELS[primary.category] || primary.category)
+      + " · " + kindLabel
       + " · 置信度：" + (primary.categoryConfidence === "confirmed" ? "已确认信号" : "推测");
     detail.appendChild(classification);
     const factsTitle = document.createElement("strong");

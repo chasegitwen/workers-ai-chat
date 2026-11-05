@@ -107,6 +107,17 @@ function diagnosticsErrors(row, timeline) {
   return records;
 }
 
+function selectPrimaryError(records, status) {
+  if (!records.length) return null;
+  if (status === "unknown" || status === "submission_unknown") {
+    return records.find(item => item.category === "unknown_execution") || records[records.length - 1] || null;
+  }
+  if (status === "cancelled" || status === "cancel_requested" || status === "waiting_for_approval" || status === "waiting_for_clarification" || status === "interrupted") {
+    return records.find(item => !item.timelineSeq && item.kind) || records[records.length - 1] || null;
+  }
+  return records[0] || null;
+}
+
 function diagnosticRun(row, { detail = false, now = Date.now() } = {}) {
   const startedAt = Number(row.submitted_at || row.created_at) || null;
   const terminal = ["completed", "failed", "cancelled", "interrupted", "rejected", "abandoned"].includes(row.status);
@@ -132,7 +143,7 @@ function diagnosticRun(row, { detail = false, now = Date.now() } = {}) {
     upstreamSessionId: row.upstream_session_id || null,
     model: model ? { provider, id: model, source: row.actual_model ? "actual" : "requested" } : null,
     error: errorCode || errorMessage ? { code: errorCode || "hermes_run_error", message: errorMessage } : null,
-    primaryError: errors[0] || null,
+    primaryError: selectPrimaryError(errors, row.status),
     errors,
     dataSource: detail ? "D1 persisted run; Hermes authoritative sync when applicable" : "D1 persisted Hermes runs",
     updatedAt: Number(row.updated_at) || null,
@@ -159,9 +170,11 @@ async function listDiagnostics(env, url, owner) {
   let rows;
   let total;
   if (category) {
+    const CATEGORY_SCAN_CAP = 500;
     const rowsResult = await env.DB.prepare("SELECT " + DIAGNOSTIC_COLUMNS + " FROM hermes_runs WHERE " + where
-      + " ORDER BY COALESCE(submitted_at, created_at) DESC, created_at DESC").bind(...bindings).all();
-    const classified = (rowsResult.results || []).map(row => diagnosticRun(row))
+      + " ORDER BY COALESCE(submitted_at, created_at) DESC, created_at DESC LIMIT ?").bind(...bindings, CATEGORY_SCAN_CAP).all();
+    const scanned = rowsResult.results || [];
+    const classified = scanned.map(row => diagnosticRun(row))
       .filter(run => run.errors.some(error => error.category === category));
     total = classified.length;
     const page = classified.slice(offset, offset + limit);
@@ -171,7 +184,8 @@ async function listDiagnostics(env, url, owner) {
       window,
       filters,
       errorCategory: category,
-      pagination: { limit, offset, total, hasMore: offset + page.length < total },
+      pagination: { limit, offset, total, hasMore: offset + page.length < total || scanned.length >= CATEGORY_SCAN_CAP },
+      categoryScanCapped: scanned.length >= CATEGORY_SCAN_CAP,
       dataSource: "D1 persisted Hermes runs; taxonomy derived on read",
       updatedAt: Date.now(),
       emptyReason: total ? null : "No owned Hermes runs matched this error category in the selected window."

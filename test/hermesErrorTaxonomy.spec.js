@@ -58,7 +58,7 @@ describe("Hermes error taxonomy", () => {
 
   it("marks ambiguous network submissions as inferred and forbids automatic replacement", () => {
     const record = buildHermesErrorRecord({
-      originalCode:"hermes_network_error", status:"submission_unknown", ambiguous:true
+      originalCode:"hermes_network_error", status:"failed", ambiguous:true
     });
     expect(record).toMatchObject({ category:"network_timeout_sse", categoryConfidence:"inferred" });
     expect(record.suggestion).toMatch(/do not automatically create or POST a replacement Run/i);
@@ -68,5 +68,27 @@ describe("Hermes error taxonomy", () => {
     const record = buildHermesErrorRecord({ status:"submission_unknown", originalCode:"hermes_submission_unknown" });
     expect(record.category).toBe("unknown_execution");
     expect(record.suggestion).toMatch(/do not automatically create or POST a replacement Run/i);
+  });
+
+  it("keeps submission_unknown as unknown_execution even when a reject/network code is also present", () => {
+    for (const originalCode of ["hermes_timeout", "hermes_upstream_auth", "hermes_unavailable", "hermes_upstream_error"]) {
+      const record = buildHermesErrorRecord({ status:"submission_unknown", originalCode, statusDetail:originalCode });
+      expect(record.category).toBe("unknown_execution");
+      expect(record.suggestion).toMatch(/do not automatically create or POST a replacement Run/i);
+    }
+  });
+
+  it("does not treat upstream cancel without local stop as a user cancellation", () => {
+    const record = buildHermesErrorRecord({
+      status:"cancelled",
+      statusDetail:"cancelled_upstream_without_request",
+      summary:"upstream cancelled"
+    });
+    expect(record).toMatchObject({ category:"unrecognized", kind:"upstream_cancel", isFault:true, categoryConfidence:"confirmed" });
+    expect(record.suggestion).not.toMatch(/normal user cancellation/i);
+  });
+
+  it("does not classify hermes_upstream_error as network via stream substring", () => {
+    expect(classifyHermesError({ originalCode:"hermes_upstream_error" }).category).toBe("unrecognized");
   });
 });

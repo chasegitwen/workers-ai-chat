@@ -75,20 +75,33 @@ export function classifyHermesError(input = {}) {
   const upstreamCode = normalizedCode(input.upstreamCode);
   const status = normalizedCode(input.status || input.statusAtError);
   const statusDetail = normalizedCode(input.statusDetail);
-  const codes = [originalCode, upstreamCode, statusDetail].filter(Boolean);
+  // status_detail may carry turn_exit_reason / UI markers; do not treat it as an error-code classifier key.
+  const codes = [originalCode, upstreamCode].filter(Boolean);
   const has = (set, patterns) => codes.some(code => codeMatches(code, set, patterns));
 
-  if (input.timelineToolError === true) {
-    return result("tool_execution", "confirmed", "Hermes timeline contains tool.completed with error=true.", "Inspect the sanitized tool failure facts; retry only after the tool issue is understood.");
-  }
-  if (has(TOOL_CODES, [/^tool_/, /_tool_(?:error|failed)$/])) {
-    return result("tool_execution", "confirmed", "An observed error code identifies a tool execution failure.", "Inspect the sanitized tool failure facts; retry only after the tool issue is understood.");
+  // H1: unknown / submission_unknown outcome outranks transport or reject codes that may have led here.
+  if (UNKNOWN_STATUSES.has(status) || statusDetail === "upstream_not_found" || statusDetail === "upstream_unknown"
+    || has(UNKNOWN_CODES, [/unknown_execution$/, /submission_unknown$/, /upstream_not_found$/])) {
+    return result("unknown_execution", "confirmed", "The stored status or code says the execution outcome is unknown.", "Manually reconcile or resolve the unknown run; do not automatically create or POST a replacement Run.");
   }
   if (WAITING_STATUSES.has(status)) {
     return result("user_cancel_or_approval", "confirmed", "The run is waiting for user approval or clarification, not failed.", "Provide the requested approval or clarification; this waiting state is not a production fault.", { kind: "waiting", isFault: false });
   }
+  // H2: upstream cancel without a local stop request is a fault, not a user cancellation.
+  if (status === "cancelled" && statusDetail === "cancelled_upstream_without_request") {
+    return result("unrecognized", "confirmed", "Upstream reported cancelled without a local stop request; this is not a user cancellation.", "Inspect authoritative Run facts; do not present this as a user cancel and do not auto-create a replacement Run.", { kind: "upstream_cancel", isFault: true });
+  }
+  if (status === "interrupted" || statusDetail === "upstream_interrupted") {
+    return result("unrecognized", "confirmed", "The stored run status records an interruption.", "Inspect authoritative Run facts before any manual retry; do not auto-create a replacement Run.", { kind: "interrupted", isFault: true });
+  }
   if (CANCEL_STATUSES.has(status)) {
-    return result("user_cancel_or_approval", "confirmed", "The stored run status records cancellation or a cancellation request.", "Confirm the final authoritative state; normal user cancellation is not automatically a production fault.", { kind: "cancel", isFault: false });
+    return result("user_cancel_or_approval", "confirmed", "The stored run status records a user cancellation or cancellation request.", "Confirm the final authoritative state; normal user cancellation is not automatically a production fault.", { kind: "cancel", isFault: false });
+  }
+  if (input.timelineToolError === true) {
+    return result("tool_execution", "confirmed", "Hermes timeline contains tool.completed with error=true.", "Inspect the sanitized tool failure facts; retry only after the tool issue is understood.");
+  }
+  if (has(TOOL_CODES, [/^tool_(?:failed|error)$/, /_tool_(?:error|failed)$/, /^hermes_tool_(?:error|failed)$/])) {
+    return result("tool_execution", "confirmed", "An observed error code identifies a tool execution failure.", "Inspect the sanitized tool failure facts; retry only after the tool issue is understood.");
   }
   if (has(AUTH_CODES, [/(?:^|_)auth(?:entication|orization)?_(?:failed|error|rejected)$/, /invalid_(?:api_)?key/])) {
     return result("api_auth", "confirmed", "An observed error code identifies an authentication or authorization rejection.", "Verify the relevant API authorization outside diagnostics; do not expose credentials here.");
@@ -99,8 +112,9 @@ export function classifyHermesError(input = {}) {
   if (has(RUNTIME_CODES, [/(?:runtime|gateway)_draining$/, /storage_unavailable$/])) {
     return result("runtime_unavailable", "confirmed", "An observed error code identifies runtime draining or unavailability.", "Wait for runtime readiness and verify health before a manual retry.");
   }
-  if (has(NETWORK_CODES, [/(?:network|timeout|sse|stream).*(?:error|timeout|closed|lost|unavailable)/])) {
-    const ambiguous = input.ambiguous === true || status === "submission_unknown" || originalCode === "hermes_network_error";
+  // Avoid matching the substring "stream" inside unrelated codes such as hermes_upstream_error.
+  if (has(NETWORK_CODES, [/(?:^|_)(?:network|timeout|sse)(?:_|$)/, /(?:^|_)stream_(?:error|unavailable|closed|lost)(?:_|$)/, /sse_(?:disconnected|connection_lost)/])) {
+    const ambiguous = input.ambiguous === true || originalCode === "hermes_network_error";
     return result("network_timeout_sse", ambiguous ? "inferred" : "confirmed",
       ambiguous
         ? "The observed network/timeout signal may explain the interruption, but the execution outcome is not proven."
@@ -109,14 +123,11 @@ export function classifyHermesError(input = {}) {
         ? "Check and reconcile the existing Run manually; do not automatically create or POST a replacement Run."
         : "Check connectivity and authoritative Run state before a manual retry.");
   }
-  if (UNKNOWN_STATUSES.has(status) || has(UNKNOWN_CODES, [/unknown_execution$/, /submission_unknown$/, /upstream_not_found$/])) {
-    return result("unknown_execution", "confirmed", "The stored status or code says the execution outcome is unknown.", "Manually reconcile or resolve the unknown run; do not automatically create or POST a replacement Run.");
-  }
   if (has(ADAPTER_CODES, [/(?:^|_)d1_(?:error|unavailable|failed)$/, /adapter_(?:error|failed)$/])) {
     return result("worker_d1_adapter", "confirmed", "An observed error code identifies the Worker, D1, or adapter layer.", "Inspect Worker/D1 adapter diagnostics; retry only after persistence and adapter health are confirmed.");
   }
   return result("unrecognized", "inferred",
-    codes.length ? "No documented taxonomy mapping matched the preserved code." : "No code, timeline tool failure, or classified run state was observed.",
+    codes.length || statusDetail ? "No documented taxonomy mapping matched the preserved code." : "No code, timeline tool failure, or classified run state was observed.",
     "Preserve the original facts and inspect manually; do not retry solely from this classification.");
 }
 

@@ -188,7 +188,7 @@ describe("Hermes frontend", () => {
     const html = htmlPage();
     expect(html).toContain('id="hermesDiagnosticsToggle"');
     expect(html).toContain('id="hermesDiagnosticsDrawer" class="hermesWorkbenchDrawer"');
-    expect(html).toContain("Hermes Run Diagnostics · 只读，不会重试或重新执行");
+    expect(html).toContain("Hermes Run Diagnostics · 不提交、不重试（刷新仅同步权威状态）");
     for(const value of ["failed", "cancelled", "interrupted", "unknown", "stopping", "success"]){
       expect(html).toContain('<option value="' + value + '">');
     }
@@ -201,8 +201,12 @@ describe("Hermes frontend", () => {
     expect(render).toContain("Number(b.startedAt)");
     expect(render).toContain("emptyReason");
     expect(render).toContain("所选时间范围内没有已持久化的运行历史");
+    expect(render).toContain("hasMore");
+    expect(render).toContain("上游状态：");
     const detail = lastDeclaration(pageScript(), "renderHermesDiagnosticsDetail");
     expect(detail).toContain("事件缓存约数分钟后可能过期");
+    expect(detail).toContain("上游：");
+    expect(detail).toContain("诊断详情接口失败（不是该 Run 自身错误）");
     const coverage = lastDeclaration(pageScript(), "hermesDiagnosticsCoverageText");
     expect(coverage).toContain("不能据此判断没有错误");
     expect(coverage).toContain("可能截断");
@@ -212,10 +216,15 @@ describe("Hermes frontend", () => {
     const detail = lastDeclaration(pageScript(), "renderHermesDiagnosticsDetail");
     expect(detail).toContain("if(run.conversationId)");
     expect(detail).toContain("if(run.relatedJob?.id)");
+    const jump = lastDeclaration(pageScript(), "jumpHermesDiagnosticConversation");
+    expect(jump).toContain("persistActiveWorkspace");
+    expect(jump).toContain("loadConversations");
     const script = pageScript();
     expect(script).toContain('if(opening){ setHermesWorkbenchOpen(false); setHermesJobsOpen(false); setHermesSettingsOpen(false); }\n      setHermesDiagnosticsOpen(opening);');
     const load = lastDeclaration(script, "loadHermesDiagnosticsDetail");
     expect(load).toContain('/api/hermes/diagnostics/runs/');
+    expect(load).toContain("detailError");
+    expect(load).not.toContain('timelineCoverage:"expired_or_missing", error:err');
     expect(load).not.toContain('method:"POST"');
   });
 

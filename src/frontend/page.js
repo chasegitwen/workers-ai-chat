@@ -3588,7 +3588,7 @@ body.dark .toolErrorNotice{
 <button id="hermesDiagnosticsBackdrop" class="hermesWorkbenchBackdrop" type="button" aria-label="关闭 Hermes 运行诊断" hidden></button>
 <aside id="hermesDiagnosticsDrawer" class="hermesWorkbenchDrawer" aria-label="Hermes 运行诊断" aria-hidden="true" hidden>
   <div class="hermesWorkbenchHeader">
-    <div><h2>诊断</h2><p>Hermes Run Diagnostics · 只读，不会重试或重新执行</p></div>
+    <div><h2>诊断</h2><p>Hermes Run Diagnostics · 不提交、不重试（刷新仅同步权威状态）</p></div>
     <button id="hermesDiagnosticsClose" class="hermesWorkbenchClose" type="button" aria-label="关闭">&times;</button>
   </div>
   <div class="hermesWorkbenchToolbar hermesDiagnosticsToolbar">
@@ -14504,7 +14504,7 @@ var hermesDiagnosticsWindows = document.getElementById("hermesDiagnosticsWindows
 var hermesDiagnosticsRefresh = document.getElementById("hermesDiagnosticsRefresh");
 var hermesDiagnosticsStatus = document.getElementById("hermesDiagnosticsStatus");
 var hermesDiagnosticsList = document.getElementById("hermesDiagnosticsList");
-var hermesDiagnosticsState = { open:false, loading:false, reloadPending:false, window:"24h", status:"", runs:[], detail:null, selectedId:"", error:null, dataSource:"D1 persisted Hermes runs", updatedAt:null, emptyReason:"" };
+var hermesDiagnosticsState = { open:false, loading:false, reloadPending:false, window:"24h", status:"", runs:[], detail:null, selectedId:"", error:null, detailError:null, syncError:null, dataSource:"D1 persisted Hermes runs", updatedAt:null, emptyReason:"", total:0, hasMore:false };
 var hermesRunMount = document.getElementById("hermesRunMount");
 var hermesRunStatus = document.getElementById("hermesRunStatus");
 var hermesRunStatusText = document.getElementById("hermesRunStatusText");
@@ -15423,7 +15423,11 @@ function hermesDiagnosticsTimelineText(event){
 async function jumpHermesDiagnosticConversation(run){
   if(!run?.conversationId) return;
   setHermesDiagnosticsOpen(false);
-  if(run.projectId) activeProjectId = run.projectId;
+  if(run.projectId){
+    activeProjectId = run.projectId;
+    persistActiveWorkspace(workspaceKeyForProjectId(run.projectId));
+    await loadConversations({ preserveSelection:true });
+  }
   await loadConversationMessages(run.conversationId);
 }
 
@@ -15441,6 +15445,28 @@ function renderHermesDiagnosticsDetail(container, run){
   coverage.className = "hermesWorkbenchCardMeta";
   coverage.textContent = "时间线覆盖：" + hermesDiagnosticsCoverageText(run.timelineCoverage);
   detail.appendChild(coverage);
+  if(run.upstreamStatus || run.statusDetail){
+    const statusMeta = document.createElement("div");
+    statusMeta.className = "hermesWorkbenchCardMeta";
+    statusMeta.textContent = [
+      "状态：" + (HERMES_STATUS_LABELS[run.status] || run.status),
+      run.upstreamStatus ? ("上游：" + run.upstreamStatus) : "",
+      run.statusDetail ? ("详情：" + run.statusDetail) : ""
+    ].filter(Boolean).join(" · ");
+    detail.appendChild(statusMeta);
+  }
+  if(hermesDiagnosticsState.syncError){
+    const sync = document.createElement("div");
+    sync.className = "hermesWorkbenchStatus";
+    sync.textContent = "权威同步失败，以下为最近持久化状态，可能过期：" + hermesErrorText(hermesDiagnosticsState.syncError);
+    detail.appendChild(sync);
+  }
+  if(hermesDiagnosticsState.detailError){
+    const loadErr = document.createElement("div");
+    loadErr.className = "hermesDiagnosticsError";
+    loadErr.textContent = "诊断详情接口失败（不是该 Run 自身错误）：" + hermesErrorText(hermesDiagnosticsState.detailError);
+    detail.appendChild(loadErr);
+  }
   if(run.error){
     const error = document.createElement("div");
     error.className = "hermesDiagnosticsError";
@@ -15477,7 +15503,12 @@ function renderHermesDiagnostics(){
   if(hermesDiagnosticsStatusFilter) hermesDiagnosticsStatusFilter.value = hermesDiagnosticsState.status;
   if(hermesDiagnosticsState.loading) hermesDiagnosticsStatus.textContent = "诊断记录加载中…";
   else if(hermesDiagnosticsState.error) hermesDiagnosticsStatus.textContent = "诊断记录不可用：" + hermesErrorText(hermesDiagnosticsState.error);
-  else hermesDiagnosticsStatus.textContent = "数据源：" + hermesDiagnosticsState.dataSource + " · 最后更新：" + hermesDiagnosticsTime(hermesDiagnosticsState.updatedAt) + " · 共 " + hermesDiagnosticsState.runs.length + " 条";
+  else {
+    const loaded = hermesDiagnosticsState.runs.length;
+    const total = Number(hermesDiagnosticsState.total) || loaded;
+    const more = hermesDiagnosticsState.hasMore ? "（还有更多，当前仅加载前 " + loaded + " 条）" : "";
+    hermesDiagnosticsStatus.textContent = "数据源：" + hermesDiagnosticsState.dataSource + " · 最后更新：" + hermesDiagnosticsTime(hermesDiagnosticsState.updatedAt) + " · 共 " + total + " 条，已加载 " + loaded + " 条" + more;
+  }
   hermesDiagnosticsList.innerHTML = "";
   const runs = [...hermesDiagnosticsState.runs].sort((a,b) => (Number(b.startedAt) || 0) - (Number(a.startedAt) || 0));
   runs.forEach(run => {
@@ -15495,6 +15526,12 @@ function renderHermesDiagnostics(){
     const timing = document.createElement("div");
     timing.className = "hermesWorkbenchCardMeta";
     timing.textContent = hermesDiagnosticsTime(run.startedAt) + " · " + hermesDiagnosticsDuration(run.durationMs, run.durationRunning);
+    const statusExtra = document.createElement("div");
+    statusExtra.className = "hermesWorkbenchCardMeta";
+    statusExtra.textContent = [
+      run.upstreamStatus && run.upstreamStatus !== run.status ? ("上游状态：" + run.upstreamStatus) : "",
+      run.statusDetail ? ("详情：" + run.statusDetail) : ""
+    ].filter(Boolean).join(" · ");
     const context = document.createElement("div");
     context.className = "hermesWorkbenchCardMeta";
     context.textContent = [run.instanceId, run.projectId, run.conversationId, run.model?.id].filter(Boolean).join(" · ");
@@ -15507,7 +15544,9 @@ function renderHermesDiagnostics(){
       if(hermesDiagnosticsState.selectedId === run.id){ hermesDiagnosticsState.selectedId = ""; hermesDiagnosticsState.detail = null; renderHermesDiagnostics(); }
       else loadHermesDiagnosticsDetail(run.id);
     }));
-    card.append(header, timing, context, source, actions);
+    card.append(header, timing);
+    if(statusExtra.textContent) card.appendChild(statusExtra);
+    card.append(context, source, actions);
     if(hermesDiagnosticsState.selectedId === run.id && hermesDiagnosticsState.detail) renderHermesDiagnosticsDetail(card, hermesDiagnosticsState.detail);
     hermesDiagnosticsList.appendChild(card);
   });
@@ -15534,8 +15573,12 @@ async function loadHermesDiagnostics(){
     hermesDiagnosticsState.dataSource = data.dataSource || "D1 persisted Hermes runs";
     hermesDiagnosticsState.updatedAt = data.updatedAt || Date.now();
     hermesDiagnosticsState.emptyReason = data.emptyReason || "";
+    hermesDiagnosticsState.total = Number(data.pagination?.total) || hermesDiagnosticsState.runs.length;
+    hermesDiagnosticsState.hasMore = Boolean(data.pagination?.hasMore);
     hermesDiagnosticsState.selectedId = "";
     hermesDiagnosticsState.detail = null;
+    hermesDiagnosticsState.detailError = null;
+    hermesDiagnosticsState.syncError = null;
   }catch(err){
     hermesDiagnosticsState.runs = [];
     hermesDiagnosticsState.error = err?.code ? err : { code:"network", message:err?.message || "网络错误" };
@@ -15549,17 +15592,29 @@ async function loadHermesDiagnostics(){
 async function loadHermesDiagnosticsDetail(runId){
   hermesDiagnosticsState.selectedId = runId;
   hermesDiagnosticsState.detail = null;
+  hermesDiagnosticsState.detailError = null;
+  hermesDiagnosticsState.syncError = null;
   renderHermesDiagnostics();
   try{
     const res = await fetch("/api/hermes/diagnostics/runs/" + encodeURIComponent(runId));
     const data = await res.json().catch(() => ({}));
     if(!res.ok || !data.ok) throw data.error || { code:"hermes_diagnostics_unavailable", message:"运行详情不可用" };
-    if(hermesDiagnosticsState.selectedId === runId) hermesDiagnosticsState.detail = data.run;
+    if(hermesDiagnosticsState.selectedId === runId){
+      hermesDiagnosticsState.detail = data.run;
+      hermesDiagnosticsState.syncError = data.syncError || null;
+    }
     const index = hermesDiagnosticsState.runs.findIndex(run => run.id === runId);
-    if(index >= 0 && data.run) hermesDiagnosticsState.runs[index] = { ...hermesDiagnosticsState.runs[index], ...data.run };
+    if(index >= 0 && data.run){
+      const { timeline, ...summary } = data.run;
+      hermesDiagnosticsState.runs[index] = { ...hermesDiagnosticsState.runs[index], ...summary };
+    }
     if(data.syncError) setContextStatus("权威状态刷新失败，显示最近持久化状态：" + hermesErrorText(data.syncError));
   }catch(err){
-    if(hermesDiagnosticsState.selectedId === runId) hermesDiagnosticsState.detail = { ...hermesDiagnosticsState.runs.find(run => run.id === runId), timeline:[], timelineCoverage:"expired_or_missing", error:err };
+    if(hermesDiagnosticsState.selectedId === runId){
+      const listed = hermesDiagnosticsState.runs.find(run => run.id === runId) || { id:runId };
+      hermesDiagnosticsState.detailError = err?.code ? err : { code:"network", message:err?.message || "网络错误" };
+      hermesDiagnosticsState.detail = { ...listed };
+    }
   }finally{ renderHermesDiagnostics(); }
 }
 

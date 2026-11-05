@@ -8,7 +8,11 @@ import {
   normalizeHermesModelOptions,
   validateHermesModelSelection
 } from "../src/hermes/catalog.js";
-import { normalizeHermesSkills, normalizeHermesToolsets } from "../src/hermes/capabilitiesPanel.js";
+import {
+  normalizeHermesExecutionEnvironment,
+  normalizeHermesSkills,
+  normalizeHermesToolsets
+} from "../src/hermes/capabilitiesPanel.js";
 import { resolveHermesUpstream } from "../src/hermes/config.js";
 import { errorFromUpstream, redactSecrets } from "../src/hermes/errors.js";
 import { createSseParser } from "../src/hermes/sse.js";
@@ -255,13 +259,29 @@ describe("Hermes read-only capabilities panel", () => {
     for (const leaked of ["/home/hermes", "GITHUB_TOKEN", "TERMINAL_KEY", "api_key", "secret"]) expect(serialized).not.toContain(leaked);
     expect(normalizeHermesSkills([{ name: "safe", category: "test", description: "token=ghp_abcdefghijk" }])[0].description)
       .toBe("token=[redacted]");
+    expect(normalizeHermesSkills([
+      { name: "safe", category: "test", description: "credential " + MOCK_API_KEY }
+    ], [MOCK_API_KEY])[0].description).toBe("credential [redacted]");
+    expect(normalizeHermesExecutionEnvironment(mock.defaultCapabilities())).toEqual({
+      status: "available", platform: "hermes-agent", model: "hermes-agent", apiSurface: "Hermes API Server",
+      workingDirectory: { status: "unavailable", selectable: false },
+      artifacts: { status: "unavailable", downloadable: false }, error: null
+    });
   });
 
   it("proxies advertised endpoints with server-side auth and preserves real states", async () => {
     mock.toolsets.push({ name: "future", label: "Future", description: "No state fields", tools: [] });
     const response = await call("GET", "/api/hermes/capabilities-panel?instance_id=oracle-hermes");
     expect(response.status).toBe(200);
-    expect(response.json).toMatchObject({ ok: true, configured: true, skills: { status: "available" }, toolsets: { status: "available" } });
+    expect(response.json).toMatchObject({
+      ok: true, configured: true,
+      environment: {
+        status: "available", platform: "hermes-agent", model: "hermes-agent",
+        workingDirectory: { status: "unavailable", selectable: false },
+        artifacts: { status: "unavailable", downloadable: false }
+      },
+      skills: { status: "available" }, toolsets: { status: "available" }
+    });
     expect(response.json.skills.items).toHaveLength(2);
     expect(response.json.toolsets.items[0]).toMatchObject({ name: "coding", enabled: true, configured: true, tools: ["read_file", "terminal"] });
     expect(response.json.toolsets.items[2]).toMatchObject({ enabled: null, configured: null });
@@ -286,7 +306,10 @@ describe("Hermes read-only capabilities panel", () => {
 
     const before = mock.calls.length;
     const missing = await call("GET", "/api/hermes/capabilities-panel", { envExtra: { HERMES_ORACLE_API_KEY: "" } });
-    expect(missing.json).toMatchObject({ configured: false, skills: { status: "unconfigured" }, toolsets: { status: "unconfigured" } });
+    expect(missing.json).toMatchObject({
+      configured: false, environment: { status: "unconfigured", workingDirectory: { status: "unavailable" } },
+      skills: { status: "unconfigured" }, toolsets: { status: "unconfigured" }
+    });
     expect(mock.calls).toHaveLength(before);
   });
 

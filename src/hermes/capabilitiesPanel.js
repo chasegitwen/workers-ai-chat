@@ -9,8 +9,8 @@ const MAX_ITEMS = 1000;
 const MAX_TOOLS = 1000;
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,159}$/;
 
-function cleanText(value, max = 1000) {
-  return safeMessage(String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, " "), [], max)
+function cleanText(value, max = 1000, secrets = []) {
+  return safeMessage(String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, " "), secrets, max)
     .replace(/\[redacted\] (?:token|jwt)\]/g, "[redacted]");
 }
 
@@ -19,33 +19,33 @@ function listData(payload) {
   return Array.isArray(payload?.data) ? payload.data : [];
 }
 
-function safeName(value) {
-  const text = cleanText(value, 160);
+function safeName(value, secrets = []) {
+  const text = cleanText(value, 160, secrets);
   return SAFE_NAME.test(text) ? text : "";
 }
 
-function stringList(value, limit = 100) {
+function stringList(value, limit = 100, secrets = []) {
   if (!Array.isArray(value)) return undefined;
-  return [...new Set(value.map(item => safeName(item)).filter(Boolean))].slice(0, limit);
+  return [...new Set(value.map(item => safeName(item, secrets)).filter(Boolean))].slice(0, limit);
 }
 
-export function normalizeHermesSkills(payload) {
+export function normalizeHermesSkills(payload, secrets = []) {
   const result = [];
   const seen = new Set();
   for (const row of listData(payload)) {
     if (result.length >= MAX_ITEMS) break;
-    const name = safeName(row?.name);
+    const name = safeName(row?.name, secrets);
     if (!name || seen.has(name)) continue;
     seen.add(name);
     const skill = {
       name,
-      description: cleanText(row?.description),
-      category: cleanText(row?.category, 120) || "uncategorized"
+      description: cleanText(row?.description, 1000, secrets),
+      category: cleanText(row?.category, 120, secrets) || "uncategorized"
     };
     // Forward-compatible, display-only metadata. No paths, env names or arbitrary objects.
-    const version = cleanText(row?.version, 80);
-    const author = cleanText(row?.author, 120);
-    const tags = stringList(row?.tags, 50);
+    const version = cleanText(row?.version, 80, secrets);
+    const author = cleanText(row?.author, 120, secrets);
+    const tags = stringList(row?.tags, 50, secrets);
     if (version) skill.version = version;
     if (author) skill.author = author;
     if (tags) skill.tags = tags;
@@ -54,22 +54,22 @@ export function normalizeHermesSkills(payload) {
   return result;
 }
 
-export function normalizeHermesToolsets(payload) {
+export function normalizeHermesToolsets(payload, secrets = []) {
   const result = [];
   const seen = new Set();
   for (const row of listData(payload)) {
     if (result.length >= MAX_ITEMS) break;
-    const name = safeName(row?.name);
+    const name = safeName(row?.name, secrets);
     if (!name || seen.has(name)) continue;
     seen.add(name);
     result.push({
       name,
-      label: cleanText(row?.label, 160) || name,
-      description: cleanText(row?.description),
+      label: cleanText(row?.label, 160, secrets) || name,
+      description: cleanText(row?.description, 1000, secrets),
       // Preserve unknown as null. Never infer an enabled/configured state.
       enabled: typeof row?.enabled === "boolean" ? row.enabled : null,
       configured: typeof row?.configured === "boolean" ? row.configured : null,
-      tools: stringList(row?.tools, MAX_TOOLS) || []
+      tools: stringList(row?.tools, MAX_TOOLS, secrets) || []
     });
   }
   return result;
@@ -84,6 +84,25 @@ function section(status, items = [], error = null) {
   return { status, items, error };
 }
 
+function unavailableExecutionEnvironment(status = "available", error = null) {
+  return {
+    status,
+    platform: null,
+    model: null,
+    apiSurface: "Hermes API Server",
+    workingDirectory: { status: "unavailable", selectable: false },
+    artifacts: { status: "unavailable", downloadable: false },
+    error
+  };
+}
+
+export function normalizeHermesExecutionEnvironment(capabilities, secrets = []) {
+  const environment = unavailableExecutionEnvironment();
+  environment.platform = capabilities?.platform === "hermes-agent" ? "hermes-agent" : null;
+  environment.model = safeName(capabilities?.model, secrets) || null;
+  return environment;
+}
+
 export async function getHermesCapabilitiesPanel(env, instanceId, { fetchImpl } = {}) {
   const client = createHermesClient(env, instanceId, { fetchImpl });
   let capabilities;
@@ -92,6 +111,7 @@ export async function getHermesCapabilitiesPanel(env, instanceId, { fetchImpl } 
   } catch (err) {
     const error = publicError(err);
     return {
+      environment: unavailableExecutionEnvironment("error", error),
       skills: section("error", [], error),
       toolsets: section("error", [], error),
       syncedAt: Date.now()
@@ -101,13 +121,18 @@ export async function getHermesCapabilitiesPanel(env, instanceId, { fetchImpl } 
   if (capabilities?.object !== "hermes.api_server.capabilities" || capabilities?.platform !== "hermes-agent") {
     const error = publicError(new HermesError("hermes_capabilities_unrecognized",
       "Upstream is not a recognized Hermes API server", { httpStatus: 502 }));
-    return { skills: section("error", [], error), toolsets: section("error", [], error), syncedAt: Date.now() };
+    return {
+      environment: unavailableExecutionEnvironment("error", error),
+      skills: section("error", [], error),
+      toolsets: section("error", [], error),
+      syncedAt: Date.now()
+    };
   }
 
   async function load(name, path, getter, normalize) {
     if (!advertisedEndpoint(capabilities, name, path)) return section("unavailable");
     try {
-      return section("available", normalize((await getter()).body));
+      return section("available", normalize((await getter()).body, client.secrets));
     } catch (err) {
       return section("error", [], publicError(err));
     }
@@ -117,5 +142,10 @@ export async function getHermesCapabilitiesPanel(env, instanceId, { fetchImpl } 
     load("skills", "/v1/skills", client.getSkills, normalizeHermesSkills),
     load("toolsets", "/v1/toolsets", client.getToolsets, normalizeHermesToolsets)
   ]);
-  return { skills, toolsets, syncedAt: Date.now() };
+  return {
+    environment: normalizeHermesExecutionEnvironment(capabilities, client.secrets),
+    skills,
+    toolsets,
+    syncedAt: Date.now()
+  };
 }

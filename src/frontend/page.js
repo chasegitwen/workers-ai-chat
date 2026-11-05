@@ -3637,6 +3637,7 @@ body.dark .toolErrorNotice{
             <button id="hermesCapabilitiesRefresh" type="button">刷新</button>
           </div>
           <div id="hermesCapabilitiesStatus" class="hermesCapabilitiesStatus"></div>
+          <div class="hermesCapabilitySection"><h3>执行环境</h3><div id="hermesEnvironmentInfo" class="hermesCapabilityList"></div></div>
           <div class="hermesCapabilitySection"><h3>Skills</h3><div id="hermesSkillsList" class="hermesCapabilityList"></div></div>
           <div class="hermesCapabilitySection"><h3>Toolsets</h3><div id="hermesToolsetsList" class="hermesCapabilityList"></div></div>
         </section>
@@ -14297,6 +14298,7 @@ var hermesCapabilitiesSearch = document.getElementById("hermesCapabilitiesSearch
 var hermesCapabilitiesCategory = document.getElementById("hermesCapabilitiesCategory");
 var hermesCapabilitiesRefresh = document.getElementById("hermesCapabilitiesRefresh");
 var hermesCapabilitiesStatus = document.getElementById("hermesCapabilitiesStatus");
+var hermesEnvironmentInfo = document.getElementById("hermesEnvironmentInfo");
 var hermesSkillsList = document.getElementById("hermesSkillsList");
 var hermesToolsetsList = document.getElementById("hermesToolsetsList");
 var hermesCapabilitiesState = { open:false, loading:false, instanceId:"", data:null, error:null };
@@ -14468,6 +14470,23 @@ function renderHermesCapabilities(){
   else if(data) hermesCapabilitiesStatus.textContent = hermesCapabilitySectionText(data.skills, "Skills") + " · " + hermesCapabilitySectionText(data.toolsets, "Toolsets") + " · " + new Date(data.syncedAt).toLocaleString();
   else hermesCapabilitiesStatus.textContent = "尚未加载";
 
+  hermesEnvironmentInfo.innerHTML = "";
+  if(data?.environment?.status === "available"){
+    const environment = data.environment;
+    appendHermesCapabilityEmpty(hermesEnvironmentInfo,
+      "实例 " + (data.instanceId || "未知") + " · 平台 " + (environment.platform || "未知") + " · 模型 " + (environment.model || "Agent 默认"));
+    appendHermesCapabilityEmpty(hermesEnvironmentInfo,
+      "工作目录：8642 Runs API 未提供可确认或可选择的工作目录");
+    appendHermesCapabilityEmpty(hermesEnvironmentInfo,
+      "文件成果：8642 API 未提供可验证的成果列表或下载接口");
+  }else if(data?.environment?.status === "unconfigured"){
+    appendHermesCapabilityEmpty(hermesEnvironmentInfo, "Hermes 实例未配置，无法确认执行环境");
+  }else if(data?.environment?.status === "error"){
+    appendHermesCapabilityEmpty(hermesEnvironmentInfo, "执行环境读取失败：" + hermesErrorText(data.environment.error));
+  }else{
+    appendHermesCapabilityEmpty(hermesEnvironmentInfo, "尚未确认执行环境");
+  }
+
   const skills = data?.skills?.status === "available" ? data.skills.items : [];
   const oldCategory = hermesCapabilitiesCategory.value;
   const categories = [...new Set(skills.map(item => item.category).filter(Boolean))].sort((a,b) => a.localeCompare(b));
@@ -14568,6 +14587,7 @@ async function loadHermesCapabilities(force){
     }
   }catch(err){
     if(hermesSelection.instanceId === requestedInstanceId){
+      hermesCapabilitiesState.data = null;
       hermesCapabilitiesState.error = err?.code ? err : { code:"network", message:err?.message || "网络错误" };
       hermesCapabilitiesState.instanceId = requestedInstanceId;
     }

@@ -109,6 +109,15 @@ async function handleCapabilitiesPanel(env, url, options) {
       ok: true,
       instanceId,
       configured: false,
+      environment: {
+        status: "unconfigured",
+        platform: null,
+        model: null,
+        apiSurface: "Hermes API Server",
+        workingDirectory: { status: "unavailable", selectable: false },
+        artifacts: { status: "unavailable", downloadable: false },
+        error: null
+      },
       skills: { status: "unconfigured", items: [], error: null },
       toolsets: { status: "unconfigured", items: [], error: null },
       syncedAt: Date.now()

@@ -8,6 +8,7 @@ import {
   normalizeHermesModelOptions,
   validateHermesModelSelection
 } from "../src/hermes/catalog.js";
+import { normalizeHermesSkills, normalizeHermesToolsets } from "../src/hermes/capabilitiesPanel.js";
 import { resolveHermesUpstream } from "../src/hermes/config.js";
 import { errorFromUpstream, redactSecrets } from "../src/hermes/errors.js";
 import { createSseParser } from "../src/hermes/sse.js";
@@ -237,6 +238,62 @@ describe("Hermes catalog and provider selection", () => {
     }
     expect(resolveHermesUpstream(testEnv({ HERMES_ORACLE_API_KEY: "" }), "oracle-hermes").code).toBe("hermes_not_configured");
     expect(resolveHermesUpstream(testEnv(), "../other").ok).toBe(false);
+  });
+});
+
+describe("Hermes read-only capabilities panel", () => {
+  it("normalizes array and list envelopes through strict field allowlists", () => {
+    expect(normalizeHermesSkills(mock.skills)).toEqual([
+      { name: "github-pr-workflow", description: "Review and prepare pull requests", category: "development", version: "1.2.0", tags: ["git", "review"] },
+      { name: "incident-response", description: "Triage incidents", category: "operations" }
+    ]);
+    expect(normalizeHermesToolsets({ data: mock.toolsets })[0]).toEqual({
+      name: "coding", label: "Coding", description: "File and terminal tools",
+      enabled: true, configured: true, tools: ["read_file", "terminal"]
+    });
+    const serialized = JSON.stringify({ skills: normalizeHermesSkills(mock.skills), toolsets: normalizeHermesToolsets(mock.toolsets) });
+    for (const leaked of ["/home/hermes", "GITHUB_TOKEN", "TERMINAL_KEY", "api_key", "secret"]) expect(serialized).not.toContain(leaked);
+    expect(normalizeHermesSkills([{ name: "safe", category: "test", description: "token=ghp_abcdefghijk" }])[0].description)
+      .toBe("token=[redacted]");
+  });
+
+  it("proxies advertised endpoints with server-side auth and preserves real states", async () => {
+    mock.toolsets.push({ name: "future", label: "Future", description: "No state fields", tools: [] });
+    const response = await call("GET", "/api/hermes/capabilities-panel?instance_id=oracle-hermes");
+    expect(response.status).toBe(200);
+    expect(response.json).toMatchObject({ ok: true, configured: true, skills: { status: "available" }, toolsets: { status: "available" } });
+    expect(response.json.skills.items).toHaveLength(2);
+    expect(response.json.toolsets.items[0]).toMatchObject({ name: "coding", enabled: true, configured: true, tools: ["read_file", "terminal"] });
+    expect(response.json.toolsets.items[2]).toMatchObject({ enabled: null, configured: null });
+    for (const path of ["/v1/skills", "/v1/toolsets"]) {
+      const upstream = mock.calls.find(item => item.path === path);
+      expect(upstream.headers.get("Authorization")).toBe("Bearer " + MOCK_API_KEY);
+      expect(upstream.redirect).toBe("manual");
+    }
+    expectNoSecrets(response.text);
+  });
+
+  it("reports unadvertised, unconfigured and failed endpoints without inventing availability", async () => {
+    mock.capabilities = mock.defaultCapabilities();
+    delete mock.capabilities.endpoints.skills;
+    mock.onToolsets = () => new Response(JSON.stringify({ error: { code: "enumeration_failed", message: "failed" } }), { status: 500, headers: { "Content-Type": "application/json" } });
+    const partial = await call("GET", "/api/hermes/capabilities-panel");
+    expect(partial.json.skills).toEqual({ status: "unavailable", items: [], error: null });
+    expect(partial.json.toolsets).toMatchObject({
+      status: "error", items: [], error: { code: "hermes_upstream_error", upstreamCode: "enumeration_failed" }
+    });
+    expect(mock.calls.some(item => item.path === "/v1/skills")).toBe(false);
+
+    const before = mock.calls.length;
+    const missing = await call("GET", "/api/hermes/capabilities-panel", { envExtra: { HERMES_ORACLE_API_KEY: "" } });
+    expect(missing.json).toMatchObject({ configured: false, skills: { status: "unconfigured" }, toolsets: { status: "unconfigured" } });
+    expect(mock.calls).toHaveLength(before);
+  });
+
+  it("requires the web session and never exposes mutating capability routes", async () => {
+    const unauthenticated = await worker.fetch(new Request(ORIGIN + "/api/hermes/capabilities-panel"), testEnv(), { waitUntil() {} });
+    expect(unauthenticated.status).toBe(401);
+    expect((await call("POST", "/api/hermes/capabilities-panel", { body: {} })).status).toBe(404);
   });
 });
 

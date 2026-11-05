@@ -5,6 +5,7 @@
 import { requireAuth } from "../lib/auth.js";
 import { jsonResponse } from "../utils/response.js";
 import { getHermesCatalog } from "./catalog.js";
+import { getHermesCapabilitiesPanel } from "./capabilitiesPanel.js";
 import { createHermesClient } from "./client.js";
 import {
   HERMES_INSTANCES,
@@ -97,6 +98,24 @@ async function handleCatalog(env, url, options) {
   } catch (err) {
     return jsonResponse({ ...base, catalog: null, stale: false, catalogError: publicError(err) });
   }
+}
+
+async function handleCapabilitiesPanel(env, url, options) {
+  const instanceId = String(url.searchParams.get("instance_id") || "oracle-hermes");
+  if (!hermesInstance(instanceId)) throw new HermesError("hermes_unknown_instance", "Unknown Hermes instance", { httpStatus: 400 });
+  const upstream = describeHermesUpstream(env, instanceId);
+  if (!upstream.configured) {
+    return jsonResponse({
+      ok: true,
+      instanceId,
+      configured: false,
+      skills: { status: "unconfigured", items: [], error: null },
+      toolsets: { status: "unconfigured", items: [], error: null },
+      syncedAt: Date.now()
+    });
+  }
+  const panel = await getHermesCapabilitiesPanel(env, instanceId, { fetchImpl: options.fetchImpl });
+  return jsonResponse({ ok: true, instanceId, configured: true, ...panel });
 }
 
 function sanitizeEvent(frame, capabilities = null) {
@@ -252,6 +271,10 @@ export async function handleHermes(request, env, url, ctx, options = {}) {
   try {
     if (url.pathname === "/api/hermes/catalog" && request.method === "GET") {
       return await handleCatalog(env, url, routeOptions);
+    }
+
+    if (url.pathname === "/api/hermes/capabilities-panel" && request.method === "GET") {
+      return await handleCapabilitiesPanel(env, url, routeOptions);
     }
 
     if (url.pathname === "/api/hermes/runs" && request.method === "POST") {

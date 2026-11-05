@@ -2652,6 +2652,22 @@ body.dark .toolErrorNotice{
 .routeCatalogPicker .modelCatalogPopup{top:calc(100% + 5px);bottom:auto}
 .openClawCatalogLine{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--muted)}
 .openClawCatalogLine button{border:1px solid var(--border);border-radius:8px;padding:5px 8px;background:transparent;color:var(--text);cursor:pointer}
+.hermesCapabilitiesLine{display:flex;justify-content:flex-end}
+.hermesCapabilitiesLine button,.hermesCapabilitiesToolbar button{border:1px solid var(--border);border-radius:8px;padding:6px 10px;background:transparent;color:var(--text);cursor:pointer}
+.hermesCapabilitiesPanel{display:grid;gap:10px;padding:10px;border:1px solid var(--border);border-radius:12px;background:var(--panel);font-size:12px}
+.hermesCapabilitiesPanel[hidden]{display:none}
+.hermesCapabilitiesToolbar{display:grid;grid-template-columns:minmax(0,1fr) minmax(110px,.6fr) auto;gap:6px}
+.hermesCapabilitiesToolbar input,.hermesCapabilitiesToolbar select{min-width:0;border:1px solid var(--border);border-radius:8px;padding:7px 8px;background:var(--panel);color:var(--text);font:inherit;font-size:max(16px,1rem)}
+.hermesCapabilitiesStatus{color:var(--muted);line-height:1.4}
+.hermesCapabilitySection{display:grid;gap:6px}
+.hermesCapabilitySection h3{margin:0;font-size:13px}
+.hermesCapabilityList{display:grid;gap:6px;max-height:240px;overflow:auto}
+.hermesCapabilityCard{display:grid;gap:4px;padding:8px;border:1px solid var(--border);border-radius:8px;background:rgba(148,163,184,.05);overflow-wrap:anywhere}
+.hermesCapabilityCardHeader{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.hermesCapabilityCardMeta{color:var(--muted)}
+.hermesCapabilityTools{display:flex;flex-wrap:wrap;gap:4px}
+.hermesCapabilityTools span{padding:2px 5px;border-radius:5px;background:rgba(148,163,184,.15);font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+@media(max-width:600px){.hermesCapabilitiesToolbar{grid-template-columns:1fr}.hermesCapabilitiesToolbar button{justify-self:start}}
 .modelModeSwitch{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:0}
 .modelModeSwitch button{border:1px solid var(--border);border-radius:10px;padding:8px;background:transparent;color:var(--text);cursor:pointer}
 .modelModeSwitch button.active{background:var(--primary);border-color:var(--primary);color:white}
@@ -3613,6 +3629,17 @@ body.dark .toolErrorNotice{
         <label>Provider <select id="hermesProviderSelect" class="modelSelectNative" aria-label="Hermes Provider" aria-hidden="true" tabindex="-1"></select></label>
         <label id="hermesModelField" hidden>基础模型 <select id="hermesModelSelect" class="modelSelectNative" aria-label="Hermes 基础模型" aria-hidden="true" tabindex="-1"></select></label>
         <div class="openClawCatalogLine"><span id="hermesCatalogStatus"></span><button id="hermesCatalogRefresh" type="button">刷新目录</button></div>
+        <div class="hermesCapabilitiesLine"><button id="hermesCapabilitiesToggle" type="button" aria-expanded="false" aria-controls="hermesCapabilitiesPanel">能力</button></div>
+        <section id="hermesCapabilitiesPanel" class="hermesCapabilitiesPanel" aria-label="Hermes 能力" hidden>
+          <div class="hermesCapabilitiesToolbar">
+            <input id="hermesCapabilitiesSearch" type="search" autocomplete="off" placeholder="搜索 Skills / Toolsets" aria-label="搜索 Hermes 能力">
+            <select id="hermesCapabilitiesCategory" aria-label="筛选 Skill 分类"><option value="">全部分类</option></select>
+            <button id="hermesCapabilitiesRefresh" type="button">刷新</button>
+          </div>
+          <div id="hermesCapabilitiesStatus" class="hermesCapabilitiesStatus"></div>
+          <div class="hermesCapabilitySection"><h3>Skills</h3><div id="hermesSkillsList" class="hermesCapabilityList"></div></div>
+          <div class="hermesCapabilitySection"><h3>Toolsets</h3><div id="hermesToolsetsList" class="hermesCapabilityList"></div></div>
+        </section>
       </div>
       <div id="chatSelectionNotice" class="chatSelectionNotice" hidden>
         <span id="chatSelectionNoticeText"></span>
@@ -14264,6 +14291,15 @@ var hermesModelField = document.getElementById("hermesModelField");
 var hermesModelSelect = document.getElementById("hermesModelSelect");
 var hermesCatalogStatus = document.getElementById("hermesCatalogStatus");
 var hermesCatalogRefresh = document.getElementById("hermesCatalogRefresh");
+var hermesCapabilitiesToggle = document.getElementById("hermesCapabilitiesToggle");
+var hermesCapabilitiesPanel = document.getElementById("hermesCapabilitiesPanel");
+var hermesCapabilitiesSearch = document.getElementById("hermesCapabilitiesSearch");
+var hermesCapabilitiesCategory = document.getElementById("hermesCapabilitiesCategory");
+var hermesCapabilitiesRefresh = document.getElementById("hermesCapabilitiesRefresh");
+var hermesCapabilitiesStatus = document.getElementById("hermesCapabilitiesStatus");
+var hermesSkillsList = document.getElementById("hermesSkillsList");
+var hermesToolsetsList = document.getElementById("hermesToolsetsList");
+var hermesCapabilitiesState = { open:false, loading:false, instanceId:"", data:null, error:null };
 var hermesRunMount = document.getElementById("hermesRunMount");
 var hermesRunStatus = document.getElementById("hermesRunStatus");
 var hermesRunStatusText = document.getElementById("hermesRunStatusText");
@@ -14403,6 +14439,149 @@ function hermesProviders(){
 
 function hermesProvider(providerId){
   return hermesProviders().find(provider => provider.id === providerId) || null;
+}
+
+function hermesCapabilitySectionText(section, label){
+  if(!section) return label + "：尚未加载";
+  if(section.status === "available") return label + "：" + section.items.length;
+  if(section.status === "unconfigured") return label + "：Hermes 实例未配置";
+  if(section.status === "unavailable") return label + "：当前 Hermes 未广告此接口";
+  if(section.status === "error") return label + "：加载失败（" + hermesErrorText(section.error) + "）";
+  return label + "：状态未知";
+}
+
+function appendHermesCapabilityEmpty(target, text){
+  const row = document.createElement("div");
+  row.className = "hermesCapabilityCardMeta";
+  row.textContent = text;
+  target.appendChild(row);
+}
+
+function renderHermesCapabilities(){
+  if(!hermesCapabilitiesPanel) return;
+  hermesCapabilitiesPanel.hidden = !hermesCapabilitiesState.open;
+  hermesCapabilitiesToggle?.setAttribute("aria-expanded", hermesCapabilitiesState.open ? "true" : "false");
+  if(!hermesCapabilitiesState.open) return;
+  const data = hermesCapabilitiesState.data;
+  if(hermesCapabilitiesState.loading) hermesCapabilitiesStatus.textContent = "能力加载中...";
+  else if(hermesCapabilitiesState.error) hermesCapabilitiesStatus.textContent = "能力面板加载失败：" + hermesErrorText(hermesCapabilitiesState.error);
+  else if(data) hermesCapabilitiesStatus.textContent = hermesCapabilitySectionText(data.skills, "Skills") + " · " + hermesCapabilitySectionText(data.toolsets, "Toolsets") + " · " + new Date(data.syncedAt).toLocaleString();
+  else hermesCapabilitiesStatus.textContent = "尚未加载";
+
+  const skills = data?.skills?.status === "available" ? data.skills.items : [];
+  const oldCategory = hermesCapabilitiesCategory.value;
+  const categories = [...new Set(skills.map(item => item.category).filter(Boolean))].sort((a,b) => a.localeCompare(b));
+  hermesCapabilitiesCategory.innerHTML = "";
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = "全部分类";
+  hermesCapabilitiesCategory.appendChild(all);
+  categories.forEach(category => {
+    const option = document.createElement("option");
+    option.value = category;
+    option.textContent = category;
+    hermesCapabilitiesCategory.appendChild(option);
+  });
+  hermesCapabilitiesCategory.value = categories.includes(oldCategory) ? oldCategory : "";
+
+  const query = hermesCapabilitiesSearch.value.trim().toLocaleLowerCase();
+  const category = hermesCapabilitiesCategory.value;
+  const matches = values => !query || values.some(value => String(value || "").toLocaleLowerCase().includes(query));
+  hermesSkillsList.innerHTML = "";
+  const filteredSkills = skills.filter(item => (!category || item.category === category)
+    && matches([item.name, item.description, item.category, ...(item.tags || [])]));
+  filteredSkills.forEach(item => {
+    const card = document.createElement("article");
+    card.className = "hermesCapabilityCard";
+    const header = document.createElement("div");
+    header.className = "hermesCapabilityCardHeader";
+    const name = document.createElement("strong");
+    name.textContent = item.name;
+    const meta = document.createElement("span");
+    meta.className = "hermesCapabilityCardMeta";
+    meta.textContent = item.category || "uncategorized";
+    header.append(name, meta);
+    const description = document.createElement("div");
+    description.textContent = item.description || "无描述";
+    card.append(header, description);
+    const extra = [item.version ? "版本 " + item.version : "", item.author ? "作者 " + item.author : "", ...(item.tags || [])].filter(Boolean);
+    if(extra.length){
+      const details = document.createElement("div");
+      details.className = "hermesCapabilityCardMeta";
+      details.textContent = extra.join(" · ");
+      card.appendChild(details);
+    }
+    hermesSkillsList.appendChild(card);
+  });
+  if(!filteredSkills.length) appendHermesCapabilityEmpty(hermesSkillsList,
+    data?.skills?.status === "available" ? "没有匹配的 Skill" : hermesCapabilitySectionText(data?.skills, "Skills"));
+
+  hermesToolsetsList.innerHTML = "";
+  const toolsets = data?.toolsets?.status === "available" ? data.toolsets.items : [];
+  const filteredToolsets = toolsets.filter(item => matches([item.name, item.label, item.description, ...(item.tools || [])]));
+  filteredToolsets.forEach(item => {
+    const card = document.createElement("article");
+    card.className = "hermesCapabilityCard";
+    const header = document.createElement("div");
+    header.className = "hermesCapabilityCardHeader";
+    const name = document.createElement("strong");
+    name.textContent = item.label || item.name;
+    const state = document.createElement("span");
+    state.className = "hermesCapabilityCardMeta";
+    const enabled = item.enabled === true ? "已启用" : (item.enabled === false ? "未启用" : "启用状态未知");
+    const configured = item.configured === true ? "已配置" : (item.configured === false ? "未配置" : "配置状态未知");
+    state.textContent = enabled + " · " + configured;
+    header.append(name, state);
+    const description = document.createElement("div");
+    description.textContent = item.description || "无描述";
+    const tools = document.createElement("div");
+    tools.className = "hermesCapabilityTools";
+    (item.tools || []).forEach(tool => {
+      const badge = document.createElement("span");
+      badge.textContent = tool;
+      tools.appendChild(badge);
+    });
+    if(!item.tools?.length) appendHermesCapabilityEmpty(tools, "未返回工具");
+    card.append(header, description, tools);
+    hermesToolsetsList.appendChild(card);
+  });
+  if(!filteredToolsets.length) appendHermesCapabilityEmpty(hermesToolsetsList,
+    data?.toolsets?.status === "available" ? "没有匹配的 Toolset" : hermesCapabilitySectionText(data?.toolsets, "Toolsets"));
+}
+
+async function loadHermesCapabilities(force){
+  if(hermesCapabilitiesState.loading) return;
+  const requestedInstanceId = hermesSelection.instanceId;
+  if(hermesCapabilitiesState.instanceId !== requestedInstanceId) hermesCapabilitiesState.data = null;
+  hermesCapabilitiesState.loading = true;
+  hermesCapabilitiesState.error = null;
+  renderHermesCapabilities();
+  const params = new URLSearchParams({ instance_id:requestedInstanceId });
+  if(force) params.set("refresh", "1");
+  try{
+    const res = await fetch("/api/hermes/capabilities-panel?" + params.toString());
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok || !data.ok) throw data.error || { code:"hermes_capabilities_panel_failed", message:"能力接口不可用" };
+    if(hermesSelection.instanceId === requestedInstanceId){
+      hermesCapabilitiesState.data = data;
+      hermesCapabilitiesState.instanceId = requestedInstanceId;
+    }
+  }catch(err){
+    if(hermesSelection.instanceId === requestedInstanceId){
+      hermesCapabilitiesState.error = err?.code ? err : { code:"network", message:err?.message || "网络错误" };
+      hermesCapabilitiesState.instanceId = requestedInstanceId;
+    }
+  }finally{
+    hermesCapabilitiesState.loading = false;
+    renderHermesCapabilities();
+    if(hermesCapabilitiesState.open && hermesCapabilitiesState.instanceId !== hermesSelection.instanceId) loadHermesCapabilities(false);
+  }
+}
+
+function toggleHermesCapabilities(){
+  hermesCapabilitiesState.open = !hermesCapabilitiesState.open;
+  renderHermesCapabilities();
+  if(hermesCapabilitiesState.open && (hermesCapabilitiesState.instanceId !== hermesSelection.instanceId || !hermesCapabilitiesState.data)) loadHermesCapabilities(false);
 }
 
 function syncHermesKindButton(){
@@ -15161,6 +15340,7 @@ function initHermesUi(){
     hermesSelection.instanceId = hermesInstanceSelect.value;
     writeHermesSelection();
     syncHermesRouteControls();
+    if(hermesCapabilitiesState.open) loadHermesCapabilities(false);
   });
   hermesAgentSelect.addEventListener("change", () => {
     hermesSelection.agentId = hermesAgentSelect.value;
@@ -15170,6 +15350,10 @@ function initHermesUi(){
   hermesProviderSelect.addEventListener("change", () => selectHermesProvider(hermesProviderSelect.value));
   hermesModelSelect.addEventListener("change", () => selectHermesModel(hermesModelSelect.value));
   hermesCatalogRefresh.addEventListener("click", () => loadHermesCatalog(true));
+  hermesCapabilitiesToggle?.addEventListener("click", toggleHermesCapabilities);
+  hermesCapabilitiesRefresh?.addEventListener("click", () => loadHermesCapabilities(true));
+  hermesCapabilitiesSearch?.addEventListener("input", renderHermesCapabilities);
+  hermesCapabilitiesCategory?.addEventListener("change", renderHermesCapabilities);
   hermesClarifySubmit?.addEventListener("click", submitHermesClarify);
   hermesRunCollapseBtn?.addEventListener("click", () => {
     const currentState = hermesPanelStateOverride || hermesPanelState;

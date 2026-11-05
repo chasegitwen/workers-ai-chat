@@ -149,6 +149,12 @@ describe("Hermes frontend", () => {
     const html = htmlPage();
     expect(html).toContain('id="hermesKindBtn" data-selection-kind="hermes" hidden');
     expect(html).toContain('id="hermesRouteControls" class="openClawRouteControls" hidden');
+    expect(html).toContain('id="hermesCapabilitiesToggle"');
+    expect(html).toContain('id="hermesCapabilitiesPanel" class="hermesCapabilitiesPanel" aria-label="Hermes 能力" hidden');
+    expect(html.indexOf('id="hermesCapabilitiesPanel"')).toBeGreaterThan(html.indexOf('id="hermesRouteControls"'));
+    expect(html.indexOf('id="hermesCapabilitiesPanel"')).toBeLessThan(html.indexOf('id="chatSelectionNotice"'));
+    expect(html).toContain('fetch("/api/hermes/capabilities-panel?" + params.toString())');
+    expect(html).toContain('item.enabled === true ? "已启用" : (item.enabled === false ? "未启用" : "启用状态未知")');
     expect(html.indexOf('id="hermesRunMount"')).toBeGreaterThan(html.indexOf('class="inputBar"'));
     expect(html.indexOf('id="hermesRunMount"')).toBeLessThan(html.indexOf('id="openClawTaskBanner"'));
     expect(html).toContain('id="hermesClarifyPanel" class="hermesClarifyPanel" hidden');

@@ -45,6 +45,16 @@ export class MockHermes {
     this.onClarify = null;
     this.onEvents = null;
     this.capabilities = null;
+    this.onSkills = null;
+    this.onToolsets = null;
+    this.skills = [
+      { name: "github-pr-workflow", description: "Review and prepare pull requests", category: "development", version: "1.2.0", tags: ["git", "review"], path: "/home/hermes/.hermes/skills/github", env: { GITHUB_TOKEN: "secret" } },
+      { name: "incident-response", description: "Triage incidents", category: "operations" }
+    ];
+    this.toolsets = [
+      { name: "coding", label: "Coding", description: "File and terminal tools", enabled: true, configured: true, tools: ["read_file", "terminal"], key_env: "TERMINAL_KEY" },
+      { name: "browser", label: "Browser", description: "Browser automation", enabled: false, configured: false, tools: ["browser_open"], api_key: "secret" }
+    ];
     this.modelOptions = {
       providers: [
         { slug: "openai-codex", name: "OpenAI Codex", is_current: true, is_user_defined: false, models: ["gpt-5.6-luna", "gpt-5.6-sol"], total_models: 2, source: "built-in", authenticated: true, key_env: "OPENAI_API_KEY", api_url: "https://internal.example/v1" },
@@ -71,7 +81,10 @@ export class MockHermes {
         run_unknown_resolution: this.unknownResolution,
         runs_idempotency: { supported: true, durable: this.durableIdempotency, retention_seconds: 86400 }
       },
-      endpoints: {}
+      endpoints: {
+        skills: { method: "GET", path: "/v1/skills" },
+        toolsets: { method: "GET", path: "/v1/toolsets" }
+      }
     };
   }
 
@@ -160,6 +173,20 @@ export class MockHermes {
 
     if (method === "GET" && url.pathname === "/v1/capabilities") return json(this.capabilities || this.defaultCapabilities());
     if (method === "GET" && url.pathname === "/api/model/options") return json(this.modelOptions);
+    if (method === "GET" && url.pathname === "/v1/skills") {
+      if (this.onSkills) {
+        const override = await this.onSkills(call);
+        if (override) return override;
+      }
+      return json({ object: "list", data: this.skills });
+    }
+    if (method === "GET" && url.pathname === "/v1/toolsets") {
+      if (this.onToolsets) {
+        const override = await this.onToolsets(call);
+        if (override) return override;
+      }
+      return json({ object: "list", platform: "api_server", data: this.toolsets });
+    }
 
     if (method === "POST" && url.pathname === "/v1/runs") {
       if (this.onCreate) {

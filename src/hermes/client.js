@@ -104,6 +104,8 @@ export function createHermesClient(env, instanceId, { fetchImpl } = {}) {
     instanceId,
     secrets,
     getCapabilities: () => request("GET", "/v1/capabilities", { timeoutMs: HERMES_TIMEOUTS_MS.capabilities }),
+    getSkills: () => request("GET", "/v1/skills", { timeoutMs: HERMES_TIMEOUTS_MS.discovery }),
+    getToolsets: () => request("GET", "/v1/toolsets", { timeoutMs: HERMES_TIMEOUTS_MS.discovery }),
     getModelOptions: ({ refresh = false } = {}) => request("GET",
       "/api/model/options?include_unconfigured=false" + (refresh ? "&refresh=true" : ""),
       { timeoutMs: HERMES_TIMEOUTS_MS.catalog }),

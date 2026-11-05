@@ -200,6 +200,17 @@ describe("Hermes frontend", () => {
     expect(html.indexOf('id="hermesDiagnosticsToggle"')).toBeGreaterThan(html.indexOf('id="hermesJobsToggle"'));
   });
 
+  it("offers run diagnostic summary downloads only from the loaded detail renderer", () => {
+    const render = lastDeclaration(pageScript(), "renderHermesDiagnosticsDetail");
+    const download = lastDeclaration(pageScript(), "exportHermesDiagnostics");
+    expect(render).toContain("导出诊断摘要 MD");
+    expect(render).toContain("导出 JSON");
+    expect(render).toContain("exportHermesDiagnostics(run");
+    expect(download).toContain('/api/hermes/diagnostics/runs/');
+    expect(download).toContain('/export?format=');
+    expect(download).toContain('link.download = ""');
+  });
+
   it("renders a read-only runtime health card without gateway controls", () => {
     const html = htmlPage();
     expect(html).toContain('id="hermesRuntimeHealth"');

@@ -1635,6 +1635,66 @@ describe("Hermes run diagnostics", () => {
     expect((await call("GET", "/api/hermes/diagnostics/runs?status=made_up", { user:"alice" })).status).toBe(400);
     expect((await call("GET", "/api/hermes/diagnostics/runs", { user:"alice", envExtra:{ HERMES_CATALOG_VISIBLE:"" } })).status).toBe(404);
   });
+
+  it("exports an owner-scoped sanitized JSON run summary with honest gaps", async () => {
+    const id = await insertDiagnosticRun({
+      owner:"alice", status:"failed", errorCode:"tool_failed",
+      errorMessage:"Authorization: Bearer export-secret-token token=fixture-private-value",
+      timelineJson:null
+    });
+    const response = await call("GET", "/api/hermes/diagnostics/runs/" + id + "/export?format=json", { user:"alice" });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toMatch(/^application\/json/);
+    expect(response.headers.get("content-disposition")).toMatch(/^attachment; filename="hermes-diagnostics-/);
+    expect(response.json).toMatchObject({
+      schema:"hermes.diagnostics.export.v1",
+      scope:{ type:"run", runId:id, owner:"alice" },
+      runs:[{ id, status:"failed", timelineCoverage:"expired_or_missing" }]
+    });
+    expect(response.json.gaps).toEqual(expect.arrayContaining(["timeline_expired_or_missing", "persisted_summary_absent"]));
+    expect(response.text).not.toMatch(/export-secret-token|fixture-private-value/);
+  });
+
+  it("returns Markdown as an attachment and keeps health failure fail-soft", async () => {
+    const id = await insertDiagnosticRun({ owner:"alice", status:"completed", completedAt:Date.now(), timelineJson:"[]" });
+    mock.onHealth = async () => { throw new Error("health probe failed with token=health-secret"); };
+    const response = await call("GET", "/api/hermes/diagnostics/runs/" + id + "/export?format=md", { user:"alice" });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toMatch(/^text\/markdown/);
+    expect(response.headers.get("content-disposition")).toMatch(/attachment; filename="hermes-diagnostics-.*\.md"/);
+    expect(response.text).toContain("Hermes 诊断摘要 / Diagnostics Summary");
+    expect(response.text).toContain("运行时健康 / Runtime health");
+    expect(response.text).toContain("runtime\\_health\\_unavailable");
+    expect(response.text).not.toContain("health-secret");
+  });
+
+  it("hides cross-user run and session exports and requires authentication", async () => {
+    const id = await insertDiagnosticRun({ owner:"alice" });
+    await env.DB.prepare("UPDATE hermes_runs SET upstream_session_id = ? WHERE id = ?").bind("session-owner-only", id).run();
+    expect((await call("GET", "/api/hermes/diagnostics/runs/" + id + "/export", { user:"bob" })).status).toBe(404);
+    expect((await call("GET", "/api/hermes/diagnostics/sessions/session-owner-only/export", { user:"bob" })).status).toBe(404);
+    const unauth = await worker.fetch(new Request(ORIGIN + "/api/hermes/diagnostics/runs/" + id + "/export"), testEnv(), {});
+    expect(unauth.status).toBe(401);
+  });
+
+  it("exports at most 50 newest owned runs for an upstream session", async () => {
+    const sessionId = "session-cap-test";
+    const own = [];
+    for (let index = 0; index < 51; index += 1) {
+      const id = await insertDiagnosticRun({ owner:"alice", status:"completed", createdAt:Date.now() + index, completedAt:Date.now() + index });
+      await env.DB.prepare("UPDATE hermes_runs SET upstream_session_id = ? WHERE id = ?").bind(sessionId, id).run();
+      own.push(id);
+    }
+    const other = await insertDiagnosticRun({ owner:"bob", status:"failed", createdAt:Date.now() + 1000 });
+    await env.DB.prepare("UPDATE hermes_runs SET upstream_session_id = ? WHERE id = ?").bind(sessionId, other).run();
+    const response = await call("GET", "/api/hermes/diagnostics/sessions/" + sessionId + "/export?format=json", { user:"alice" });
+    expect(response.status).toBe(200);
+    expect(response.json.scope).toMatchObject({ type:"session", sessionId, owner:"alice" });
+    expect(response.json.runs).toHaveLength(50);
+    expect(response.json.runs[0].id).toBe(own.at(-1));
+    expect(response.json.runs.map(run => run.id)).not.toContain(other);
+    expect(response.json.gaps).toContain("session_runs_capped");
+  });
 });
 
 describe("Hermes disabled and existing features", () => {

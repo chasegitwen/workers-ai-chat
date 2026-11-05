@@ -15550,6 +15550,17 @@ function jumpHermesDiagnosticJob(run){
   setTimeout(() => hermesJobsList?.querySelector?.('[data-job-id="' + CSS.escape(run.relatedJob.id) + '"]')?.scrollIntoView?.({ block:"center" }), 0);
 }
 
+function exportHermesDiagnostics(run, format){
+  if(!run?.id) return;
+  const selectedFormat = format === "json" ? "json" : "md";
+  const link = document.createElement("a");
+  link.href = "/api/hermes/diagnostics/runs/" + encodeURIComponent(run.id) + "/export?format=" + selectedFormat;
+  link.download = "";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 function renderHermesDiagnosticsDetail(container, run){
   const detail = document.createElement("div");
   detail.className = "hermesDiagnosticsDetail";
@@ -15643,6 +15654,10 @@ function renderHermesDiagnosticsDetail(container, run){
   }
   const actions = document.createElement("div");
   actions.className = "hermesWorkbenchActions";
+  actions.append(
+    hermesWorkbenchButton("导出诊断摘要 MD", () => exportHermesDiagnostics(run, "md")),
+    hermesWorkbenchButton("导出 JSON", () => exportHermesDiagnostics(run, "json"))
+  );
   if(run.conversationId) actions.append(hermesWorkbenchButton("跳转会话", () => jumpHermesDiagnosticConversation(run)));
   if(run.relatedJob?.id) actions.append(hermesWorkbenchButton("跳转 Job", () => jumpHermesDiagnosticJob(run)));
   if(actions.children.length) detail.appendChild(actions);

@@ -7,6 +7,14 @@ import { buildHermesErrorRecord, parseErrorCategory } from "./errorTaxonomy.js";
 import { HERMES_ACTIVE_STATUSES } from "./status.js";
 import { publicHermesRun, readRunById, syncHermesRun } from "./runs.js";
 import { pruneHermesDiagnosticPayloads } from "./persistence.js";
+import { isHermesSessionId } from "./client.js";
+import { getHermesRuntimeHealth } from "./health.js";
+import {
+  HERMES_DIAGNOSTICS_EXPORT_RUN_LIMIT,
+  buildDiagnosticsExport,
+  compactRuntimeHealth,
+  diagnosticsExportMarkdown
+} from "./diagnosticsExport.js";
 
 const WINDOW_MS = Object.freeze({
   "24h": 24 * 60 * 60 * 1000,
@@ -275,13 +283,94 @@ async function diagnosticsDetail(env, runId, owner, { fetchImpl } = {}) {
   };
 }
 
+function exportFormat(url) {
+  const format = String(url.searchParams.get("format") || "md").toLowerCase();
+  if (!["md", "json"].includes(format)) {
+    throw new HermesError("hermes_diagnostics_export_format_invalid", "format must be md or json", { httpStatus: 400 });
+  }
+  return format;
+}
+
+function exportFilename(scopeId, format, now = Date.now()) {
+  const safeId = String(scopeId || "summary").replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 120) || "summary";
+  const utc = new Date(now).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  return `hermes-diagnostics-${safeId}-${utc}.${format}`;
+}
+
+async function runtimeHealthForExport(env, instanceId, fetchImpl) {
+  try {
+    return compactRuntimeHealth(await getHermesRuntimeHealth(env, instanceId, { fetchImpl }));
+  } catch (err) {
+    return null;
+  }
+}
+
+function diagnosticsExportResponse(payload, format, scopeId) {
+  const body = format === "json" ? JSON.stringify(payload, null, 2) : diagnosticsExportMarkdown(payload);
+  return new Response(body, { headers: {
+    "Content-Type": format === "json" ? "application/json; charset=utf-8" : "text/markdown; charset=utf-8",
+    "Content-Disposition": `attachment; filename="${exportFilename(scopeId, format)}"`,
+    "Cache-Control": "no-store"
+  } });
+}
+
+async function exportRunDiagnostics(env, url, runId, owner, { fetchImpl } = {}) {
+  const format = exportFormat(url);
+  // Re-check identity ownership at export time; never reuse a previously loaded detail object.
+  const row = await env.DB.prepare("SELECT " + DIAGNOSTIC_COLUMNS + " FROM hermes_runs WHERE id = ? AND owner_username = ?")
+    .bind(runId, owner).first();
+  if (!row) throw new HermesError("hermes_run_not_found", "Hermes run not found", { httpStatus: 404 });
+  const health = await runtimeHealthForExport(env, row.instance_id, fetchImpl);
+  const payload = buildDiagnosticsExport({
+    scope: { type: "run", runId }, owner,
+    runs: [diagnosticRun(row, { detail: true })], runtimeHealth: health
+  });
+  return diagnosticsExportResponse(payload, format, runId);
+}
+
+async function exportSessionDiagnostics(env, url, sessionId, owner, { fetchImpl } = {}) {
+  const format = exportFormat(url);
+  if (!isHermesSessionId(sessionId)) {
+    throw new HermesError("hermes_invalid_session_id", "Invalid Hermes session id", { httpStatus: 400 });
+  }
+  // Owner scope is in the same SELECT as the session id, so another user's session is indistinguishable from missing.
+  const result = await env.DB.prepare("SELECT " + DIAGNOSTIC_COLUMNS
+    + " FROM hermes_runs WHERE owner_username = ? AND upstream_session_id = ?"
+    + " ORDER BY COALESCE(submitted_at, created_at) DESC, created_at DESC LIMIT ?")
+    .bind(owner, sessionId, HERMES_DIAGNOSTICS_EXPORT_RUN_LIMIT + 1).all();
+  const rows = result.results || [];
+  if (!rows.length) throw new HermesError("hermes_session_not_found", "Hermes session not found", { httpStatus: 404 });
+  const included = rows.slice(0, HERMES_DIAGNOSTICS_EXPORT_RUN_LIMIT);
+  const health = await runtimeHealthForExport(env, included[0].instance_id, fetchImpl);
+  const payload = buildDiagnosticsExport({
+    scope: { type: "session", sessionId }, owner,
+    runs: included.map(row => diagnosticRun(row, { detail: true })),
+    runtimeHealth: health,
+    runsCapped: rows.length > HERMES_DIAGNOSTICS_EXPORT_RUN_LIMIT
+  });
+  return diagnosticsExportResponse(payload, format, sessionId);
+}
+
+function decodedSessionId(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch (err) {
+    throw new HermesError("hermes_invalid_session_id", "Invalid Hermes session id", { httpStatus: 400 });
+  }
+}
+
 export async function handleHermesDiagnostics(request, env, url, { owner, fetchImpl, ctx } = {}) {
   if (url.pathname === "/api/hermes/diagnostics/runs") {
     if (request.method !== "GET") return null;
     return listDiagnostics(env, url, owner);
   }
+  if (request.method !== "GET") return null;
+  const runExport = url.pathname.match(/^\/api\/hermes\/diagnostics\/runs\/(hrun_[a-f0-9]{32})\/export$/);
+  if (runExport) return exportRunDiagnostics(env, url, runExport[1], owner, { fetchImpl });
+  const sessionExport = url.pathname.match(/^\/api\/hermes\/diagnostics\/sessions\/([^/]+)\/export$/);
+  if (sessionExport) return exportSessionDiagnostics(env, url, decodedSessionId(sessionExport[1]), owner, { fetchImpl });
   const match = url.pathname.match(/^\/api\/hermes\/diagnostics\/runs\/(hrun_[a-f0-9]{32})$/);
-  if (!match || request.method !== "GET") return null;
+  if (!match) return null;
   return diagnosticsDetail(env, match[1], owner, { fetchImpl });
 }
 

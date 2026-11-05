@@ -9,6 +9,7 @@ import { HermesError, errorFromUpstream, safeMessage } from "./errors.js";
 
 const RUN_ID_PATTERN = /^run_[A-Za-z0-9_-]{1,128}$/;
 const IDEMPOTENCY_KEY_PATTERN = /^[\x21-\x7e]{1,255}$/;
+const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 
 export function isHermesRunId(value) {
   return RUN_ID_PATTERN.test(String(value || ""));
@@ -16,6 +17,10 @@ export function isHermesRunId(value) {
 
 export function isValidIdempotencyKey(value) {
   return IDEMPOTENCY_KEY_PATTERN.test(String(value || ""));
+}
+
+export function isHermesSessionId(value) {
+  return SESSION_ID_PATTERN.test(String(value || ""));
 }
 
 async function readJson(response) {
@@ -100,6 +105,13 @@ export function createHermesClient(env, instanceId, { fetchImpl } = {}) {
     return "/v1/runs/" + encodeURIComponent(runId) + suffix;
   }
 
+  function sessionPath(sessionId, suffix = "") {
+    if (!isHermesSessionId(sessionId)) {
+      throw new HermesError("hermes_invalid_session_id", "Invalid Hermes session id", { httpStatus: 400 });
+    }
+    return "/api/sessions/" + encodeURIComponent(sessionId) + suffix;
+  }
+
   return {
     instanceId,
     secrets,
@@ -109,6 +121,31 @@ export function createHermesClient(env, instanceId, { fetchImpl } = {}) {
     getModelOptions: ({ refresh = false } = {}) => request("GET",
       "/api/model/options?include_unconfigured=false" + (refresh ? "&refresh=true" : ""),
       { timeoutMs: HERMES_TIMEOUTS_MS.catalog }),
+    listSessions({ limit = 100, offset = 0, source = "", includeChildren = true } = {}) {
+      const safeLimit = Math.max(1, Math.min(200, Number.parseInt(limit, 10) || 100));
+      const safeOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
+      const params = new URLSearchParams({
+        limit: String(safeLimit), offset: String(safeOffset), include_children: includeChildren ? "true" : "false"
+      });
+      if (source) params.set("source", String(source).slice(0, 80));
+      return request("GET", "/api/sessions?" + params.toString(), { timeoutMs: HERMES_TIMEOUTS_MS.sessions });
+    },
+    createSession: body => request("POST", "/api/sessions", {
+      body, timeoutMs: HERMES_TIMEOUTS_MS.sessions, mutating: true
+    }),
+    getSession: sessionId => request("GET", sessionPath(sessionId), { timeoutMs: HERMES_TIMEOUTS_MS.sessions }),
+    patchSession: (sessionId, body) => request("PATCH", sessionPath(sessionId), {
+      body, timeoutMs: HERMES_TIMEOUTS_MS.sessions, mutating: true
+    }),
+    getSessionMessages: (sessionId, { includeCompacted = true } = {}) => request("GET",
+      sessionPath(sessionId, "/messages") + "?include_compacted=" + (includeCompacted ? "true" : "false") + "&inline_images=false",
+      { timeoutMs: HERMES_TIMEOUTS_MS.sessions }),
+    forkSession: (sessionId, body) => request("POST", sessionPath(sessionId, "/fork"), {
+      body, timeoutMs: HERMES_TIMEOUTS_MS.sessions, mutating: true
+    }),
+    deleteSession: sessionId => request("DELETE", sessionPath(sessionId), {
+      timeoutMs: HERMES_TIMEOUTS_MS.sessions, mutating: true
+    }),
     createRun(bodyJson, idempotencyKey) {
       if (!isValidIdempotencyKey(idempotencyKey)) {
         throw new HermesError("hermes_invalid_idempotency_key", "Invalid idempotency key", { httpStatus: 500 });

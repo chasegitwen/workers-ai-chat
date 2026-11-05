@@ -1680,6 +1680,24 @@ body.dark .projectRuntimeItem{
   gap:12px;
 }
 
+.hermesWorkbenchBackdrop{position:fixed;inset:0;background:rgba(15,23,42,.34);z-index:70;border:0}
+.hermesWorkbenchDrawer{position:fixed;z-index:71;top:0;right:0;width:min(620px,100vw);height:100dvh;background:var(--panel,#fff);color:var(--text,#111827);box-shadow:-12px 0 32px rgba(15,23,42,.2);display:flex;flex-direction:column}
+.hermesWorkbenchHeader{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px;border-bottom:1px solid var(--border,#d9dee8)}
+.hermesWorkbenchHeader h2{font-size:18px;margin:0}.hermesWorkbenchHeader p{font-size:12px;margin:3px 0 0;color:var(--muted,#667085)}
+.hermesWorkbenchClose{border:0;background:transparent;font-size:26px;cursor:pointer;color:inherit}
+.hermesWorkbenchToolbar{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border,#d9dee8)}
+.hermesWorkbenchToolbar input,.hermesWorkbenchToolbar button,.hermesWorkbenchProjectRow input,.hermesWorkbenchCard button,.hermesWorkbenchCard select{font:inherit;min-height:36px}
+.hermesWorkbenchToolbar input{min-width:0;border:1px solid var(--border,#d9dee8);border-radius:8px;padding:7px 10px;background:inherit;color:inherit}
+.hermesWorkbenchProjects{padding:10px 16px;border-bottom:1px solid var(--border,#d9dee8)}
+.hermesWorkbenchProjects summary{cursor:pointer;font-weight:600}.hermesWorkbenchProjectRow{display:flex;align-items:center;gap:8px;margin-top:8px}.hermesWorkbenchProjectRow span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.hermesWorkbenchBody{flex:1;overflow:auto;padding:12px 16px 28px}.hermesWorkbenchStatus{font-size:13px;color:var(--muted,#667085);margin-bottom:8px}
+.hermesWorkbenchCard{border:1px solid var(--border,#d9dee8);border-radius:10px;padding:12px;margin-bottom:10px;background:var(--panel,#fff)}
+.hermesWorkbenchCardHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.hermesWorkbenchCardHeader strong{overflow-wrap:anywhere}.hermesWorkbenchCardMeta{font-size:12px;color:var(--muted,#667085);margin-top:4px;overflow-wrap:anywhere}
+.hermesWorkbenchActions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.hermesWorkbenchActions button,.hermesWorkbenchActions select,.hermesWorkbenchProjects button,.hermesWorkbenchToolbar button{border:1px solid var(--border,#d9dee8);border-radius:7px;background:transparent;color:inherit;padding:6px 9px;cursor:pointer}
+.hermesWorkbenchHistory{margin-top:10px;border-top:1px solid var(--border,#d9dee8);padding-top:8px}.hermesWorkbenchMessage{margin:7px 0;padding:8px;border-radius:7px;background:rgba(127,127,127,.08);white-space:pre-wrap;overflow-wrap:anywhere}.hermesWorkbenchMessage b{display:block;font-size:12px;margin-bottom:4px}
+.hermesWorkbenchTitleForm{border:1px solid var(--primary);border-radius:10px;padding:10px;margin-bottom:10px}.hermesWorkbenchTitleForm label{display:block;font-size:12px;margin-bottom:6px}.hermesWorkbenchTitleForm input{width:100%;min-height:38px;border:1px solid var(--border);border-radius:8px;background:inherit;color:inherit;padding:7px 9px;font:inherit}.hermesWorkbenchTitleForm div{display:flex;justify-content:flex-end;gap:6px;margin-top:8px}
+@media(max-width:640px){.hermesWorkbenchToolbar{grid-template-columns:1fr 1fr}.hermesWorkbenchToolbar input{grid-column:1/-1}.hermesWorkbenchDrawer{width:100vw}.hermesWorkbenchHeader{padding:12px}.hermesWorkbenchBody{padding:10px 12px 24px}}
+
 .contextSection{
   display:flex;
   flex-direction:column;
@@ -3514,6 +3532,28 @@ body.dark .toolErrorNotice{
   </div>
 </div>
 
+<button id="hermesWorkbenchBackdrop" class="hermesWorkbenchBackdrop" type="button" aria-label="关闭 Hermes 会话与项目" hidden></button>
+<aside id="hermesWorkbenchDrawer" class="hermesWorkbenchDrawer" aria-label="Hermes 会话与项目" aria-hidden="true" hidden>
+  <div class="hermesWorkbenchHeader">
+    <div><h2>会话 / 项目</h2><p>Hermes Sessions / Projects</p></div>
+    <button id="hermesWorkbenchClose" class="hermesWorkbenchClose" type="button" aria-label="关闭">&times;</button>
+  </div>
+  <div class="hermesWorkbenchToolbar">
+    <input id="hermesWorkbenchSearch" type="search" autocomplete="off" placeholder="搜索标题或授权元数据" aria-label="搜索 Hermes 会话标题和授权元数据">
+    <button id="hermesWorkbenchArchiveFilter" type="button" aria-pressed="false">活跃</button>
+    <button id="hermesWorkbenchRefresh" type="button">刷新</button>
+  </div>
+  <details class="hermesWorkbenchProjects">
+    <summary>项目分组</summary>
+    <div id="hermesWorkbenchProjectList"></div>
+    <div class="hermesWorkbenchProjectRow"><button id="hermesWorkbenchProjectCreate" type="button">+ 新建项目</button></div>
+  </details>
+  <div class="hermesWorkbenchBody">
+    <div id="hermesWorkbenchStatus" class="hermesWorkbenchStatus">仅搜索标题和授权元数据，不搜索消息全文。</div>
+    <div id="hermesWorkbenchList"></div>
+  </div>
+</aside>
+
 <div class="app">
 
   <div class="topbar">
@@ -3629,7 +3669,7 @@ body.dark .toolErrorNotice{
         <label>Provider <select id="hermesProviderSelect" class="modelSelectNative" aria-label="Hermes Provider" aria-hidden="true" tabindex="-1"></select></label>
         <label id="hermesModelField" hidden>基础模型 <select id="hermesModelSelect" class="modelSelectNative" aria-label="Hermes 基础模型" aria-hidden="true" tabindex="-1"></select></label>
         <div class="openClawCatalogLine"><span id="hermesCatalogStatus"></span><button id="hermesCatalogRefresh" type="button">刷新目录</button></div>
-        <div class="hermesCapabilitiesLine"><button id="hermesCapabilitiesToggle" type="button" aria-expanded="false" aria-controls="hermesCapabilitiesPanel">能力</button></div>
+        <div class="hermesCapabilitiesLine"><button id="hermesCapabilitiesToggle" type="button" aria-expanded="false" aria-controls="hermesCapabilitiesPanel">能力</button><button id="hermesWorkbenchToggle" type="button" aria-expanded="false" aria-controls="hermesWorkbenchDrawer">会话 / 项目</button></div>
         <section id="hermesCapabilitiesPanel" class="hermesCapabilitiesPanel" aria-label="Hermes 能力" hidden>
           <div class="hermesCapabilitiesToolbar">
             <input id="hermesCapabilitiesSearch" type="search" autocomplete="off" placeholder="搜索 Skills / Toolsets" aria-label="搜索 Hermes 能力">
@@ -14302,6 +14342,18 @@ var hermesEnvironmentInfo = document.getElementById("hermesEnvironmentInfo");
 var hermesSkillsList = document.getElementById("hermesSkillsList");
 var hermesToolsetsList = document.getElementById("hermesToolsetsList");
 var hermesCapabilitiesState = { open:false, loading:false, instanceId:"", data:null, error:null };
+var hermesWorkbenchToggle = document.getElementById("hermesWorkbenchToggle");
+var hermesWorkbenchDrawer = document.getElementById("hermesWorkbenchDrawer");
+var hermesWorkbenchBackdrop = document.getElementById("hermesWorkbenchBackdrop");
+var hermesWorkbenchClose = document.getElementById("hermesWorkbenchClose");
+var hermesWorkbenchSearch = document.getElementById("hermesWorkbenchSearch");
+var hermesWorkbenchArchiveFilter = document.getElementById("hermesWorkbenchArchiveFilter");
+var hermesWorkbenchRefresh = document.getElementById("hermesWorkbenchRefresh");
+var hermesWorkbenchProjectList = document.getElementById("hermesWorkbenchProjectList");
+var hermesWorkbenchProjectCreate = document.getElementById("hermesWorkbenchProjectCreate");
+var hermesWorkbenchStatus = document.getElementById("hermesWorkbenchStatus");
+var hermesWorkbenchList = document.getElementById("hermesWorkbenchList");
+var hermesWorkbenchState = { open:false, loading:false, reloadPending:false, archived:false, sessions:[], projects:[], capabilities:null, error:null, searchTimer:null };
 var hermesRunMount = document.getElementById("hermesRunMount");
 var hermesRunStatus = document.getElementById("hermesRunStatus");
 var hermesRunStatusText = document.getElementById("hermesRunStatusText");
@@ -14606,6 +14658,292 @@ function toggleHermesCapabilities(){
   hermesCapabilitiesState.open = !hermesCapabilitiesState.open;
   renderHermesCapabilities();
   if(hermesCapabilitiesState.open && (hermesCapabilitiesState.instanceId !== hermesSelection.instanceId || !hermesCapabilitiesState.data)) loadHermesCapabilities(false);
+}
+
+function setHermesWorkbenchOpen(open){
+  hermesWorkbenchState.open = Boolean(open);
+  if(hermesWorkbenchDrawer){
+    hermesWorkbenchDrawer.hidden = !hermesWorkbenchState.open;
+    hermesWorkbenchDrawer.setAttribute("aria-hidden", hermesWorkbenchState.open ? "false" : "true");
+  }
+  if(hermesWorkbenchBackdrop) hermesWorkbenchBackdrop.hidden = !hermesWorkbenchState.open;
+  hermesWorkbenchToggle?.setAttribute("aria-expanded", hermesWorkbenchState.open ? "true" : "false");
+  if(hermesWorkbenchState.open){
+    loadHermesWorkbench();
+    setTimeout(() => hermesWorkbenchSearch?.focus?.(), 0);
+  }
+}
+
+function hermesWorkbenchButton(label, action, title){
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  if(title) button.title = title;
+  button.addEventListener("click", action);
+  return button;
+}
+
+function requestHermesWorkbenchTitle(label, initialValue){
+  return new Promise(resolve => {
+    const prior = hermesWorkbenchList?.querySelector?.(".hermesWorkbenchTitleForm");
+    if(prior) prior.remove();
+    const form = document.createElement("form");
+    form.className = "hermesWorkbenchTitleForm";
+    const caption = document.createElement("label");
+    caption.textContent = label;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.maxLength = 160;
+    input.value = initialValue || "";
+    const actions = document.createElement("div");
+    const cancel = hermesWorkbenchButton("取消", () => { form.remove(); resolve(""); });
+    const save = hermesWorkbenchButton("保存", () => {});
+    save.type = "submit";
+    actions.append(cancel, save);
+    form.append(caption, input, actions);
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      const value = input.value.trim();
+      if(!value){ input.focus(); return; }
+      form.remove();
+      resolve(value);
+    });
+    hermesWorkbenchList.prepend(form);
+    input.focus();
+    input.select();
+  });
+}
+
+function renderHermesWorkbenchProjects(){
+  if(!hermesWorkbenchProjectList) return;
+  hermesWorkbenchProjectList.innerHTML = "";
+  hermesWorkbenchState.projects.forEach(project => {
+    const row = document.createElement("div");
+    row.className = "hermesWorkbenchProjectRow";
+    const name = document.createElement("span");
+    name.textContent = project.title;
+    const rename = hermesWorkbenchButton("重命名", () => renameHermesWorkbenchProject(project));
+    row.append(name, rename);
+    hermesWorkbenchProjectList.appendChild(row);
+  });
+  if(!hermesWorkbenchState.projects.length){
+    const empty = document.createElement("div");
+    empty.className = "hermesWorkbenchCardMeta";
+    empty.textContent = "尚无项目分组";
+    hermesWorkbenchProjectList.appendChild(empty);
+  }
+}
+
+function renderHermesWorkbench(){
+  if(!hermesWorkbenchList) return;
+  renderHermesWorkbenchProjects();
+  hermesWorkbenchArchiveFilter.textContent = hermesWorkbenchState.archived ? "已归档" : "活跃";
+  hermesWorkbenchArchiveFilter.setAttribute("aria-pressed", hermesWorkbenchState.archived ? "true" : "false");
+  if(hermesWorkbenchState.loading) hermesWorkbenchStatus.textContent = "Hermes 会话加载中…";
+  else if(hermesWorkbenchState.error) hermesWorkbenchStatus.textContent = "会话加载失败：" + hermesErrorText(hermesWorkbenchState.error);
+  else hermesWorkbenchStatus.textContent = "共 " + hermesWorkbenchState.sessions.length + " 个会话 · 仅搜索标题和授权元数据，不搜索消息全文。";
+  hermesWorkbenchList.innerHTML = "";
+  const sessions = hermesWorkbenchState.sessions.slice().sort((a,b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+  sessions.forEach(session => {
+    const card = document.createElement("article");
+    card.className = "hermesWorkbenchCard";
+    card.dataset.sessionId = session.id;
+    const header = document.createElement("div");
+    header.className = "hermesWorkbenchCardHeader";
+    const heading = document.createElement("strong");
+    heading.textContent = session.title || "未命名会话";
+    const time = document.createElement("span");
+    time.className = "hermesWorkbenchCardMeta";
+    time.textContent = session.updatedAt ? new Date(session.updatedAt).toLocaleString() : "时间未知";
+    header.append(heading, time);
+    const meta = document.createElement("div");
+    meta.className = "hermesWorkbenchCardMeta";
+    meta.textContent = session.id + (session.forkedFromSessionId ? " · fork: " + session.forkedFromSessionId : "");
+    const actions = document.createElement("div");
+    actions.className = "hermesWorkbenchActions";
+    const capabilities = hermesWorkbenchState.capabilities || {};
+    actions.append(hermesWorkbenchButton("继续", () => resumeHermesWorkbenchSession(session)));
+    if(capabilities.messages !== false) actions.append(hermesWorkbenchButton("历史", () => toggleHermesWorkbenchHistory(session, card)));
+    if(capabilities.patch !== false) actions.append(hermesWorkbenchButton("重命名", () => renameHermesWorkbenchSession(session)));
+    if(capabilities.fork !== false) actions.append(hermesWorkbenchButton("分叉", () => forkHermesWorkbenchSession(session)));
+    actions.append(hermesWorkbenchButton(session.archived ? "取消归档" : "归档", () => archiveHermesWorkbenchSession(session, !session.archived)));
+    const projectSelect = document.createElement("select");
+    projectSelect.setAttribute("aria-label", "分配项目");
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "无项目";
+    projectSelect.appendChild(none);
+    hermesWorkbenchState.projects.forEach(project => {
+      const option = document.createElement("option");
+      option.value = project.id;
+      option.textContent = project.title;
+      projectSelect.appendChild(option);
+    });
+    projectSelect.value = session.projectId || "";
+    projectSelect.addEventListener("change", () => assignHermesWorkbenchProject(session, projectSelect.value));
+    actions.append(projectSelect);
+    if(capabilities.messages !== false){
+      actions.append(
+        hermesWorkbenchButton("导出 MD", () => exportHermesWorkbenchSession(session, "md")),
+        hermesWorkbenchButton("导出 JSON", () => exportHermesWorkbenchSession(session, "json"))
+      );
+    }
+    card.append(header, meta, actions);
+    hermesWorkbenchList.appendChild(card);
+  });
+  if(!sessions.length && !hermesWorkbenchState.loading){
+    const empty = document.createElement("div");
+    empty.className = "hermesWorkbenchStatus";
+    empty.textContent = hermesWorkbenchState.archived ? "没有已归档会话" : "没有匹配的活跃会话";
+    hermesWorkbenchList.appendChild(empty);
+  }
+}
+
+async function loadHermesWorkbench(){
+  if(hermesWorkbenchState.loading){
+    hermesWorkbenchState.reloadPending = true;
+    return;
+  }
+  hermesWorkbenchState.loading = true;
+  hermesWorkbenchState.error = null;
+  renderHermesWorkbench();
+  const params = new URLSearchParams({
+    instance_id:hermesSelection.instanceId,
+    archived:hermesWorkbenchState.archived ? "1" : "0",
+    q:String(hermesWorkbenchSearch?.value || "").trim()
+  });
+  try{
+    const res = await fetch("/api/hermes/sessions?" + params.toString());
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok || !data.ok) throw data.upstreamError || data.error || { code:"hermes_sessions_unavailable", message:"会话接口不可用" };
+    hermesWorkbenchState.sessions = Array.isArray(data.sessions) ? data.sessions : [];
+    hermesWorkbenchState.projects = Array.isArray(data.projects) ? data.projects : [];
+    hermesWorkbenchState.capabilities = data.capabilities || null;
+    hermesWorkbenchState.error = data.upstreamError || null;
+  }catch(err){
+    hermesWorkbenchState.sessions = [];
+    hermesWorkbenchState.error = err?.code ? err : { code:"network", message:err?.message || "网络错误" };
+  }finally{
+    hermesWorkbenchState.loading = false;
+    renderHermesWorkbench();
+    if(hermesWorkbenchState.reloadPending){
+      hermesWorkbenchState.reloadPending = false;
+      loadHermesWorkbench();
+    }
+  }
+}
+
+async function hermesWorkbenchMutation(path, method, body){
+  const res = await fetch(path, {
+    method,
+    headers:{ "Content-Type":"application/json; charset=utf-8" },
+    body:body === undefined ? undefined : JSON.stringify(body)
+  });
+  const data = await res.json().catch(() => ({}));
+  if(!res.ok || !data.ok) throw data.error || { code:"hermes_workbench_failed", message:"操作失败" };
+  return data;
+}
+
+async function renameHermesWorkbenchSession(session){
+  const title = await requestHermesWorkbenchTitle("新的会话标题", session.title || "");
+  if(!title?.trim()) return;
+  try{
+    await hermesWorkbenchMutation("/api/hermes/sessions/" + encodeURIComponent(session.id), "PATCH", { title:title.trim() });
+    await loadHermesWorkbench();
+  }catch(err){ setContextStatus("Hermes 会话重命名失败：" + hermesErrorText(err)); }
+}
+
+async function archiveHermesWorkbenchSession(session, archived){
+  if(archived && !confirm("归档只隐藏此会话，不会删除 Hermes 原始历史。继续？")) return;
+  try{
+    await hermesWorkbenchMutation("/api/hermes/sessions/" + encodeURIComponent(session.id) + "/archive", "POST", {
+      archived, expected_archived:Boolean(session.archived)
+    });
+    await loadHermesWorkbench();
+  }catch(err){ setContextStatus("Hermes 归档操作失败：" + hermesErrorText(err)); }
+}
+
+async function assignHermesWorkbenchProject(session, projectId){
+  try{
+    await hermesWorkbenchMutation("/api/hermes/sessions/" + encodeURIComponent(session.id), "PATCH", { project_id:projectId || null });
+    await loadHermesWorkbench();
+  }catch(err){ setContextStatus("Hermes 项目分配失败：" + hermesErrorText(err)); }
+}
+
+async function forkHermesWorkbenchSession(session){
+  const title = await requestHermesWorkbenchTitle("分叉会话标题", (session.title || "Hermes 会话") + " (fork)");
+  if(!title?.trim()) return;
+  try{
+    await hermesWorkbenchMutation("/api/hermes/sessions/" + encodeURIComponent(session.id) + "/fork", "POST", { title:title.trim() });
+    await loadHermesWorkbench();
+  }catch(err){ setContextStatus("Hermes 会话分叉失败：" + hermesErrorText(err)); }
+}
+
+async function resumeHermesWorkbenchSession(session){
+  try{
+    const data = await hermesWorkbenchMutation("/api/hermes/sessions/" + encodeURIComponent(session.id) + "/resume", "POST", {
+      project_id:activeProjectId || DEFAULT_PROJECT_ID
+    });
+    setHermesWorkbenchOpen(false);
+    setHermesSelectionActive(true);
+    currentConversationId = data.resume.conversationId;
+    await loadConversations();
+    await loadConversationMessages(currentConversationId);
+    setContextStatus("已打开 Hermes 会话，可从现有发送路径继续");
+  }catch(err){ setContextStatus("Hermes 会话打开失败：" + hermesErrorText(err)); }
+}
+
+async function toggleHermesWorkbenchHistory(session, card){
+  const existing = card.querySelector?.(".hermesWorkbenchHistory");
+  if(existing){ existing.remove(); return; }
+  const history = document.createElement("div");
+  history.className = "hermesWorkbenchHistory";
+  history.textContent = "历史加载中…";
+  card.appendChild(history);
+  try{
+    const res = await fetch("/api/hermes/sessions/" + encodeURIComponent(session.id) + "/messages");
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok || !data.ok) throw data.error || { message:"历史不可用" };
+    history.innerHTML = "";
+    (data.messages || []).forEach(message => {
+      const row = document.createElement("div");
+      row.className = "hermesWorkbenchMessage";
+      const label = document.createElement("b");
+      label.textContent = message.role + (message.toolName ? " · " + message.toolName : "");
+      const content = document.createElement("span");
+      content.textContent = message.content || "（空）";
+      row.append(label, content);
+      history.appendChild(row);
+    });
+    if(!data.messages?.length) history.textContent = "没有可显示的消息";
+  }catch(err){ history.textContent = "历史加载失败：" + hermesErrorText(err); }
+}
+
+function exportHermesWorkbenchSession(session, format){
+  const link = document.createElement("a");
+  link.href = "/api/hermes/sessions/" + encodeURIComponent(session.id) + "/export?format=" + format;
+  link.download = "";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+async function createHermesWorkbenchProject(){
+  const title = await requestHermesWorkbenchTitle("项目名称", "");
+  if(!title?.trim()) return;
+  try{
+    await hermesWorkbenchMutation("/api/hermes/projects", "POST", { title:title.trim() });
+    await loadHermesWorkbench();
+  }catch(err){ setContextStatus("Hermes 项目创建失败：" + hermesErrorText(err)); }
+}
+
+async function renameHermesWorkbenchProject(project){
+  const title = await requestHermesWorkbenchTitle("新的项目名称", project.title || "");
+  if(!title?.trim()) return;
+  try{
+    await hermesWorkbenchMutation("/api/hermes/projects/" + encodeURIComponent(project.id), "PATCH", { title:title.trim() });
+    await loadHermesWorkbench();
+  }catch(err){ setContextStatus("Hermes 项目重命名失败：" + hermesErrorText(err)); }
 }
 
 function syncHermesKindButton(){
@@ -15378,6 +15716,19 @@ function initHermesUi(){
   hermesCapabilitiesRefresh?.addEventListener("click", () => loadHermesCapabilities(true));
   hermesCapabilitiesSearch?.addEventListener("input", renderHermesCapabilities);
   hermesCapabilitiesCategory?.addEventListener("change", renderHermesCapabilities);
+  hermesWorkbenchToggle?.addEventListener("click", () => setHermesWorkbenchOpen(!hermesWorkbenchState.open));
+  hermesWorkbenchClose?.addEventListener("click", () => setHermesWorkbenchOpen(false));
+  hermesWorkbenchBackdrop?.addEventListener("click", () => setHermesWorkbenchOpen(false));
+  hermesWorkbenchRefresh?.addEventListener("click", loadHermesWorkbench);
+  hermesWorkbenchArchiveFilter?.addEventListener("click", () => {
+    hermesWorkbenchState.archived = !hermesWorkbenchState.archived;
+    loadHermesWorkbench();
+  });
+  hermesWorkbenchSearch?.addEventListener("input", () => {
+    clearTimeout(hermesWorkbenchState.searchTimer);
+    hermesWorkbenchState.searchTimer = setTimeout(loadHermesWorkbench, 250);
+  });
+  hermesWorkbenchProjectCreate?.addEventListener("click", createHermesWorkbenchProject);
   hermesClarifySubmit?.addEventListener("click", submitHermesClarify);
   hermesRunCollapseBtn?.addEventListener("click", () => {
     const currentState = hermesPanelStateOverride || hermesPanelState;

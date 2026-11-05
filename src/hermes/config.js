@@ -33,7 +33,8 @@ export const HERMES_TIMEOUTS_MS = Object.freeze({
   stop: 10000,
   approval: 10000,
   clarify: 10000,
-  resolveUnknown: 10000
+  resolveUnknown: 10000,
+  sessions: 15000
 });
 
 // A D1 compare-and-set prevents concurrent approval clicks. If a Worker disappears after

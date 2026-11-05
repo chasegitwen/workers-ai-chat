@@ -33,6 +33,7 @@ export class MockHermes {
   constructor({ durableIdempotency = true, unknownResolution = true } = {}) {
     this.calls = [];
     this.runs = new Map();
+    this.sessions = new Map();
     this.idempotency = new Map();
     this.seq = 0;
     this.durableIdempotency = durableIdempotency;
@@ -44,6 +45,7 @@ export class MockHermes {
     this.onApproval = null;
     this.onClarify = null;
     this.onEvents = null;
+    this.onSessions = null;
     this.capabilities = null;
     this.onSkills = null;
     this.onToolsets = null;
@@ -79,13 +81,32 @@ export class MockHermes {
         run_approval_response: true, approval_events: true, tool_progress_events: true, model_options: true,
         run_clarify_response: true, clarify_events: true,
         run_unknown_resolution: this.unknownResolution,
+        session_list: true, session_create: true, session_get: true, session_patch: true,
+        session_messages: true, session_fork: true,
         runs_idempotency: { supported: true, durable: this.durableIdempotency, retention_seconds: 86400 }
       },
       endpoints: {
         skills: { method: "GET", path: "/v1/skills" },
-        toolsets: { method: "GET", path: "/v1/toolsets" }
+        toolsets: { method: "GET", path: "/v1/toolsets" },
+        session_list: { method: "GET", path: "/api/sessions" },
+        session_create: { method: "POST", path: "/api/sessions" },
+        session_get: { method: "GET", path: "/api/sessions/{id}" },
+        session_patch: { method: "PATCH", path: "/api/sessions/{id}" },
+        session_messages: { method: "GET", path: "/api/sessions/{id}/messages" },
+        session_fork: { method: "POST", path: "/api/sessions/{id}/fork" }
       }
     };
+  }
+
+  newSession({ id, title = "Untitled session", messages = [], created_at, updated_at, source = "api" } = {}) {
+    const sessionId = id || "session_" + crypto.randomUUID().replace(/-/g, "");
+    const now = Date.now() / 1000;
+    const session = {
+      id: sessionId, title, source, created_at: created_at || now, updated_at: updated_at || now,
+      messages: messages.map(message => ({ ...message }))
+    };
+    this.sessions.set(sessionId, session);
+    return session;
   }
 
   newRun(body) {
@@ -96,6 +117,9 @@ export class MockHermes {
       execution_generation: 1, output: "", usage: {}, pending_controls: [], _body: body
     };
     this.runs.set(runId, run);
+    const session = this.sessions.get(run.session_id) || this.newSession({ id: run.session_id, title: String(body.input || "Hermes session").slice(0, 160) });
+    session.updated_at = Date.now() / 1000;
+    if (body.input) session.messages.push({ role: "user", content: body.input, created_at: session.updated_at });
     return run;
   }
 
@@ -186,6 +210,52 @@ export class MockHermes {
         if (override) return override;
       }
       return json({ object: "list", platform: "api_server", data: this.toolsets });
+    }
+
+    if (url.pathname === "/api/sessions") {
+      if (this.onSessions) {
+        const override = await this.onSessions(call);
+        if (override) return override;
+      }
+      if (method === "GET") {
+        const limit = Math.max(1, Number(url.searchParams.get("limit") || 100));
+        const offset = Math.max(0, Number(url.searchParams.get("offset") || 0));
+        const sessions = [...this.sessions.values()].sort((a, b) => b.updated_at - a.updated_at)
+          .slice(offset, offset + limit).map(({ messages, ...session }) => session);
+        return json({ sessions, total: this.sessions.size, limit, offset });
+      }
+      if (method === "POST") {
+        if (!call.body?.title) return err(400, "invalid_params", "title is required");
+        const { messages, ...session } = this.newSession({ title: call.body.title });
+        return json(session, 201);
+      }
+    }
+
+    const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)(?:\/(messages|fork))?$/);
+    if (sessionMatch) {
+      const [, sessionId, action] = sessionMatch;
+      const session = this.sessions.get(decodeURIComponent(sessionId));
+      if (!session) return err(404, "session_not_found", "Session not found");
+      if (!action && method === "GET") {
+        const { messages, ...visible } = session;
+        return json(visible);
+      }
+      if (!action && method === "PATCH") {
+        if (typeof call.body?.title !== "string" || !call.body.title.trim()) return err(400, "invalid_params", "title is required");
+        session.title = call.body.title.trim();
+        session.updated_at = Date.now() / 1000;
+        const { messages, ...visible } = session;
+        return json(visible);
+      }
+      if (action === "messages" && method === "GET") return json({ messages: session.messages });
+      if (action === "fork" && method === "POST") {
+        const fork = this.newSession({
+          title: call.body?.title || session.title + " (fork)", messages: session.messages,
+          created_at: Date.now() / 1000, updated_at: Date.now() / 1000
+        });
+        const { messages, ...visible } = fork;
+        return json(visible, 201);
+      }
     }
 
     if (method === "POST" && url.pathname === "/v1/runs") {

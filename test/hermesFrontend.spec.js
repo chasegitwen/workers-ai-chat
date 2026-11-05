@@ -145,6 +145,42 @@ function sandbox({ executionEnabled = true, attachments = false, extra = [] } = 
 }
 
 describe("Hermes frontend", () => {
+  it("renders the Hermes-only Sessions / Projects drawer and honest search scope", () => {
+    const html = htmlPage();
+    expect(html).toContain('id="hermesWorkbenchToggle"');
+    expect(html).toContain('id="hermesWorkbenchDrawer" class="hermesWorkbenchDrawer"');
+    expect(html).toContain("Hermes Sessions / Projects");
+    expect(html).toContain("仅搜索标题和授权元数据，不搜索消息全文");
+    expect(html.indexOf('id="hermesWorkbenchToggle"')).toBeGreaterThan(html.indexOf('id="hermesRouteControls"'));
+  });
+
+  it("sorts workbench sessions newest first before rendering", () => {
+    const source = lastDeclaration(pageScript(), "renderHermesWorkbench");
+    expect(source).toContain("sort((a,b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))");
+    expect(source).toContain("session.forkedFromSessionId");
+  });
+
+  it("uses the archive metadata endpoint and supports unarchive", () => {
+    const source = lastDeclaration(pageScript(), "archiveHermesWorkbenchSession");
+    expect(source).toContain('encodeURIComponent(session.id) + "/archive"');
+    expect(source).toContain("expected_archived:Boolean(session.archived)");
+    expect(source).toContain("不会删除 Hermes 原始历史");
+    expect(source).not.toContain("end_reason");
+  });
+
+  it("assigns projects through the owned session metadata route", () => {
+    const source = lastDeclaration(pageScript(), "assignHermesWorkbenchProject");
+    expect(source).toContain("{ project_id:projectId || null }");
+    expect(source).toContain('"PATCH"');
+  });
+
+  it("sends only the title/metadata query and keeps history as an explicit action", () => {
+    const load = lastDeclaration(pageScript(), "loadHermesWorkbench");
+    expect(load).toContain('q:String(hermesWorkbenchSearch?.value || "").trim()');
+    expect(load).not.toContain("messages");
+    expect(lastDeclaration(pageScript(), "toggleHermesWorkbenchHistory")).toContain('"/messages"');
+  });
+
   it("ships the Hermes target hidden by default with TDZ-safe state", () => {
     const html = htmlPage();
     expect(html).toContain('id="hermesKindBtn" data-selection-kind="hermes" hidden');

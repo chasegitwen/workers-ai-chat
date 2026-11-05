@@ -6,6 +6,7 @@ import { requireAuth } from "../lib/auth.js";
 import { jsonResponse } from "../utils/response.js";
 import { getHermesCatalog } from "./catalog.js";
 import { getHermesCapabilitiesPanel } from "./capabilitiesPanel.js";
+import { getHermesRuntimeHealth } from "./health.js";
 import { createHermesClient } from "./client.js";
 import {
   HERMES_INSTANCES,
@@ -152,6 +153,26 @@ async function handleCapabilitiesPanel(env, url, options) {
   }
   const panel = await getHermesCapabilitiesPanel(env, instanceId, { fetchImpl: options.fetchImpl });
   return jsonResponse({ ok: true, instanceId, configured: true, ...panel });
+}
+
+async function handleRuntimeHealth(env, url, options) {
+  const instanceId = String(url.searchParams.get("instance_id") || ORACLE_HERMES_INSTANCE_ID).trim() || ORACLE_HERMES_INSTANCE_ID;
+  if (!hermesInstance(instanceId)) throw new HermesError("hermes_unknown_instance", "Unknown Hermes instance", { httpStatus: 400 });
+  const upstream = describeHermesUpstream(env, instanceId);
+  if (!upstream.configured) {
+    return jsonResponse({
+      ok: true,
+      health: {
+        instanceId, overallStatus: "unavailable", connectivity: "unavailable", backend: "unavailable",
+        checks: {}, gateway: null, platforms: null, capabilities: null, dataSource: [],
+        probedAt: Date.now(), lastSuccessfulProbeAt: null,
+        notes: ["Hermes instance is not configured."],
+        error: { code: upstream.reason, message: "Hermes instance is not configured" }
+      }
+    });
+  }
+  const health = await getHermesRuntimeHealth(env, instanceId, { fetchImpl: options.fetchImpl });
+  return jsonResponse({ ok: true, health });
 }
 
 function sanitizeEvent(frame, capabilities = null) {
@@ -311,6 +332,10 @@ export async function handleHermes(request, env, url, ctx, options = {}) {
 
     if (url.pathname === "/api/hermes/capabilities-panel" && request.method === "GET") {
       return await handleCapabilitiesPanel(env, url, routeOptions);
+    }
+
+    if (url.pathname === "/api/hermes/runtime-health" && request.method === "GET") {
+      return await handleRuntimeHealth(env, url, routeOptions);
     }
 
     if (url.pathname === "/api/hermes/run-settings" && request.method === "GET") {

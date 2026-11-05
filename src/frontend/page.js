@@ -1699,6 +1699,7 @@ body.dark .projectRuntimeItem{
 .hermesWorkbenchTitleForm{border:1px solid var(--primary);border-radius:10px;padding:10px;margin-bottom:10px}.hermesWorkbenchTitleForm label{display:block;font-size:12px;margin-bottom:6px}.hermesWorkbenchTitleForm input{width:100%;min-height:38px;border:1px solid var(--border);border-radius:8px;background:inherit;color:inherit;padding:7px 9px;font:inherit}.hermesWorkbenchTitleForm div{display:flex;justify-content:flex-end;gap:6px;margin-top:8px}
 .hermesJobsToolbar{grid-template-columns:minmax(0,1fr) auto auto auto}.hermesJobsEditor{padding:12px 16px;border-bottom:1px solid var(--border,#d9dee8);display:grid;grid-template-columns:1fr 1fr;gap:9px}.hermesJobsEditor[hidden]{display:none}.hermesJobsEditor label{display:flex;flex-direction:column;gap:4px;font-size:12px}.hermesJobsEditor .wide{grid-column:1/-1}.hermesJobsEditor input,.hermesJobsEditor textarea{font:inherit;border:1px solid var(--border,#d9dee8);border-radius:8px;padding:8px;background:inherit;color:inherit;min-width:0}.hermesJobsEditor textarea{min-height:92px;resize:vertical}.hermesJobsEditorActions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px}.hermesJobsEditorActions button{font:inherit;border:1px solid var(--border,#d9dee8);border-radius:7px;background:transparent;color:inherit;padding:7px 11px;cursor:pointer}.hermesJobsPrompt,.hermesJobsResult{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto;margin:8px 0 0;padding:8px;border-radius:7px;background:rgba(127,127,127,.08)}
 .hermesDiagnosticsToolbar{grid-template-columns:auto auto 1fr auto}.hermesDiagnosticsWindows{display:flex;gap:5px;flex-wrap:wrap}.hermesDiagnosticsWindows button[aria-pressed="true"]{border-color:var(--primary);color:var(--primary);font-weight:600}.hermesDiagnosticsToolbar select{font:inherit;border:1px solid var(--border,#d9dee8);border-radius:8px;padding:7px 9px;background:inherit;color:inherit;min-height:36px}.hermesDiagnosticsDetail{margin-top:10px;border-top:1px solid var(--border,#d9dee8);padding-top:10px}.hermesDiagnosticsTimeline{margin:8px 0 0;padding-left:20px;font-size:12px;line-height:1.5}.hermesDiagnosticsError{margin-top:8px;padding:8px;border-radius:7px;background:rgba(190,24,93,.08);white-space:pre-wrap;overflow-wrap:anywhere}.hermesDiagnosticsFacts{margin:6px 0;padding-left:20px;font-size:12px;line-height:1.5}.hermesDiagnosticsInference{margin-top:6px;padding:7px;border-left:3px solid #d97706;background:rgba(217,119,6,.08);font-size:12px}
+.hermesRuntimeHealth{margin-bottom:12px}.hermesRuntimeHealth[data-status="healthy"]{border-left:4px solid #15803d}.hermesRuntimeHealth[data-status="degraded"]{border-left:4px solid #d97706}.hermesRuntimeHealth[data-status="unavailable"]{border-left:4px solid #be123c}.hermesRuntimeHealthFacts{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:6px;margin-top:8px}.hermesRuntimeHealthFact{padding:7px;border-radius:7px;background:var(--surface-muted,rgba(127,127,127,.07));font-size:12px;overflow-wrap:anywhere}.hermesRuntimeHealthNote{margin-top:7px;font-size:12px;color:var(--muted,#667085)}
 @media(max-width:640px){.hermesWorkbenchToolbar{grid-template-columns:1fr 1fr}.hermesWorkbenchToolbar input{grid-column:1/-1}.hermesWorkbenchDrawer{width:100vw}.hermesWorkbenchHeader{padding:12px}.hermesWorkbenchBody{padding:10px 12px 24px}}
 .hermesSettingsBody{display:flex;flex-direction:column;gap:12px}.hermesSettingsSection{border:1px solid var(--border,#d9dee8);border-radius:10px;padding:12px}.hermesSettingsSection h3{margin:0 0 8px;font-size:14px}.hermesSettingsLabel{display:flex;flex-direction:column;gap:6px;font-size:13px}.hermesSettingsLabel select{border:1px solid var(--border,#d9dee8);border-radius:8px;padding:7px 10px;background:inherit;color:inherit}.hermesSettingsHint,.hermesSettingsGap{font-size:12px;color:var(--muted,#667085);margin:6px 0 0;line-height:1.45}.hermesSettingsList{margin:0;padding-left:18px;font-size:12px;color:var(--muted,#667085);line-height:1.45}.hermesSettingsEffective{font-size:13px;line-height:1.5}@media(max-width:640px){.hermesJobsToolbar{grid-template-columns:1fr 1fr}.hermesJobsEditor{grid-template-columns:1fr}.hermesJobsEditor .wide,.hermesJobsEditorActions{grid-column:1}}
 
@@ -3588,9 +3589,16 @@ body.dark .toolErrorNotice{
 <button id="hermesDiagnosticsBackdrop" class="hermesWorkbenchBackdrop" type="button" aria-label="关闭 Hermes 运行诊断" hidden></button>
 <aside id="hermesDiagnosticsDrawer" class="hermesWorkbenchDrawer" aria-label="Hermes 运行诊断" aria-hidden="true" hidden>
   <div class="hermesWorkbenchHeader">
-    <div><h2>诊断</h2><p>Hermes Run Diagnostics · 不提交、不重试（刷新仅同步权威状态）</p></div>
+    <div><h2>诊断</h2><p>Hermes Run Diagnostics · 不提交、不重试（刷新仅同步权威状态）· 只读探测</p></div>
     <button id="hermesDiagnosticsClose" class="hermesWorkbenchClose" type="button" aria-label="关闭">&times;</button>
   </div>
+  <section id="hermesRuntimeHealth" class="hermesWorkbenchCard hermesRuntimeHealth" aria-label="运行时健康 Runtime health" data-status="unknown" data-read-only="true">
+    <div class="hermesWorkbenchCardHeader"><strong>运行时健康 / Runtime health</strong><span id="hermesRuntimeHealthLevel" class="hermesWorkbenchCardMeta">Unknown</span></div>
+    <div class="hermesWorkbenchCardMeta">只读健康探测；不提供 Gateway 或平台控制操作。</div>
+    <div id="hermesRuntimeHealthMeta" class="hermesWorkbenchCardMeta">数据源：尚未探测 · 探测时间：未知 · 最近成功：未知</div>
+    <div id="hermesRuntimeHealthFacts" class="hermesRuntimeHealthFacts"></div>
+    <div id="hermesRuntimeHealthNotes" class="hermesRuntimeHealthNote"></div>
+  </section>
   <div class="hermesWorkbenchToolbar hermesDiagnosticsToolbar">
     <select id="hermesDiagnosticsStatusFilter" aria-label="筛选运行状态">
       <option value="">全部状态</option><option value="failed">失败</option><option value="cancelled">取消</option>
@@ -14512,6 +14520,12 @@ var hermesDiagnosticsWindows = document.getElementById("hermesDiagnosticsWindows
 var hermesDiagnosticsRefresh = document.getElementById("hermesDiagnosticsRefresh");
 var hermesDiagnosticsStatus = document.getElementById("hermesDiagnosticsStatus");
 var hermesDiagnosticsList = document.getElementById("hermesDiagnosticsList");
+var hermesRuntimeHealth = document.getElementById("hermesRuntimeHealth");
+var hermesRuntimeHealthLevel = document.getElementById("hermesRuntimeHealthLevel");
+var hermesRuntimeHealthMeta = document.getElementById("hermesRuntimeHealthMeta");
+var hermesRuntimeHealthFacts = document.getElementById("hermesRuntimeHealthFacts");
+var hermesRuntimeHealthNotes = document.getElementById("hermesRuntimeHealthNotes");
+var hermesRuntimeHealthState = { loading:false, data:null, error:null, instanceId:"", requestedAt:0 };
 var hermesDiagnosticsState = { open:false, loading:false, reloadPending:false, window:"24h", status:"", category:"", runs:[], detail:null, selectedId:"", error:null, detailError:null, syncError:null, dataSource:"D1 persisted Hermes runs", updatedAt:null, emptyReason:"", total:0, hasMore:false };
 var hermesRunMount = document.getElementById("hermesRunMount");
 var hermesRunStatus = document.getElementById("hermesRunStatus");
@@ -15400,7 +15414,10 @@ function setHermesDiagnosticsOpen(open){
   }
   if(hermesDiagnosticsBackdrop) hermesDiagnosticsBackdrop.hidden = !hermesDiagnosticsState.open;
   hermesDiagnosticsToggle?.setAttribute("aria-expanded", hermesDiagnosticsState.open ? "true" : "false");
-  if(hermesDiagnosticsState.open) loadHermesDiagnostics();
+  if(hermesDiagnosticsState.open){
+    loadHermesRuntimeHealth(false);
+    loadHermesDiagnostics();
+  }
 }
 
 function hermesDiagnosticsCoverageText(coverage){
@@ -15412,6 +15429,86 @@ function hermesDiagnosticsCoverageText(coverage){
 
 function hermesDiagnosticsTime(value){
   return value ? new Date(Number(value)).toLocaleString() : "未知";
+}
+
+const HERMES_RUNTIME_HEALTH_LABELS = { healthy:"Healthy", degraded:"Degraded", unavailable:"Unavailable", unknown:"Unknown" };
+const HERMES_RUNTIME_CHECK_LABELS = {
+  state_db:"State DB", session_store:"Session store", config:"Env / config", model:"Model",
+  disk:"Disk", gateway:"Gateway", background_queues:"Background queues"
+};
+
+function hermesRuntimeCheckText(name, check){
+  if(!check) return (HERMES_RUNTIME_CHECK_LABELS[name] || name) + "：未知";
+  const extra = [];
+  if(name === "disk"){
+    if(Number.isFinite(Number(check.usedPercent))) extra.push("used " + Number(check.usedPercent).toFixed(1) + "%");
+    if(Number.isFinite(Number(check.freeBytes))) extra.push("free " + Number(check.freeBytes).toLocaleString() + " bytes");
+  }
+  if(name === "gateway"){
+    if(check.state) extra.push(check.state);
+    if(Number.isFinite(Number(check.connectedPlatforms)) && Number.isFinite(Number(check.platforms))) extra.push(check.connectedPlatforms + "/" + check.platforms + " platforms");
+  }
+  if(name === "background_queues" && Number.isFinite(Number(check.activeApiRuns))) extra.push("Active API Runs " + check.activeApiRuns);
+  if(check.detail) extra.push(check.detail);
+  return (HERMES_RUNTIME_CHECK_LABELS[name] || name) + "：" + check.status + (extra.length ? " · " + extra.join(" · ") : "");
+}
+
+function appendHermesRuntimeHealthFact(text){
+  const fact = document.createElement("div");
+  fact.className = "hermesRuntimeHealthFact";
+  fact.textContent = text;
+  hermesRuntimeHealthFacts.appendChild(fact);
+}
+
+function renderHermesRuntimeHealth(){
+  if(!hermesRuntimeHealth || !hermesRuntimeHealthFacts) return;
+  const data = hermesRuntimeHealthState.data;
+  const level = data?.overallStatus || (hermesRuntimeHealthState.error ? "unavailable" : "unknown");
+  hermesRuntimeHealth.dataset.status = level;
+  hermesRuntimeHealthLevel.textContent = hermesRuntimeHealthState.loading ? "Probing…" : (HERMES_RUNTIME_HEALTH_LABELS[level] || "Unknown");
+  const sources = Array.isArray(data?.dataSource) && data.dataSource.length ? data.dataSource.join(" + ") : "尚未确认";
+  hermesRuntimeHealthMeta.textContent = "数据源：" + sources + " · 探测时间：" + hermesDiagnosticsTime(data?.probedAt)
+    + " · 最近成功：" + hermesDiagnosticsTime(data?.lastSuccessfulProbeAt);
+  hermesRuntimeHealthFacts.innerHTML = "";
+  appendHermesRuntimeHealthFact("Hermes API connectivity：" + (data?.connectivity || "unknown"));
+  appendHermesRuntimeHealthFact("Backend readiness：" + (data?.backend || "unknown"));
+  appendHermesRuntimeHealthFact(hermesRuntimeCheckText("state_db", data?.checks?.state_db));
+  appendHermesRuntimeHealthFact(hermesRuntimeCheckText("background_queues", data?.checks?.background_queues));
+  for(const name of ["session_store", "config", "model", "disk", "gateway"]){
+    if(data?.checks?.[name]) appendHermesRuntimeHealthFact(hermesRuntimeCheckText(name, data.checks[name]));
+  }
+  if(data?.platforms) appendHermesRuntimeHealthFact("Platforms：" + data.platforms.connected + "/" + data.platforms.total + " available" + (data.platforms.truncated ? " · list capped" : ""));
+  const notes = [];
+  if(hermesRuntimeHealthState.error) notes.push("探测接口不可用：" + hermesErrorText(hermesRuntimeHealthState.error));
+  if(data?.error) notes.push(hermesErrorText(data.error));
+  if(Array.isArray(data?.notes)) notes.push(...data.notes);
+  hermesRuntimeHealthNotes.textContent = notes.join(" · ");
+}
+
+async function loadHermesRuntimeHealth(force){
+  const instanceId = hermesSelection.instanceId || "oracle-hermes";
+  const now = Date.now();
+  if(!force && hermesRuntimeHealthState.instanceId === instanceId && now - hermesRuntimeHealthState.requestedAt < 30000) return;
+  if(hermesRuntimeHealthState.loading) return;
+  hermesRuntimeHealthState = { ...hermesRuntimeHealthState, loading:true, error:null, instanceId, requestedAt:now };
+  renderHermesRuntimeHealth();
+  try{
+    const params = new URLSearchParams({ instance_id:instanceId });
+    const res = await fetch("/api/hermes/runtime-health?" + params.toString());
+    const payload = await res.json().catch(() => ({}));
+    if(!res.ok || !payload.ok || !payload.health) throw payload.error || { code:"hermes_runtime_health_unavailable", message:"运行时健康接口不可用" };
+    const previousSuccess = hermesRuntimeHealthState.data?.lastSuccessfulProbeAt || null;
+    hermesRuntimeHealthState.data = payload.health.lastSuccessfulProbeAt || !previousSuccess
+      ? payload.health
+      : { ...payload.health, lastSuccessfulProbeAt:previousSuccess };
+  }catch(err){
+    const previousSuccess = hermesRuntimeHealthState.data?.lastSuccessfulProbeAt || null;
+    hermesRuntimeHealthState.data = { instanceId, overallStatus:"unavailable", connectivity:"unavailable", backend:"unavailable", checks:{}, dataSource:[], probedAt:Date.now(), lastSuccessfulProbeAt:previousSuccess, notes:[] };
+    hermesRuntimeHealthState.error = err?.code ? err : { code:"network", message:err?.message || "网络错误" };
+  }finally{
+    hermesRuntimeHealthState.loading = false;
+    renderHermesRuntimeHealth();
+  }
 }
 
 const HERMES_DIAGNOSTIC_CATEGORY_LABELS = {
@@ -16527,7 +16624,10 @@ function initHermesUi(){
     });
     hermesDiagnosticsClose?.addEventListener("click", () => setHermesDiagnosticsOpen(false));
     hermesDiagnosticsBackdrop?.addEventListener("click", () => setHermesDiagnosticsOpen(false));
-    hermesDiagnosticsRefresh?.addEventListener("click", loadHermesDiagnostics);
+    hermesDiagnosticsRefresh?.addEventListener("click", () => {
+      loadHermesRuntimeHealth(true);
+      loadHermesDiagnostics();
+    });
     hermesDiagnosticsStatusFilter?.addEventListener("change", () => {
       hermesDiagnosticsState.status = hermesDiagnosticsStatusFilter.value || "";
       loadHermesDiagnostics();

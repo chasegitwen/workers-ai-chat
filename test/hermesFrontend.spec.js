@@ -200,6 +200,27 @@ describe("Hermes frontend", () => {
     expect(html.indexOf('id="hermesDiagnosticsToggle"')).toBeGreaterThan(html.indexOf('id="hermesJobsToggle"'));
   });
 
+  it("renders a read-only runtime health card without gateway controls", () => {
+    const html = htmlPage();
+    expect(html).toContain('id="hermesRuntimeHealth"');
+    expect(html).toContain("运行时健康 / Runtime health");
+    expect(html).toContain('data-read-only="true"');
+    expect(html).toContain("数据源：尚未探测 · 探测时间：未知 · 最近成功：未知");
+    const start = html.indexOf('id="hermesRuntimeHealth"');
+    const end = html.indexOf('<div class="hermesWorkbenchToolbar hermesDiagnosticsToolbar">', start);
+    const panel = html.slice(start, end).toLowerCase();
+    for(const action of ["start gateway", "stop gateway", "restart gateway"]){
+      expect(panel).not.toContain(action);
+    }
+    const load = lastDeclaration(pageScript(), "loadHermesRuntimeHealth");
+    expect(load).toContain('/api/hermes/runtime-health?');
+    expect(load).toContain("< 30000");
+    expect(load).not.toContain('method:"POST"');
+    const render = lastDeclaration(pageScript(), "renderHermesRuntimeHealth");
+    expect(render).toContain("lastSuccessfulProbeAt");
+    expect(lastDeclaration(pageScript(), "hermesRuntimeCheckText")).toContain("Active API Runs");
+  });
+
   it("shows facts, inference, suggestions, and the unknown-execution warning separately", () => {
     const detail = lastDeclaration(pageScript(), "renderHermesDiagnosticsDetail");
     expect(detail).toContain("已确认事实");

@@ -49,6 +49,8 @@ export class MockHermes {
     this.onSessions = null;
     this.onJobs = null;
     this.capabilities = null;
+    this.onHealth = null;
+    this.onHealthDetailed = null;
     this.onSkills = null;
     this.onToolsets = null;
     this.skills = [
@@ -108,6 +110,36 @@ export class MockHermes {
         job_resume: { method: "POST", path: "/api/jobs/{id}/resume" },
         job_run: { method: "POST", path: "/api/jobs/{id}/run" }
       }
+    };
+  }
+
+  defaultHealthDetailed() {
+    return {
+      status: "ok",
+      readiness: {
+        status: "ok",
+        checks: {
+          state_db: { status: "ok" },
+          session_store: { status: "ok" },
+          config: { status: "ok" },
+          model: { status: "ok" },
+          disk: { status: "ok", used_percent: 31.5, free_bytes: 123456789 },
+          gateway: { status: "ok", state: "running", connected_platforms: 2, platforms: 2 },
+          background_queues: { status: "ok", active_api_runs: 1, process_completions: 0, active_delegations: 0 }
+        }
+      },
+      platform: "hermes-agent",
+      version: "0.22.5",
+      gateway_state: "running",
+      gateway_busy: true,
+      gateway_drainable: true,
+      active_agents: 1,
+      platforms: {
+        api_server: { state: "connected", metrics: { secret: "must-not-leak" } },
+        telegram: { status: "running", token: "must-not-leak" }
+      },
+      home: "/home/hermes/.hermes",
+      env: { API_SERVER_KEY: MOCK_API_KEY }
     };
   }
 
@@ -222,6 +254,20 @@ export class MockHermes {
       return json({ error: { message: "Invalid gateway API key (API_SERVER_KEY)", type: "gateway_auth_error", code: "gateway_auth_failed" } }, 401);
     }
 
+    if (method === "GET" && url.pathname === "/health") {
+      if (this.onHealth) {
+        const override = await this.onHealth(call);
+        if (override) return override;
+      }
+      return json({ status: "ok", platform: "hermes-agent", version: "0.22.5" });
+    }
+    if (method === "GET" && url.pathname === "/health/detailed") {
+      if (this.onHealthDetailed) {
+        const override = await this.onHealthDetailed(call);
+        if (override) return override;
+      }
+      return json(this.defaultHealthDetailed());
+    }
     if (method === "GET" && url.pathname === "/v1/capabilities") return json(this.capabilities || this.defaultCapabilities());
     if (method === "GET" && url.pathname === "/api/model/options") return json(this.modelOptions);
     if (method === "GET" && url.pathname === "/v1/skills") {

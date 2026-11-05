@@ -127,6 +127,8 @@ export function createHermesClient(env, instanceId, { fetchImpl } = {}) {
   return {
     instanceId,
     secrets,
+    getHealth: () => request("GET", "/health", { timeoutMs: HERMES_TIMEOUTS_MS.health }),
+    getHealthDetailed: () => request("GET", "/health/detailed", { timeoutMs: HERMES_TIMEOUTS_MS.healthDetailed }),
     getCapabilities: () => request("GET", "/v1/capabilities", { timeoutMs: HERMES_TIMEOUTS_MS.capabilities }),
     getSkills: () => request("GET", "/v1/skills", { timeoutMs: HERMES_TIMEOUTS_MS.discovery }),
     getToolsets: () => request("GET", "/v1/toolsets", { timeoutMs: HERMES_TIMEOUTS_MS.discovery }),

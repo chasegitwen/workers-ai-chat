@@ -15,6 +15,7 @@ import {
 } from "../src/hermes/capabilitiesPanel.js";
 import { resolveHermesUpstream } from "../src/hermes/config.js";
 import { errorFromUpstream, redactSecrets } from "../src/hermes/errors.js";
+import { getHermesRuntimeHealth, normalizeHermesHealthProbe } from "../src/hermes/health.js";
 import { createSseParser } from "../src/hermes/sse.js";
 import { sanitizeHermesTimelineEvent } from "../src/hermes/timeline.js";
 import { MOCK_API_KEY, MockHermes, hermesEnv, sseBody, sseFrame } from "./helpers/mockHermes.js";
@@ -362,6 +363,104 @@ describe("Hermes read-only capabilities panel", () => {
     const unauthenticated = await worker.fetch(new Request(ORIGIN + "/api/hermes/capabilities-panel"), testEnv(), { waitUntil() {} });
     expect(unauthenticated.status).toBe(401);
     expect((await call("POST", "/api/hermes/capabilities-panel", { body: {} })).status).toBe(404);
+  });
+});
+
+describe("Hermes runtime health panel", () => {
+  it("normalizes a fully ready probe as healthy using only allowlisted fields", () => {
+    const detailed = mock.defaultHealthDetailed();
+    const health = normalizeHermesHealthProbe(
+      { status: "ok", platform: "hermes-agent", version: "0.22.5", secret: MOCK_API_KEY },
+      detailed,
+      mock.defaultCapabilities(),
+      { instanceId: "oracle-hermes", probedAt: 1700000000000 }
+    );
+    expect(health).toMatchObject({
+      overallStatus: "healthy", connectivity: "ok", backend: "ready",
+      checks: {
+        state_db: { status: "ok" },
+        disk: { status: "ok", usedPercent: 31.5, freeBytes: 123456789 },
+        background_queues: { status: "ok", activeApiRuns: 1 }
+      },
+      gateway: { state: "running", busy: true, drainable: true, activeAgents: 1 },
+      platforms: { total: 2, connected: 2 },
+      lastSuccessfulProbeAt: 1700000000000
+    });
+    const serialized = JSON.stringify(health);
+    for (const leaked of [MOCK_API_KEY, "/home/hermes", "must-not-leak", "API_SERVER_KEY"]) expect(serialized).not.toContain(leaked);
+  });
+
+  it("never treats HTTP 200 readiness degraded or an unavailable check as healthy", () => {
+    const detailed = mock.defaultHealthDetailed();
+    detailed.status = "degraded";
+    detailed.readiness.status = "degraded";
+    detailed.readiness.checks.state_db = { status: "degraded", detail: "corrupt", path: "/secret/state.db" };
+    detailed.readiness.checks.session_store = { status: "unavailable", detail: "corrupt", raw: { secret: "x" } };
+    const health = normalizeHermesHealthProbe(
+      { status: "ok", platform: "hermes-agent" }, detailed, mock.defaultCapabilities(), { probedAt: 42 }
+    );
+    expect(health.overallStatus).toBe("degraded");
+    expect(health.backend).toBe("degraded");
+    expect(health.checks.state_db).toEqual({ status: "degraded", detail: "corrupt" });
+    expect(health.checks.session_store).toEqual({ status: "unavailable", detail: "corrupt" });
+    expect(JSON.stringify(health)).not.toContain("/secret/state.db");
+
+    detailed.readiness.checks.session_store = { status: "retrying" };
+    const retrying = normalizeHermesHealthProbe(
+      { status: "ok", platform: "hermes-agent" }, detailed, mock.defaultCapabilities(), { probedAt: 43 }
+    );
+    expect(retrying.checks.session_store).toEqual({ status: "degraded", detail: "retrying" });
+    expect(retrying.overallStatus).toBe("degraded");
+  });
+
+  it("reports unrecognized reached payloads as unknown and network failure as unavailable", async () => {
+    const unknown = normalizeHermesHealthProbe(
+      { hello: "world" }, { readiness: { status: "ok", checks: {} } }, null, { probedAt: 7 }
+    );
+    expect(unknown).toMatchObject({ overallStatus: "unknown", connectivity: "unknown", lastSuccessfulProbeAt: null });
+
+    const unavailable = await getHermesRuntimeHealth(testEnv(), "oracle-hermes", {
+      fetchImpl: async () => { throw new Error("network down"); }, now: 8
+    });
+    expect(unavailable).toMatchObject({
+      overallStatus: "unavailable", connectivity: "unavailable", backend: "unavailable",
+      probedAt: 8, lastSuccessfulProbeAt: null,
+      error: { code: "hermes_network_error" }
+    });
+  });
+
+  it("serves an authenticated, catalog-gated, read-only runtime endpoint", async () => {
+    const response = await call("GET", "/api/hermes/runtime-health?instance_id=oracle-hermes");
+    expect(response.status).toBe(200);
+    expect(response.json).toMatchObject({ ok: true, health: { overallStatus: "healthy", connectivity: "ok" } });
+    expect(mock.only("/health")).toHaveLength(1);
+    expect(mock.only("/health/detailed")).toHaveLength(1);
+    for (const path of ["/health", "/health/detailed"]) {
+      const upstream = mock.calls.find(item => item.path === path);
+      expect(upstream.headers.get("Authorization")).toBe("Bearer " + MOCK_API_KEY);
+      expect(upstream.headers.get("CF-Access-Client-Id")).toBe("access-id.access");
+      expect(upstream.redirect).toBe("manual");
+    }
+    expectNoSecrets(response.text);
+    expect((await call("POST", "/api/hermes/runtime-health", { body: {} })).status).toBe(404);
+    const unauthenticated = await worker.fetch(new Request(ORIGIN + "/api/hermes/runtime-health"), testEnv(), { waitUntil() {} });
+    expect(unauthenticated.status).toBe(401);
+    expect((await call("GET", "/api/hermes/runtime-health", { envExtra: { HERMES_CATALOG_VISIBLE: "" } })).status).toBe(404);
+  });
+
+  it("classifies a detailed HTTP 200 degraded route response as degraded", async () => {
+    mock.onHealthDetailed = () => {
+      const body = mock.defaultHealthDetailed();
+      body.status = "degraded";
+      body.readiness.status = "degraded";
+      body.readiness.checks.session_store = { status: "unavailable", detail: "corrupt" };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    const response = await call("GET", "/api/hermes/runtime-health");
+    expect(response.json.health).toMatchObject({
+      overallStatus: "degraded", backend: "degraded",
+      checks: { session_store: { status: "unavailable" } }
+    });
   });
 });
 

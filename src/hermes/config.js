@@ -25,6 +25,8 @@ export const HERMES_INSTANCES = Object.freeze({
 });
 
 export const HERMES_TIMEOUTS_MS = Object.freeze({
+  health: 7000,
+  healthDetailed: 9000,
   capabilities: 10000,
   discovery: 10000,
   catalog: 15000,

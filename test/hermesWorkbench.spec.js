@@ -181,6 +181,28 @@ describe("Hermes sessions and projects workbench", () => {
     expect(list.json.projects).toEqual([]);
   });
 
+  it("redacts configured secrets that straddle the content limit", async () => {
+    const secret = "test-hermes-key-0123456789abcdef";
+    const prefix = "p".repeat(480);
+    const session = await ownSession({
+      id: "session_redact_straddle",
+      messages: [
+        { role: "tool", name: "terminal", content: prefix + secret + "TRAIL" },
+        { role: "user", content: "u".repeat(7990) + secret + "AFTER" }
+      ]
+    });
+    const result = await call("GET", `/api/hermes/sessions/${session.id}/messages`);
+    expect(result.status).toBe(200);
+    expect(result.text).not.toContain(secret);
+    expect(result.text).not.toContain(secret.slice(0, 12));
+    const tool = result.json.messages.find(item => item.role === "tool");
+    const user = result.json.messages.find(item => item.role === "user");
+    expect(tool.content.length).toBeLessThanOrEqual(500);
+    expect(user.content.length).toBeLessThanOrEqual(8000);
+    expect(tool.content).toContain("[redacted]");
+    expect(user.content).toContain("[redacted]");
+  });
+
   it("bounds tool message content and omits system content in history", async () => {
     const toolPayload = "TOOL_SECRET_" + "x".repeat(1200);
     const session = await ownSession({

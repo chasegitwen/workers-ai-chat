@@ -174,7 +174,8 @@ const MESSAGE_CONTENT_LIMIT = Object.freeze({
   tool: 500,
   system: 0
 });
-const REDACTION_INPUT_LIMIT = 4000;
+// Extra window past the role limit so a secret that straddles the cut still matches before final trim.
+const REDACTION_SLACK = 512;
 
 function rawMessageText(value) {
   if (typeof value === "string") return value;
@@ -192,9 +193,9 @@ function messageContent(value, secrets, role = "assistant") {
   if (role === "system") return { content: "", omitted: true, truncated: false };
   const limit = MESSAGE_CONTENT_LIMIT[role] ?? MESSAGE_CONTENT_LIMIT.assistant;
   const raw = rawMessageText(value);
-  const bounded = raw.slice(0, Math.min(raw.length, REDACTION_INPUT_LIMIT));
+  const bounded = raw.slice(0, Math.min(raw.length, limit + REDACTION_SLACK));
   const redacted = redactSecrets(bounded, secrets);
-  const truncated = raw.length > limit || raw.length > REDACTION_INPUT_LIMIT || redacted.length > limit;
+  const truncated = raw.length > limit || redacted.length > limit;
   return { content: redacted.slice(0, limit), omitted: false, truncated };
 }
 

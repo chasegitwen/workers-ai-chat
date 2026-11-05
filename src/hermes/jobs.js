@@ -170,7 +170,11 @@ async function jobCapabilities(client) {
     const body = (await client.getCapabilities()).body || {};
     const features = body.features && typeof body.features === "object" ? body.features : {};
     const endpoints = body.endpoints && typeof body.endpoints === "object" ? body.endpoints : {};
-    const relevant = [...Object.keys(features), ...Object.keys(endpoints)].filter(key => /^(?:job|jobs|cron)(?:_|$)/.test(key));
+    // v0.22.5 advertises static jobs_admin:false without listing /api/jobs endpoints.
+    // Treat that noise as non-advertisement and probe the documented jobs routes by default.
+    const ignoreFeature = new Set(["jobs_admin", "admin_config_rw"]);
+    const relevant = [...Object.keys(features), ...Object.keys(endpoints)].filter(key =>
+      /^(?:job|jobs|cron)(?:_|$)/.test(key) && !ignoreFeature.has(key));
     const endpointEntries = Object.entries(endpoints);
     const advertised = relevant.length > 0 || endpointEntries.some(([, value]) => String(value?.path || "").startsWith("/api/jobs"));
     const paths = {
@@ -287,10 +291,16 @@ export async function handleHermesJobs(request, env, url, { owner, fetchImpl } =
     const result = await jobsCall(client.createJob(createBody(body)));
     const job = sourceJob(result.body);
     const createdId = jobId(job?.id);
-    const meta = await persistOwner(env.DB, {
-      id: createdId, owner, instanceId, projectId: body.project_id ? String(body.project_id).slice(0, 160) : null,
-      title: typeof body.name === "string" ? body.name.trim().slice(0, 200) : null
-    });
+    let meta;
+    try {
+      meta = await persistOwner(env.DB, {
+        id: createdId, owner, instanceId, projectId: body.project_id ? String(body.project_id).slice(0, 160) : null,
+        title: typeof body.name === "string" ? body.name.trim().slice(0, 200) : null
+      });
+    } catch (err) {
+      try { await client.deleteJob(createdId); } catch (cleanupErr) { /* best-effort orphan cleanup */ }
+      throw err;
+    }
     return Response.json({ ok: true, job: publicJob(job, meta, client.secrets), capabilities }, { status: 201 });
   }
 

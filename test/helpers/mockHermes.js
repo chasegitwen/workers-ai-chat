@@ -83,6 +83,7 @@ export class MockHermes {
         run_approval_response: true, approval_events: true, tool_progress_events: true, model_options: true,
         run_clarify_response: true, clarify_events: true,
         run_unknown_resolution: this.unknownResolution,
+        jobs_admin: false, admin_config_rw: false,
         session_list: true, session_create: true, session_get: true, session_patch: true,
         session_messages: true, session_fork: true,
         job_list: true, job_create: true, job_get: true, job_patch: true,

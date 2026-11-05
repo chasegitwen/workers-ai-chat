@@ -154,6 +154,26 @@ describe("Hermes jobs center", () => {
     expect(mock.calls.slice(beforeRun).some(item => item.path.endsWith("/run"))).toBe(false);
   });
 
+  it("treats v0.22.5 jobs_admin:false as non-advertisement and still allows jobs CRUD", async () => {
+    mock.capabilities = mock.defaultCapabilities();
+    mock.capabilities.features.jobs_admin = false;
+    for (const key of Object.keys(mock.capabilities.features)) {
+      if (/^job_/.test(key)) delete mock.capabilities.features[key];
+    }
+    for (const key of Object.keys(mock.capabilities.endpoints)) {
+      if (/^job_/.test(key)) delete mock.capabilities.endpoints[key];
+    }
+    const created = await call("POST", "/api/hermes/jobs", {
+      body: { name: "RealCap", schedule: "0 * * * *", prompt: "ping" }
+    });
+    expect(created.status).toBe(201);
+    expect(created.json.job.id).toMatch(/^[a-f0-9]{12}$/);
+    const list = await call("GET", "/api/hermes/jobs");
+    expect(list.status).toBe(200);
+    expect(list.json.available).toBe(true);
+    expect(list.json.jobs.some(item => item.id === created.json.job.id)).toBe(true);
+  });
+
   it("degrades to a clear empty result when the jobs API is unavailable", async () => {
     await ownJob();
     mock.onJobs = call => call.method === "GET" && call.path === "/api/jobs"

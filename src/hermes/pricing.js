@@ -97,6 +97,10 @@ export function gradeHermesCost({ normalized, attribution, snapshot, catalog, pr
     return { costStatus: "n_a", costMicros: null, currency: null, priceSnapshot: null,
       note: costNote("runtime_attribution_missing", "Actual provider/model attribution is unavailable."), overflow: false };
   }
+  if (billingMode !== "metered") {
+    return { costStatus: "n_a", costMicros: null, currency: null, priceSnapshot: null,
+      note: costNote("reference_price_not_spend", "Provider billing is not explicitly known to be metered; reference prices are not treated as money spent."), overflow: false };
+  }
 
   const priceSnapshot = priorPriceSnapshot || (matched?.modelRow?.pricing ? {
     provider, model, serviceTier: attribution.serviceTier || null, ...matched.modelRow.pricing
@@ -117,6 +121,10 @@ export function gradeHermesCost({ normalized, attribution, snapshot, catalog, pr
   if (normalized.input === null || normalized.output === null) {
     return { costStatus: "unknown", costMicros: null, currency: priceSnapshot.currency || "USD", priceSnapshot,
       note: costNote("token_coverage_incomplete", "Required input/output token buckets are unavailable."), overflow: false };
+  }
+  if (normalized.validationFlags?.includes("usage_cache_convention_unverified")) {
+    return { costStatus: "unknown", costMicros: null, currency: priceSnapshot.currency || "USD", priceSnapshot,
+      note: costNote("usage_cache_convention_unverified", "Provider token details were present without canonical Hermes cache buckets."), overflow: false };
   }
   const buckets = [
     ["input", normalized.input, rates.input], ["output", normalized.output, rates.output],

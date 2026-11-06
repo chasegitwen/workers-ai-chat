@@ -86,15 +86,22 @@ describe("Hermes B2-1 usage normalization", () => {
     });
   });
 
-  it("keeps canonical Hermes keys beside details but isolates raw-only provider shapes", () => {
+  it("keeps Responses totals but flags unverified cache details and isolates hard raw markers", () => {
     const openAi = normalizeHermesUsage({
-      input_tokens: 100, output_tokens: 20, total_tokens: 120,
-      input_tokens_details: { cached_tokens: 60 }
+      input_tokens: 100000, output_tokens: 20, total_tokens: 100020,
+      input_tokens_details: { cached_tokens: 90000 }
     });
     expect(openAi).toMatchObject({
-      input: 100, output: 20, total: 120, cacheRead: null, collectionStatus: "collected"
+      input: 100000, output: 20, total: 100020, cacheRead: null, collectionStatus: "partial"
     });
-    expect(openAi.validationFlags).toEqual([]);
+    expect(openAi.validationFlags).toEqual(["usage_cache_convention_unverified"]);
+
+    const normalizedDetails = normalizeHermesUsage({
+      input_tokens: 100000, output_tokens: 20, total_tokens: 100020,
+      cache_read_tokens: 90000, input_tokens_details: { cached_tokens: 90000 }
+    });
+    expect(normalizedDetails).toMatchObject({ cacheRead: 90000, collectionStatus: "collected" });
+    expect(normalizedDetails.validationFlags).toEqual([]);
 
     const invalidCanonical = normalizeHermesUsage({
       input_tokens: { invalid: true }, input_tokens_details: { cached_tokens: 60 }, prompt_tokens: 100
@@ -103,8 +110,8 @@ describe("Hermes B2-1 usage normalization", () => {
     expect(invalidCanonical.validationFlags).toContain("usage_shape_openai_raw_ignored");
 
     const anthropic = normalizeHermesUsage({
-      prompt_tokens: 40, completion_tokens: 5, cache_read_input_tokens: 60,
-      cache_creation_input_tokens: 10
+      input_tokens: 40, output_tokens: 5, cache_read_input_tokens: 60000,
+      cache_creation_input_tokens: 10000
     });
     expect(anthropic).toMatchObject({
       input: null, output: null, total: null, cacheRead: null, cacheWrite: null,
@@ -113,6 +120,12 @@ describe("Hermes B2-1 usage normalization", () => {
     expect(anthropic.validationFlags).toEqual(expect.arrayContaining([
       "usage_shape_anthropic_raw_ignored", "input_includes_cache_false"
     ]));
+
+    const openAiChat = normalizeHermesUsage({
+      input_tokens: 100, output_tokens: 5, prompt_tokens: 100, completion_tokens: 5, cached_tokens: 80
+    });
+    expect(openAiChat).toMatchObject({ input: null, output: null, collectionStatus: "missing" });
+    expect(openAiChat.validationFlags).toContain("usage_shape_openai_raw_ignored");
   });
 
   it("grades no-price, included, actual, cache-aware and service-tier costs honestly", () => {
@@ -137,15 +150,29 @@ describe("Hermes B2-1 usage normalization", () => {
       rates: { input: "2", output: "4", cacheRead: "0.5", cacheWrite: "1", request: null },
       serviceTiers: { fast: { input: "3", output: "6", cacheRead: "0.75", cacheWrite: "1.5", request: null } }
     };
-    const catalog = { providers: [{ id: "metered", billingMode: "metered_or_unknown", models: [{ id: "m", pricing }] }] };
+    const catalog = { providers: [{ id: "metered", billingMode: "metered", models: [{ id: "m", pricing }] }] };
     expect(gradeHermesCost({ normalized, attribution, snapshot: {}, catalog })).toMatchObject({
       costStatus: "estimated", costMicros: 4200000,
       priceSnapshot: { provider: "metered", model: "m", collectedAt: 100 }
     });
+    for (const provider of ["zai", "kimi-coding", "unknown-api"]) {
+      const referenceCatalog = { providers: [{ id: provider, billingMode: "reference_only", models: [{ id: "m", pricing }] }] };
+      expect(gradeHermesCost({
+        normalized, attribution: { ...attribution, actualProvider: provider }, snapshot: {}, catalog: referenceCatalog
+      })).toMatchObject({
+        costStatus: "n_a", costMicros: null, note: { code: "reference_price_not_spend" }
+      });
+    }
     expect(gradeHermesCost({ normalized, attribution: { ...attribution, serviceTier: "fast" }, snapshot: {}, catalog }))
       .toMatchObject({ costStatus: "estimated", costMicros: 6300000 });
     expect(gradeHermesCost({ normalized, attribution: { ...attribution, serviceTier: "mystery" }, snapshot: {}, catalog }))
       .toMatchObject({ costStatus: "unknown", costMicros: null, note: { code: "service_tier_price_unknown" } });
+    const unverifiedDetails = normalizeHermesUsage({
+      input_tokens: 100000, output_tokens: 20, total_tokens: 100020,
+      input_tokens_details: { cached_tokens: 90000 }
+    });
+    expect(gradeHermesCost({ normalized: unverifiedDetails, attribution, snapshot: {}, catalog }))
+      .toMatchObject({ costStatus: "unknown", costMicros: null, note: { code: "usage_cache_convention_unverified" } });
     const freeCatalog = structuredClone(catalog);
     freeCatalog.providers[0].models[0].pricing.free = true;
     expect(gradeHermesCost({ normalized, attribution, snapshot: {}, catalog: freeCatalog }))
@@ -169,13 +196,13 @@ describe("Hermes B2-1 usage normalization", () => {
     const pricing = { source: "test", currency: "USD", unit: "usd_per_million_tokens", collectedAt: 1,
       pricingVersion: null, free: false, rates: { input: "0.1", output: "1", cacheRead: null, cacheWrite: null, request: null }, serviceTiers: {} };
     const attribution = { actualProvider: "p", actualModel: "m", serviceTier: null };
-    const catalog = { providers: [{ id: "p", billingMode: "metered_or_unknown", models: [{ id: "m", pricing }] }] };
+    const catalog = { providers: [{ id: "p", billingMode: "metered", models: [{ id: "m", pricing }] }] };
     expect(gradeHermesCost({ normalized: tiny, attribution, snapshot: {}, catalog }))
       .toMatchObject({ costStatus: "estimated", costMicros: 1 });
 
     const hugePricing = structuredClone(pricing);
     hugePricing.rates.input = "999999999999";
-    const hugeCatalog = { providers: [{ id: "p", billingMode: "metered_or_unknown", models: [{ id: "m", pricing: hugePricing }] }] };
+    const hugeCatalog = { providers: [{ id: "p", billingMode: "metered", models: [{ id: "m", pricing: hugePricing }] }] };
     expect(gradeHermesCost({
       normalized: normalizeHermesUsage({ input_tokens: MAX_SAFE_TOKEN_COUNT, output_tokens: 0, total_tokens: MAX_SAFE_TOKEN_COUNT }),
       attribution, snapshot: {}, catalog: hugeCatalog
@@ -205,7 +232,7 @@ describe("Hermes B2-1 collection and API", () => {
     expect(columns).toEqual(expect.arrayContaining([
       "input_tokens", "cache_read_tokens", "reasoning_tokens", "actual_provider", "requested_provider",
       "collection_status", "occurred_at", "collected_at", "price_snapshot_json", "estimated_cost_micros",
-      "actual_cost_micros", "cost_note", "coverage_incomplete", "coverage_note"
+      "actual_cost_micros", "cost_note", "cost_note_code", "coverage_incomplete", "coverage_note"
     ]));
     const indexes = (await env.DB.prepare("PRAGMA index_list(hermes_run_usage)").all()).results.map(row => row.name);
     expect(indexes).toEqual(expect.arrayContaining([
@@ -249,7 +276,7 @@ describe("Hermes B2-1 collection and API", () => {
     const local = await insertRun({ requestedProvider: "metered", requestedModel: "m", status: "completed", completedAt: Date.now() });
     const row = await env.DB.prepare("SELECT * FROM hermes_runs WHERE id = ?").bind(local.id).first();
     const catalog = rate => ({
-      providers: [{ id: "metered", billingMode: "metered_or_unknown", models: [{ id: "m", pricing: {
+      providers: [{ id: "metered", billingMode: "metered", models: [{ id: "m", pricing: {
         source: "hermes_model_options", currency: "USD", unit: "usd_per_million_tokens", collectedAt: 111,
         pricingVersion: "v1", free: false,
         rates: { input: rate, output: "4", cacheRead: "0.5", cacheWrite: "1", request: null }, serviceTiers: {}
@@ -274,7 +301,10 @@ describe("Hermes B2-1 collection and API", () => {
 
     await env.DB.prepare("UPDATE hermes_catalog_cache SET catalog_json = ?, synced_at = 222 WHERE instance_id = 'oracle-hermes'")
       .bind(JSON.stringify(catalog("200"))).run();
-    await persistHermesRunUsage(testEnv(), row, snapshot);
+    await persistHermesRunUsage(testEnv(), row, {
+      ...snapshot,
+      usage: { input_tokens: 1000000, output_tokens: 500000, total_tokens: 1700000 }
+    });
     stored = await env.DB.prepare(
       "SELECT price_snapshot_json, estimated_cost_micros FROM hermes_run_usage WHERE run_id = ?"
     ).bind(local.id).first();
@@ -288,8 +318,54 @@ describe("Hermes B2-1 collection and API", () => {
       coverageNote: expect.stringContaining("not total-system cost"),
       priceSnapshot: { provider: "metered", model: "m", rates: { input: "2" } }
     });
+    expect(detail.json.usage.costNoteCode).toBe("reference_price_estimate");
     const list = await call("/api/hermes/usage/runs?window=24h");
     expect(list.json.runs[0]).toMatchObject({ runId: local.id, costStatus: "estimated", estimatedCostMicros: 4100000 });
+  });
+
+  it("regrades merged token buckets and lets unknown replace a stale estimate while actual stays sticky", async () => {
+    const local = await insertRun({ requestedProvider: "metered", requestedModel: "m", status: "completed", completedAt: Date.now() });
+    const row = await env.DB.prepare("SELECT * FROM hermes_runs WHERE id = ?").bind(local.id).first();
+    const pricing = {
+      source: "test", currency: "USD", unit: "usd_per_million_tokens", collectedAt: 1,
+      pricingVersion: "v1", free: false,
+      rates: { input: "2", output: "4", cacheRead: null, cacheWrite: null, request: null }, serviceTiers: {}
+    };
+    await env.DB.prepare(
+      `INSERT INTO hermes_catalog_cache (instance_id, catalog_json, capabilities_json, synced_at)
+       VALUES ('oracle-hermes', ?, '{}', 1)`
+    ).bind(JSON.stringify({ providers: [{ id: "metered", billingMode: "metered", models: [{ id: "m", pricing }] }] })).run();
+
+    await persistHermesRunUsage(testEnv(), row, {
+      status: "completed", runtime: { provider: "metered", model: "m" },
+      usage: { input_tokens: 1000000, output_tokens: 500000, total_tokens: 1500000 }
+    });
+    expect(await env.DB.prepare(
+      "SELECT estimated_cost_micros, cost_status FROM hermes_run_usage WHERE run_id = ?"
+    ).bind(local.id).first()).toEqual({ estimated_cost_micros: 4000000, cost_status: "estimated" });
+
+    await persistHermesRunUsage(testEnv(), row, {
+      status: "completed", runtime: { provider: "metered", model: "m" }, usage: { cache_read_tokens: 200000 }
+    });
+    expect(await env.DB.prepare(
+      "SELECT input_tokens, cache_read_tokens, estimated_cost_micros, cost_status, cost_note_code FROM hermes_run_usage WHERE run_id = ?"
+    ).bind(local.id).first()).toEqual({
+      input_tokens: 1000000, cache_read_tokens: 200000, estimated_cost_micros: null,
+      cost_status: "unknown", cost_note_code: "cache_read_price_missing"
+    });
+
+    await persistHermesRunUsage(testEnv(), row, {
+      status: "completed", runtime: { provider: "metered", model: "m" }, usage: {},
+      billing: { status: "actual", source: "provider_response", currency: "USD", amount_usd: "1.25" }
+    });
+    await persistHermesRunUsage(testEnv(), row, {
+      status: "completed", runtime: { provider: "metered", model: "m" }, usage: {}
+    });
+    expect(await env.DB.prepare(
+      "SELECT actual_cost_micros, cost_status, cost_note_code FROM hermes_run_usage WHERE run_id = ?"
+    ).bind(local.id).first()).toEqual({
+      actual_cost_micros: 1250000, cost_status: "actual", cost_note_code: "provider_charged"
+    });
   });
 
   it.each([

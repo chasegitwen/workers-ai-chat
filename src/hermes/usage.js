@@ -83,27 +83,27 @@ export function normalizeHermesUsage(rawUsage) {
   // GET /v1/runs is already normalized by Hermes. Raw provider shapes have
   // incompatible cache conventions, so do not blend their aliases into these
   // pricing buckets. A raw-shape marker makes the omission explicit.
-  const openAiRaw = Boolean(usage && (
+  const openAiChatRaw = Boolean(usage && (
     own(usage, "prompt_tokens") || own(usage, "completion_tokens") || own(usage, "cached_tokens")
-    || (usage.input_tokens_details && typeof usage.input_tokens_details === "object")
+  ));
+  const openAiDetails = Boolean(usage && (
+    (usage.input_tokens_details && typeof usage.input_tokens_details === "object")
     || (usage.output_tokens_details && typeof usage.output_tokens_details === "object")
   ));
   const anthropicRaw = Boolean(usage && (
     own(usage, "cache_read_input_tokens") || own(usage, "cache_creation_input_tokens")
   ));
-  const canonicalKeys = [
-    "input_tokens", "input", "output_tokens", "output", "total_tokens", "total",
-    "cache_read_tokens", "cache_read", "cache_write_tokens", "cache_write", "reasoning_tokens", "reasoning"
-  ];
-  const hasCanonical = Boolean(usage && canonicalKeys.some(key => own(usage, key) && usableTokenValue(usage[key])));
-  if ((openAiRaw || anthropicRaw) && !hasCanonical) {
-    if (openAiRaw) flags.push("usage_shape_openai_raw_ignored", "input_includes_cache_true");
+  if (openAiChatRaw || anthropicRaw) {
+    if (openAiChatRaw) flags.push("usage_shape_openai_raw_ignored", "input_includes_cache_true");
     if (anthropicRaw) flags.push("usage_shape_anthropic_raw_ignored", "input_includes_cache_false");
     return {
       input: null, output: null, total: null, cacheRead: null, cacheWrite: null, reasoning: null,
       collectionStatus: "missing", overflowDetected: false, validationFlags: flags
     };
   }
+  const hasCanonicalCache = Boolean(usage && ["cache_read_tokens", "cache_write_tokens"]
+    .some(key => own(usage, key) && usableTokenValue(usage[key])));
+  if (openAiDetails && !hasCanonicalCache) flags.push("usage_cache_convention_unverified");
   const candidates = usage ? {
     input: firstTokenValue(usage, ["input_tokens", "input"]),
     output: firstTokenValue(usage, ["output_tokens", "output"]),
@@ -198,7 +198,8 @@ function usageRecord(row) {
     actualCostMicros: row.actual_cost_micros ?? null,
     costStatus: row.cost_status || null,
     currency: row.currency || null,
-    costNote: row.cost_note || null
+    costNote: row.cost_note || null,
+    costNoteCode: row.cost_note_code || null
   };
 }
 
@@ -218,14 +219,27 @@ export async function persistHermesRunUsage(env, run, snapshot, {
   const jobId = cleanId(snapshot?.job_id || runtime.job_id, 160) || null;
   let existing = null;
   try {
-    existing = await env.DB.prepare("SELECT price_snapshot_json FROM hermes_run_usage WHERE owner_username = ? AND run_id = ?")
+    existing = await env.DB.prepare(
+      `SELECT price_snapshot_json, input_tokens, output_tokens, total_tokens,
+        cache_read_tokens, cache_write_tokens, reasoning_tokens
+       FROM hermes_run_usage WHERE owner_username = ? AND run_id = ?`
+    )
       .bind(run.owner_username, run.id).first();
   } catch (err) {
     existing = null;
   }
   let priorPriceSnapshot = null;
   try { priorPriceSnapshot = JSON.parse(existing?.price_snapshot_json || "null"); } catch (err) { priorPriceSnapshot = null; }
-  const cost = await priceHermesUsage(env, run, normalized, attribution, snapshot, priorPriceSnapshot);
+  const mergedNormalized = {
+    ...normalized,
+    input: normalized.input ?? existing?.input_tokens ?? null,
+    output: normalized.output ?? existing?.output_tokens ?? null,
+    total: normalized.total ?? existing?.total_tokens ?? null,
+    cacheRead: normalized.cacheRead ?? existing?.cache_read_tokens ?? null,
+    cacheWrite: normalized.cacheWrite ?? existing?.cache_write_tokens ?? null,
+    reasoning: normalized.reasoning ?? existing?.reasoning_tokens ?? null
+  };
+  const cost = await priceHermesUsage(env, run, mergedNormalized, attribution, snapshot, priorPriceSnapshot);
   const coverageComplete = snapshot?.usage?.coverage_complete === true || snapshot?.usage?.coverageComplete === true;
   const coverageNote = coverageComplete
     ? "Runtime reports complete run usage coverage."
@@ -241,8 +255,8 @@ export async function persistHermesRunUsage(env, run, snapshot, {
         service_tier, project_id, conversation_id, upstream_session_id, hermes_job_id, collection_status,
         collection_source, historical_gap, overflow_detected, validation_flags_json, occurred_at, collected_at,
         price_snapshot_json, estimated_cost_micros, actual_cost_micros, cost_status, currency, cost_note,
-        coverage_incomplete, coverage_note)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        cost_note_code, coverage_incomplete, coverage_note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(owner_username, run_id) DO UPDATE SET
         upstream_run_id = COALESCE(excluded.upstream_run_id, hermes_run_usage.upstream_run_id),
         run_status = excluded.run_status,
@@ -277,18 +291,20 @@ export async function persistHermesRunUsage(env, run, snapshot, {
         collected_at = excluded.collected_at,
         price_snapshot_json = COALESCE(hermes_run_usage.price_snapshot_json, excluded.price_snapshot_json),
         estimated_cost_micros = CASE
+          WHEN hermes_run_usage.cost_status = 'actual' THEN hermes_run_usage.estimated_cost_micros
           WHEN excluded.cost_status = 'actual' THEN NULL
           WHEN excluded.cost_status = 'estimated' THEN excluded.estimated_cost_micros
-          ELSE hermes_run_usage.estimated_cost_micros END,
+          ELSE NULL END,
         actual_cost_micros = COALESCE(excluded.actual_cost_micros, hermes_run_usage.actual_cost_micros),
         cost_status = CASE
-          WHEN excluded.cost_status = 'actual' OR hermes_run_usage.cost_status = 'actual' THEN 'actual'
-          WHEN excluded.cost_status = 'estimated' THEN 'estimated'
-          WHEN hermes_run_usage.cost_status = 'estimated' THEN 'estimated'
+          WHEN hermes_run_usage.cost_status = 'actual' THEN 'actual'
           ELSE excluded.cost_status END,
-        currency = COALESCE(excluded.currency, hermes_run_usage.currency),
-        cost_note = CASE WHEN excluded.cost_status IN ('actual', 'estimated')
-          OR hermes_run_usage.cost_note IS NULL THEN excluded.cost_note ELSE hermes_run_usage.cost_note END,
+        currency = CASE WHEN hermes_run_usage.cost_status = 'actual'
+          THEN hermes_run_usage.currency ELSE excluded.currency END,
+        cost_note = CASE WHEN hermes_run_usage.cost_status = 'actual'
+          THEN hermes_run_usage.cost_note ELSE excluded.cost_note END,
+        cost_note_code = CASE WHEN hermes_run_usage.cost_status = 'actual'
+          THEN hermes_run_usage.cost_note_code ELSE excluded.cost_note_code END,
         coverage_incomplete = MIN(hermes_run_usage.coverage_incomplete, excluded.coverage_incomplete),
         coverage_note = excluded.coverage_note`
     ).bind(
@@ -306,7 +322,7 @@ export async function persistHermesRunUsage(env, run, snapshot, {
       cost.priceSnapshot ? JSON.stringify(cost.priceSnapshot) : null,
       cost.costStatus === "estimated" ? cost.costMicros : null,
       cost.costStatus === "actual" ? cost.costMicros : null,
-      cost.costStatus, cost.currency, cost.note?.detail || null,
+      cost.costStatus, cost.currency, cost.note?.detail || null, cost.note?.code || null,
       coverageComplete ? 0 : 1, coverageNote
     ).run();
     return true;

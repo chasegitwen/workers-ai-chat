@@ -246,6 +246,24 @@ describe("Hermes catalog and provider selection", () => {
     expect(options.providers[1]).not.toHaveProperty("auth");
   });
 
+  it("fails closed on billing mode and recognizes coding plans without estimating spend", () => {
+    const options = normalizeHermesModelOptions({ providers: [
+      { slug: "zai", auth_type: "api_key", models: ["glm"] },
+      { slug: "kimi-coding", auth_type: "api_key", models: ["kimi"] },
+      { slug: "vendor-coding-plan", auth_type: "api_key", models: ["code"] },
+      { slug: "unknown-api", auth_type: "api_key", models: ["m"] },
+      { slug: "known-payg", auth_type: "api_key", billing_mode: "metered", models: ["m"] }
+    ] });
+    expect(options.providers.map(provider => [provider.id, provider.billingMode])).toEqual([
+      ["zai", "reference_only"],
+      ["kimi-coding", "reference_only"],
+      ["vendor-coding-plan", "reference_only"],
+      ["unknown-api", "reference_only"],
+      ["known-payg", "metered"]
+    ]);
+    expect(JSON.stringify(options)).not.toContain("billing_mode");
+  });
+
   it("validates explicit provider/model and maps the agent default to no override", () => {
     const catalog = { providers: normalizeHermesModelOptions(mock.modelOptions).providers };
     expect(validateHermesModelSelection(catalog, {})).toMatchObject({ ok: true, mode: "agent_default", provider: "", model: "" });

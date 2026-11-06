@@ -91,8 +91,13 @@ function providerBillingMode(row, id) {
   if (id.startsWith("custom:") || row?.is_user_defined === true) return "custom_unknown";
   if (row?.plan_usage && typeof row.plan_usage === "object") return "fixed_quota";
   const authType = String(row?.auth_type || "").toLowerCase();
-  if (authType.includes("oauth") || id.includes("coding-plan") || id.includes("coding_plan")) return "reference_only";
-  return "metered_or_unknown";
+  if (authType.includes("oauth") || id === "zai" || id === "kimi-coding"
+      || /(?:coding[-_]?plan|coding|oauth)/.test(id)) return "reference_only";
+  const declaredMode = String(row?.billing_mode || row?.billingMode || "").trim().toLowerCase();
+  if (row?.metered === true || ["metered", "usage_metered", "payg", "pay_as_you_go"].includes(declaredMode)) {
+    return "metered";
+  }
+  return "reference_only";
 }
 
 export function normalizeHermesCapabilities(payload) {

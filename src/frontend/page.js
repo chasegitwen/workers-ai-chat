@@ -3641,11 +3641,12 @@ body.dark .toolErrorNotice{
     <select id="hermesUsageProject" data-filter="project" aria-label="筛选项目"><option value="">全部项目</option></select>
     <select id="hermesUsageJob" data-filter="job" aria-label="筛选 Job"><option value="">全部 Job</option></select>
     <button id="hermesUsageRefresh" type="button">刷新</button>
+    <button id="hermesUsageExport" type="button">导出 CSV</button>
   </div>
   <div class="hermesWorkbenchBody">
     <div id="hermesUsageStatus" class="hermesWorkbenchStatus">用量由 Worker 在限定时间范围内汇总，不下载全部事件历史。</div>
     <div id="hermesUsageOverview" class="hermesUsageOverview" aria-label="用量概览"></div>
-    <div id="hermesUsageTrend" class="hermesUsageTrend" aria-label="每日 Token 趋势"></div>
+    <div id="hermesUsageTrend" class="hermesUsageTrend" aria-label="每日 Token 趋势（UTC）"></div>
     <details class="hermesUsageCoverage" open><summary>保留与覆盖范围</summary><div id="hermesUsageCoverage"></div></details>
     <div id="hermesUsageRuns"></div>
     <button id="hermesUsageLoadMore" class="hermesUsageLoadMore" type="button" hidden>加载更多</button>
@@ -14567,6 +14568,7 @@ var hermesUsageSession = document.getElementById("hermesUsageSession");
 var hermesUsageProject = document.getElementById("hermesUsageProject");
 var hermesUsageJob = document.getElementById("hermesUsageJob");
 var hermesUsageRefresh = document.getElementById("hermesUsageRefresh");
+var hermesUsageExport = document.getElementById("hermesUsageExport");
 var hermesUsageStatus = document.getElementById("hermesUsageStatus");
 var hermesUsageOverview = document.getElementById("hermesUsageOverview");
 var hermesUsageTrend = document.getElementById("hermesUsageTrend");
@@ -15493,10 +15495,12 @@ function hermesUsageCostCoverageText(costs, status){
 }
 
 function hermesUsageActualSummary(costs){
+  if(Number(costs?.currencies || 0) > 1) return "N/A · 多币种不可合计（" + costs.currencies + " 种）" + hermesUsageCostCoverageText(costs, "actual");
   return hermesUsageCostText(costs?.actualMicros, "actual", costs?.currency) + hermesUsageCostCoverageText(costs, "actual");
 }
 
 function hermesUsageEstimatedSummary(costs){
+  if(Number(costs?.currencies || 0) > 1) return "N/A · 多币种不可合计（" + costs.currencies + " 种）" + hermesUsageCostCoverageText(costs, "estimated") + (costs?.includedRuns ? " · " + costs.includedRuns + " Included" : "");
   if(costs?.estimatedMicros !== null && costs?.estimatedMicros !== undefined){
     return hermesUsageCostText(costs.estimatedMicros, "estimated", costs.currency) + hermesUsageCostCoverageText(costs, "estimated") + (costs.includedRuns ? " · " + costs.includedRuns + " Included" : "");
   }
@@ -15572,7 +15576,7 @@ function renderHermesUsage(){
     const bar = document.createElement("div");
     bar.className = "hermesUsageTrendBar";
     bar.style.height = Math.max(3, Math.round((Number(day.totalTokens) || 0) * 82 / max)) + "px";
-    bar.title = day.day + " · total " + hermesUsageNumber(day.totalTokens) + " · " + day.runCount + " runs";
+    bar.title = day.day + " UTC · total " + hermesUsageNumber(day.totalTokens) + " · " + day.runCount + " runs";
     hermesUsageTrend.appendChild(bar);
   });
   if(!daily.length){ const empty = document.createElement("span"); empty.className = "hermesWorkbenchCardMeta"; empty.textContent = "所选范围没有每日趋势数据"; hermesUsageTrend.appendChild(empty); }
@@ -15612,12 +15616,14 @@ async function loadHermesUsage(reset){
   const params = new URLSearchParams({ window:hermesUsageState.window, limit:"25", offset:String(offset) });
   Object.entries(hermesUsageState.filters).forEach(([name,value]) => { if(value) params.set(name,value); });
   try{
-    const analyticsPromise = fetch("/api/hermes/usage/analytics?" + params.toString()).then(async res => ({ res, data:await res.json().catch(() => ({})) }));
+    const analyticsPromise = reset === false
+      ? Promise.resolve(null)
+      : fetch("/api/hermes/usage/analytics?" + params.toString()).then(async res => ({ res, data:await res.json().catch(() => ({})) }));
     const runsPromise = fetch("/api/hermes/usage/runs?" + params.toString()).then(async res => ({ res, data:await res.json().catch(() => ({})) }));
     const [analyticsResult,runsResult] = await Promise.all([analyticsPromise,runsPromise]);
-    if(!analyticsResult.res.ok || !analyticsResult.data.ok) throw analyticsResult.data.error || { code:"hermes_usage_unavailable", message:"用量汇总不可用" };
+    if(analyticsResult && (!analyticsResult.res.ok || !analyticsResult.data.ok)) throw analyticsResult.data.error || { code:"hermes_usage_unavailable", message:"用量汇总不可用" };
     if(!runsResult.res.ok || !runsResult.data.ok) throw runsResult.data.error || { code:"hermes_usage_runs_unavailable", message:"用量明细不可用" };
-    hermesUsageState.analytics = analyticsResult.data;
+    if(analyticsResult) hermesUsageState.analytics = analyticsResult.data;
     hermesUsageState.runs = offset ? hermesUsageState.runs.concat(runsResult.data.runs || []) : (runsResult.data.runs || []);
     hermesUsageState.total = Number(runsResult.data.page?.total || 0);
     hermesUsageState.hasMore = Boolean(runsResult.data.page?.hasMore);
@@ -15629,6 +15635,17 @@ async function loadHermesUsage(reset){
     renderHermesUsage();
     if(hermesUsageState.reloadPending){ hermesUsageState.reloadPending = false; loadHermesUsage(true); }
   }
+}
+
+function exportHermesUsage(){
+  const params = new URLSearchParams({ window:hermesUsageState.window });
+  Object.entries(hermesUsageState.filters).forEach(([name,value]) => { if(value) params.set(name,value); });
+  const link = document.createElement("a");
+  link.href = "/api/hermes/usage/export?" + params.toString();
+  link.download = "";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 function setHermesDiagnosticsOpen(open){
@@ -16891,6 +16908,7 @@ function initHermesUi(){
     hermesUsageClose?.addEventListener("click", () => setHermesUsageOpen(false));
     hermesUsageBackdrop?.addEventListener("click", () => setHermesUsageOpen(false));
     hermesUsageRefresh?.addEventListener("click", () => loadHermesUsage(true));
+    hermesUsageExport?.addEventListener("click", exportHermesUsage);
     hermesUsageWindows?.addEventListener("click", event => {
       const button = event.target?.closest?.("[data-window]");
       if(!button) return;

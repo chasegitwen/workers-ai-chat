@@ -348,6 +348,7 @@ export async function handleHermes(request, env, url, ctx, options = {}) {
     const usageResponse = await handleHermesUsage(request, env, url, {
       owner, fetchImpl: options.fetchImpl
     });
+    if (usageResponse instanceof Response) return usageResponse;
     if (usageResponse) return jsonResponse(usageResponse);
 
     const diagnosticsResponse = await handleHermesDiagnostics(request, env, url, {

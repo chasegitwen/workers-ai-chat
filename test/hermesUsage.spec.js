@@ -45,7 +45,7 @@ async function call(path, { user = "admin", envExtra = {}, method = "GET", body 
   const text = await response.text();
   let json = null;
   try { json = JSON.parse(text); } catch (err) { /* response under test is not JSON */ }
-  return { status: response.status, json, text };
+  return { status: response.status, headers: response.headers, json, text };
 }
 
 async function insertRun({
@@ -448,6 +448,45 @@ describe("Hermes B2-1 collection and API", () => {
     expect((await call("/api/hermes/usage/runs/" + bob.id, { user: "alice" })).status).toBe(404);
   });
 
+  it("exports only whitelisted owner-scoped usage rows in a bounded CSV window", async () => {
+    const alice = await insertRun({ owner: "alice", status: "completed", completedAt: Date.now() });
+    const oldAlice = await insertRun({ owner: "alice", status: "completed", completedAt: Date.now() - 2 * 86400000 });
+    const bob = await insertRun({ owner: "bob", status: "completed", completedAt: Date.now() });
+    for (const local of [alice, oldAlice, bob]) {
+      const row = await env.DB.prepare("SELECT * FROM hermes_runs WHERE id = ?").bind(local.id).first();
+      await persistHermesRunUsage(testEnv(), row, {
+        status: "completed", session_id: "session-" + local.owner,
+        runtime: { provider: "metered", model: "model-a" },
+        usage: { input_tokens: 7, output_tokens: 2, total_tokens: 9 }
+      });
+    }
+
+    const response = await call("/api/hermes/usage/export?window=24h&provider=metered", { user: "alice" });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/csv");
+    expect(response.headers.get("content-disposition")).toContain("hermes-usage-24h.csv");
+    expect(response.headers.get("x-hermes-export-truncated")).toBe("false");
+    expect(response.text).toContain("run_id,occurred_at_utc,run_status");
+    expect(response.text).toContain(alice.id);
+    expect(response.text).not.toContain(oldAlice.id);
+    expect(response.text).not.toContain(bob.id);
+    for (const forbidden of ["owner_username", "upstream_request_json", "diagnostics_json", "prompt", "answer", "credential", "api_key"]) {
+      expect(response.text.toLowerCase()).not.toContain(forbidden);
+    }
+  });
+
+  it("re-checks export ownership and returns 404 for a foreign targeted run", async () => {
+    const bob = await insertRun({ owner: "bob", status: "completed", completedAt: Date.now() });
+    const row = await env.DB.prepare("SELECT * FROM hermes_runs WHERE id = ?").bind(bob.id).first();
+    await persistHermesRunUsage(testEnv(), row, {
+      status: "completed", usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+    });
+
+    const response = await call("/api/hermes/usage/export?window=24h&run_id=" + bob.id, { user: "alice" });
+    expect(response.status).toBe(404);
+    expect(response.json.error.code).toBe("hermes_run_not_found");
+  });
+
   it("aggregates owner-scoped totals and daily trends that reconcile with filtered details", async () => {
     const aliceA = await insertRun({ owner: "alice", status: "completed", completedAt: Date.now() - 2000 });
     const aliceB = await insertRun({ owner: "alice", status: "completed", completedAt: Date.now() - 1000 });
@@ -495,6 +534,8 @@ describe("Hermes B2-1 collection and API", () => {
     expect((await call("/api/hermes/usage/analytics?window=365d")).status).toBe(400);
     expect((await call("/api/hermes/usage/runs?provider=%20bad%20value")).status).toBe(400);
     expect((await call("/api/hermes/usage/runs?limit=101")).status).toBe(400);
+    expect((await call("/api/hermes/usage/export?window=all")).status).toBe(400);
+    expect((await call("/api/hermes/usage/export?limit=5001")).status).toBe(400);
   });
 
   it("keeps terminalization successful when the usage write fails", async () => {

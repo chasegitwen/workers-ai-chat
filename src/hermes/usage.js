@@ -15,6 +15,7 @@ import { isHermesTerminal } from "./status.js";
 const MAX_SAFE_TOKEN_COUNT = Number.MAX_SAFE_INTEGER;
 const COLLECTION_SOURCES = new Set(["get_run", "sse_terminal", "backfill"]);
 const WINDOWS = { "24h": 86400000, "7d": 604800000, "30d": 2592000000, "90d": 7776000000 };
+const EXPORT_LIMIT_MAX = 5000;
 const USAGE_FILTERS = {
   provider: "actual_provider",
   model: "actual_model",
@@ -422,6 +423,93 @@ function usagePredicate(owner, since, filters) {
   return { sql: clauses.join(" AND "), bindings };
 }
 
+function csvCell(value) {
+  if (value === null || value === undefined) return "";
+  let text = String(value);
+  // Keep spreadsheet applications from interpreting exported metadata as a formula.
+  if (/^[=+\-@]/.test(text)) text = "'" + text;
+  return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+}
+
+function usageExportRow(row) {
+  return {
+    run_id: row.run_id,
+    occurred_at_utc: Number.isFinite(Number(row.occurred_at)) ? new Date(Number(row.occurred_at)).toISOString() : null,
+    run_status: row.run_status,
+    actual_provider: row.actual_provider,
+    actual_model: row.actual_model,
+    requested_provider: row.requested_provider,
+    requested_model: row.requested_model,
+    route_source: row.route_source,
+    fallback_used: row.fallback_used,
+    project_id: row.project_id,
+    session_id: row.upstream_session_id,
+    job_id: row.hermes_job_id,
+    input_tokens: row.input_tokens,
+    output_tokens: row.output_tokens,
+    total_tokens: row.total_tokens,
+    cache_read_tokens: row.cache_read_tokens,
+    cache_write_tokens: row.cache_write_tokens,
+    reasoning_tokens: row.reasoning_tokens,
+    collection_status: row.collection_status,
+    historical_gap: row.historical_gap,
+    overflow_detected: row.overflow_detected,
+    estimated_cost_micros: row.estimated_cost_micros,
+    actual_cost_micros: row.actual_cost_micros,
+    cost_status: row.cost_status,
+    currency: row.currency,
+    cost_note_code: row.cost_note_code,
+    coverage_incomplete: row.coverage_incomplete
+  };
+}
+
+async function exportOwnedUsage(env, owner, url) {
+  const window = usageWindow(url);
+  const filters = usageFilters(url);
+  const limit = pageNumber(url, "limit", EXPORT_LIMIT_MAX, EXPORT_LIMIT_MAX);
+  const runId = String(url.searchParams.get("run_id") || "").trim();
+  if (runId) {
+    if (!/^hrun_[a-f0-9]{32}$/.test(runId)) {
+      throw new HermesError("hermes_run_not_found", "Hermes run not found", { httpStatus: 404 });
+    }
+    // Targeted exports re-check ownership here instead of relying on a prior list result.
+    const owned = await env.DB.prepare(
+      "SELECT run_id FROM hermes_run_usage WHERE run_id = ? AND owner_username = ?"
+    ).bind(runId, owner).first();
+    if (!owned) throw new HermesError("hermes_run_not_found", "Hermes run not found", { httpStatus: 404 });
+  }
+  const predicate = usagePredicate(owner, window.since, filters);
+  const clauses = [predicate.sql];
+  const bindings = [...predicate.bindings];
+  if (runId) {
+    clauses.push("run_id = ?");
+    bindings.push(runId);
+  }
+  const result = await env.DB.prepare(
+    `SELECT run_id, occurred_at, run_status, actual_provider, actual_model,
+      requested_provider, requested_model, route_source, fallback_used, project_id,
+      upstream_session_id, hermes_job_id, input_tokens, output_tokens, total_tokens,
+      cache_read_tokens, cache_write_tokens, reasoning_tokens, collection_status,
+      historical_gap, overflow_detected, estimated_cost_micros, actual_cost_micros,
+      cost_status, currency, cost_note_code, coverage_incomplete
+     FROM hermes_run_usage WHERE ${clauses.join(" AND ")}
+     ORDER BY occurred_at DESC, run_id DESC LIMIT ?`
+  ).bind(...bindings, limit + 1).all();
+  const rows = (result.results || []).slice(0, limit).map(usageExportRow);
+  const columns = Object.keys(usageExportRow({}));
+  const csv = [columns.join(","), ...rows.map(row => columns.map(name => csvCell(row[name])).join(","))].join("\r\n") + "\r\n";
+  return new Response(csv, {
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="hermes-usage-${window.name}.csv"`,
+      "Cache-Control": "private, no-store",
+      "X-Hermes-Export-Window": window.name,
+      "X-Hermes-Export-Rows": String(rows.length),
+      "X-Hermes-Export-Truncated": (result.results || []).length > limit ? "true" : "false"
+    }
+  });
+}
+
 function safeAggregate(value) {
   if (value === null || value === undefined) return null;
   const number = Number(value);
@@ -547,6 +635,9 @@ async function usageAnalytics(env, owner, url) {
 
 export async function handleHermesUsage(request, env, url, { owner, fetchImpl } = {}) {
   if (request.method !== "GET") return null;
+  if (url.pathname === "/api/hermes/usage/export") {
+    return exportOwnedUsage(env, owner, url);
+  }
   if (url.pathname === "/api/hermes/usage/analytics") {
     return usageAnalytics(env, owner, url);
   }

@@ -210,6 +210,8 @@ describe("Hermes frontend", () => {
     expect(html).toContain("@media(max-width:800px){.hermesUsageOverview");
     expect(html).toContain(".hermesUsageRunFacts{grid-template-columns:1fr}");
     expect(html).toContain("不下载全部事件历史");
+    expect(html).toContain('id="hermesUsageExport"');
+    expect(html).toContain("每日 Token 趋势（UTC）");
     expect(html.indexOf('id="hermesUsageToggle"')).toBeGreaterThan(html.indexOf('id="hermesDiagnosticsToggle"'));
 
     const render = lastDeclaration(pageScript(), "renderHermesUsage");
@@ -221,6 +223,32 @@ describe("Hermes frontend", () => {
     expect(load).toContain('/api/hermes/usage/runs?');
     expect(load).not.toContain('method:"POST"');
     expect(load).not.toContain("download");
+    const download = lastDeclaration(pageScript(), "exportHermesUsage");
+    expect(download).toContain('/api/hermes/usage/export?');
+    expect(download).toContain("hermesUsageState.window");
+    expect(download).toContain("hermesUsageState.filters");
+  });
+
+  it("loads only the next usage page when loading more", async () => {
+    const script = pageScript();
+    const requests = [];
+    const fetch = async url => {
+      requests.push(url);
+      return { ok:true, json:async () => ({ ok:true, runs:[{ runId:"next" }], page:{ total:2, hasMore:false } }) };
+    };
+    const source = [
+      'let hermesUsageState = { loading:false, reloadPending:false, window:"24h", filters:{ provider:"" }, analytics:{ summary:{ runCount:2 } }, runs:[{ runId:"first" }], total:2, hasMore:true, error:null };',
+      'function renderHermesUsage(){}',
+      lastDeclaration(script, "loadHermesUsage"),
+      'return { loadHermesUsage, state:() => hermesUsageState };'
+    ].join("\n");
+    const api = new Function("fetch", source)(fetch);
+
+    await api.loadHermesUsage(false);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toContain("/api/hermes/usage/runs?");
+    expect(api.state().analytics.summary.runCount).toBe(2);
+    expect(api.state().runs.map(run => run.runId)).toEqual(["first", "next"]);
   });
 
   it("queues a fresh usage load when filters change during an in-flight request", async () => {
@@ -278,6 +306,9 @@ describe("Hermes frontend", () => {
 
     expect(api.hermesUsageActualSummary(costs)).toBe("Actual 1.000000 USD · 部分（1/7 次 Actual，3 次 N/A）");
     expect(api.hermesUsageEstimatedSummary(costs)).toBe("Estimated 2.500000 USD · 部分（2/7 次 Estimated，3 次 N/A） · 1 Included");
+    const mixed = { ...costs, actualMicros:null, estimatedMicros:null, currency:null, currencies:2 };
+    expect(api.hermesUsageActualSummary(mixed)).toContain("多币种不可合计（2 种）");
+    expect(api.hermesUsageEstimatedSummary(mixed)).toContain("多币种不可合计（2 种）");
   });
 
   it("offers run diagnostic summary downloads only from the loaded detail renderer", () => {

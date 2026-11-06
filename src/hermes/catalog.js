@@ -2,7 +2,8 @@
 //
 // Sources: GET /v1/capabilities and GET /api/model/options (Hermes v0.22.5). Both payloads
 // are reduced to a field whitelist before they are cached or returned; credentials-related
-// fields (api_url, key_env, auth_type, warning, usage, limit, pricing, ...) are dropped.
+// fields (api_url, key_env, auth_type, warning, usage, limit, ...) are dropped. Pricing is
+// retained only through the scalar whitelist below; URLs, credentials and account data never are.
 
 import { HERMES_AGENT_ID, HERMES_CATALOG_MAX_AGE_MS, hermesInstance } from "./config.js";
 import { createHermesClient } from "./client.js";
@@ -12,6 +13,8 @@ const PROVIDER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/;
 const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,159}$/;
 const MAX_PROVIDERS = 64;
 const MAX_MODELS_PER_PROVIDER = 500;
+const PRICE_TEXT_PATTERN = /^\d{1,18}(?:\.\d{1,12})?$/;
+const PRICE_TIERS = ["default", "standard", "fast", "ultrafast"];
 
 // Features required before runs may be submitted. Anything missing fails closed.
 const REQUIRED_FEATURES = ["run_submission", "run_status", "run_events_sse", "run_stop"];
@@ -30,6 +33,66 @@ const BOOLEAN_FEATURES = [
 function cleanName(value, fallback) {
   const text = String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
   return (text || fallback).slice(0, 120);
+}
+
+function cleanPrice(value) {
+  if (value === null || value === undefined || value === "" || value === "?") return null;
+  if (String(value).trim().toLowerCase() === "free") return "0";
+  const text = String(value).trim().replace(/^\$/, "");
+  if (!PRICE_TEXT_PATTERN.test(text)) return null;
+  const normalized = text.replace(/^0+(?=\d)/, "").replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+  return normalized || "0";
+}
+
+function cleanPriceSource(value) {
+  const text = String(value ?? "").trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9._:-]{0,79}$/.test(text) ? text : "hermes_model_options";
+}
+
+function cleanPricingVersion(value) {
+  const text = String(value ?? "").trim();
+  return /^[A-Za-z0-9][A-Za-z0-9._:+@/-]{0,119}$/.test(text) ? text : null;
+}
+
+function normalizePriceRates(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const input = cleanPrice(raw.input ?? raw.input_cost_per_million);
+  const output = cleanPrice(raw.output ?? raw.output_cost_per_million);
+  const cacheRead = cleanPrice(raw.cache_read ?? raw.cache ?? raw.cache_read_cost_per_million);
+  const cacheWrite = cleanPrice(raw.cache_write ?? raw.cache_write_cost_per_million);
+  const request = cleanPrice(raw.request_cost);
+  if ([input, output, cacheRead, cacheWrite, request].every(value => value === null)) return null;
+  return { input, output, cacheRead, cacheWrite, request };
+}
+
+function normalizeModelPrice(raw, collectedAt) {
+  const rates = normalizePriceRates(raw);
+  if (!rates) return null;
+  const tiers = {};
+  const rawTiers = raw?.service_tiers && typeof raw.service_tiers === "object" ? raw.service_tiers : {};
+  for (const tier of PRICE_TIERS) {
+    const tierRates = normalizePriceRates(rawTiers[tier] || raw?.[tier]);
+    if (tierRates) tiers[tier] = tierRates;
+  }
+  return {
+    source: cleanPriceSource(raw?.source),
+    currency: "USD",
+    unit: "usd_per_million_tokens",
+    collectedAt,
+    pricingVersion: cleanPricingVersion(raw?.pricing_version),
+    free: raw?.free === true,
+    rates,
+    serviceTiers: tiers
+  };
+}
+
+function providerBillingMode(row, id) {
+  if (id === "openai-codex") return "subscription_included";
+  if (id.startsWith("custom:") || row?.is_user_defined === true) return "custom_unknown";
+  if (row?.plan_usage && typeof row.plan_usage === "object") return "fixed_quota";
+  const authType = String(row?.auth_type || "").toLowerCase();
+  if (authType.includes("oauth") || id.includes("coding-plan") || id.includes("coding_plan")) return "reference_only";
+  return "metered_or_unknown";
 }
 
 export function normalizeHermesCapabilities(payload) {
@@ -63,7 +126,7 @@ export function normalizeHermesCapabilities(payload) {
   };
 }
 
-export function normalizeHermesModelOptions(payload) {
+export function normalizeHermesModelOptions(payload, { collectedAt = Date.now() } = {}) {
   const rows = Array.isArray(payload?.providers) ? payload.providers : [];
   const seen = new Set();
   const providers = [];
@@ -72,11 +135,21 @@ export function normalizeHermesModelOptions(payload) {
     const id = String(row?.slug || "").trim();
     if (!PROVIDER_ID_PATTERN.test(id) || seen.has(id)) continue;
     seen.add(id);
-    const models = [...new Set((Array.isArray(row?.models) ? row.models : [])
+    const rawModels = Array.isArray(row?.models) ? row.models : [];
+    const modelById = new Map(rawModels.map(model => [
+      String(typeof model === "string" ? model : (model?.id || "")).trim(), model
+    ]));
+    const models = [...new Set(rawModels
       .map(model => String(typeof model === "string" ? model : (model?.id || "")).trim())
       .filter(model => MODEL_ID_PATTERN.test(model)))]
       .slice(0, MAX_MODELS_PER_PROVIDER)
-      .map(model => ({ id: model, name: model }));
+      .map(model => {
+        const rawModel = modelById.get(model);
+        const rawPrice = (rawModel && typeof rawModel === "object" ? rawModel.pricing : null)
+          || (row?.pricing && typeof row.pricing === "object" ? row.pricing[model] : null);
+        const pricing = normalizeModelPrice(rawPrice, collectedAt);
+        return { id: model, name: model, ...(pricing ? { pricing } : {}) };
+      });
     const authenticated = row?.authenticated !== false;
     providers.push({
       id,
@@ -84,6 +157,7 @@ export function normalizeHermesModelOptions(payload) {
       isCurrent: row?.is_current === true,
       authenticated,
       selectable: authenticated && models.length > 0,
+      billingMode: providerBillingMode(row, id),
       models
     });
   }
@@ -149,8 +223,9 @@ export async function fetchHermesCatalog(env, instanceId, { refresh = false, fet
     throw new HermesError("hermes_capability_missing", "Hermes model options are not available", { httpStatus: 502 });
   }
   const optionsResponse = await client.getModelOptions({ refresh });
-  const modelOptions = normalizeHermesModelOptions(optionsResponse.body);
-  return buildHermesCatalog(instanceId, capabilities, modelOptions, Date.now());
+  const syncedAt = Date.now();
+  const modelOptions = normalizeHermesModelOptions(optionsResponse.body, { collectedAt: syncedAt });
+  return buildHermesCatalog(instanceId, capabilities, modelOptions, syncedAt);
 }
 
 // Returns { catalog, stale, source, error? }. Falls back to the last cached snapshot when the
@@ -168,6 +243,10 @@ export async function getHermesCatalog(env, instanceId, { refresh = false, fetch
     if (cached) return { catalog: cached.catalog, stale: true, source: "cache", error: err };
     throw err;
   }
+}
+
+export async function readCachedHermesCatalog(db, instanceId) {
+  return (await readCache(db, instanceId))?.catalog || null;
 }
 
 // Validates a requested provider/model against the catalog. Empty provider and model means

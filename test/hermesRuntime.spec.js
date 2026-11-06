@@ -210,6 +210,7 @@ describe("Hermes catalog and provider selection", () => {
     expect(options.providers.map(row => row.id)).toEqual(["openai-codex", "minimax", "anthropic"]);
     expect(options.providers[0]).toEqual({
       id: "openai-codex", name: "OpenAI Codex", isCurrent: true, authenticated: true, selectable: true,
+      billingMode: "subscription_included",
       models: [{ id: "gpt-5.6-luna", name: "gpt-5.6-luna" }, { id: "gpt-5.6-sol", name: "gpt-5.6-sol" }]
     });
     expect(options.providers[2].selectable).toBe(false);
@@ -217,6 +218,32 @@ describe("Hermes catalog and provider selection", () => {
     for (const leaked of ["api_url", "key_env", "OPENAI_API_KEY", "internal.example", "usage", "warning", "sk-abc"]) {
       expect(serialized).not.toContain(leaked);
     }
+  });
+
+  it("retains only sanitized model/options pricing metadata", () => {
+    const payload = structuredClone(mock.modelOptions);
+    payload.providers[1].pricing = {
+      "MiniMax-M3": {
+        input: "$1.25", output: "$5.00", cache: "$0.125", cache_write: "$0.50",
+        request_cost: "$0.01", source: "provider_models_api", pricing_version: "minimax-2026-11",
+        service_tiers: { fast: { input: "$2.50", output: "$10.00" } },
+        api_url: "https://secret.example", key_env: "SECRET_KEY", auth: "Bearer secret", warning: "secret"
+      }
+    };
+    const options = normalizeHermesModelOptions(payload, { collectedAt: 1234 });
+    expect(options.providers[1].models[0].pricing).toEqual({
+      source: "provider_models_api", currency: "USD", unit: "usd_per_million_tokens",
+      collectedAt: 1234, pricingVersion: "minimax-2026-11", free: false,
+      rates: { input: "1.25", output: "5", cacheRead: "0.125", cacheWrite: "0.5", request: "0.01" },
+      serviceTiers: {
+        fast: { input: "2.5", output: "10", cacheRead: null, cacheWrite: null, request: null }
+      }
+    });
+    const serialized = JSON.stringify(options);
+    for (const leaked of ["secret.example", "SECRET_KEY", "Bearer secret", "warning", "api_url", "key_env"]) {
+      expect(serialized).not.toContain(leaked);
+    }
+    expect(options.providers[1]).not.toHaveProperty("auth");
   });
 
   it("validates explicit provider/model and maps the agent default to no override", () => {

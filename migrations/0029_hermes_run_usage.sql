@@ -33,11 +33,16 @@ CREATE TABLE IF NOT EXISTS hermes_run_usage (
   -- when this Worker observed/backfilled the authoritative snapshot.
   occurred_at INTEGER NOT NULL,
   collected_at INTEGER NOT NULL,
-  -- Reserved for B2-2. B2-1 never populates cost or price data.
+  -- B2-2 keeps the exact sanitized price row used so catalog changes cannot
+  -- silently rewrite historical estimates.
   price_snapshot_json TEXT,
   estimated_cost_micros INTEGER,
+  actual_cost_micros INTEGER,
   cost_status TEXT,
   currency TEXT,
+  cost_note TEXT,
+  coverage_incomplete INTEGER NOT NULL DEFAULT 1,
+  coverage_note TEXT,
   PRIMARY KEY (owner_username, run_id),
   FOREIGN KEY (run_id) REFERENCES hermes_runs(id)
 );

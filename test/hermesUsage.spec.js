@@ -9,6 +9,7 @@ import {
   normalizeHermesUsage,
   persistHermesRunUsage
 } from "../src/hermes/usage.js";
+import { gradeHermesCost, MAX_SAFE_MICROS } from "../src/hermes/pricing.js";
 import { MockHermes, hermesEnv } from "./helpers/mockHermes.js";
 
 const ORIGIN = "http://example.com";
@@ -85,20 +86,24 @@ describe("Hermes B2-1 usage normalization", () => {
     });
   });
 
-  it("isolates raw OpenAI and Anthropic cache conventions from pricing buckets", () => {
+  it("keeps canonical Hermes keys beside details but isolates raw-only provider shapes", () => {
     const openAi = normalizeHermesUsage({
       input_tokens: 100, output_tokens: 20, total_tokens: 120,
       input_tokens_details: { cached_tokens: 60 }
     });
     expect(openAi).toMatchObject({
-      input: null, output: null, total: null, cacheRead: null, collectionStatus: "missing"
+      input: 100, output: 20, total: 120, cacheRead: null, collectionStatus: "collected"
     });
-    expect(openAi.validationFlags).toEqual(expect.arrayContaining([
-      "usage_shape_openai_raw_ignored", "input_includes_cache_true"
-    ]));
+    expect(openAi.validationFlags).toEqual([]);
+
+    const invalidCanonical = normalizeHermesUsage({
+      input_tokens: { invalid: true }, input_tokens_details: { cached_tokens: 60 }, prompt_tokens: 100
+    });
+    expect(invalidCanonical).toMatchObject({ input: null, collectionStatus: "missing" });
+    expect(invalidCanonical.validationFlags).toContain("usage_shape_openai_raw_ignored");
 
     const anthropic = normalizeHermesUsage({
-      input_tokens: 40, output_tokens: 5, cache_read_input_tokens: 60,
+      prompt_tokens: 40, completion_tokens: 5, cache_read_input_tokens: 60,
       cache_creation_input_tokens: 10
     });
     expect(anthropic).toMatchObject({
@@ -108,6 +113,74 @@ describe("Hermes B2-1 usage normalization", () => {
     expect(anthropic.validationFlags).toEqual(expect.arrayContaining([
       "usage_shape_anthropic_raw_ignored", "input_includes_cache_false"
     ]));
+  });
+
+  it("grades no-price, included, actual, cache-aware and service-tier costs honestly", () => {
+    const normalized = normalizeHermesUsage({
+      input_tokens: 1000000, output_tokens: 500000, total_tokens: 1800000,
+      cache_read_tokens: 200000, cache_write_tokens: 100000
+    });
+    const attribution = { actualProvider: "metered", actualModel: "m", serviceTier: null };
+    expect(gradeHermesCost({ normalized, attribution, snapshot: {}, catalog: null })).toMatchObject({
+      costStatus: "n_a", costMicros: null, priceSnapshot: null
+    });
+    const includedCatalog = { providers: [{ id: "openai-codex", billingMode: "subscription_included", models: [{ id: "m" }] }] };
+    expect(gradeHermesCost({ normalized, attribution: { ...attribution, actualProvider: "openai-codex" }, snapshot: {}, catalog: includedCatalog }))
+      .toMatchObject({ costStatus: "included", costMicros: null, priceSnapshot: null });
+    const customCatalog = { providers: [{ id: "custom:x", billingMode: "custom_unknown", models: [{ id: "m" }] }] };
+    expect(gradeHermesCost({ normalized, attribution: { ...attribution, actualProvider: "custom:x" }, snapshot: {}, catalog: customCatalog }))
+      .toMatchObject({ costStatus: "n_a", costMicros: null, note: { code: "custom_pricing_unknown" } });
+
+    const pricing = {
+      source: "hermes_model_options", currency: "USD", unit: "usd_per_million_tokens", collectedAt: 100,
+      pricingVersion: "v1", free: false,
+      rates: { input: "2", output: "4", cacheRead: "0.5", cacheWrite: "1", request: null },
+      serviceTiers: { fast: { input: "3", output: "6", cacheRead: "0.75", cacheWrite: "1.5", request: null } }
+    };
+    const catalog = { providers: [{ id: "metered", billingMode: "metered_or_unknown", models: [{ id: "m", pricing }] }] };
+    expect(gradeHermesCost({ normalized, attribution, snapshot: {}, catalog })).toMatchObject({
+      costStatus: "estimated", costMicros: 4200000,
+      priceSnapshot: { provider: "metered", model: "m", collectedAt: 100 }
+    });
+    expect(gradeHermesCost({ normalized, attribution: { ...attribution, serviceTier: "fast" }, snapshot: {}, catalog }))
+      .toMatchObject({ costStatus: "estimated", costMicros: 6300000 });
+    expect(gradeHermesCost({ normalized, attribution: { ...attribution, serviceTier: "mystery" }, snapshot: {}, catalog }))
+      .toMatchObject({ costStatus: "unknown", costMicros: null, note: { code: "service_tier_price_unknown" } });
+    const freeCatalog = structuredClone(catalog);
+    freeCatalog.providers[0].models[0].pricing.free = true;
+    expect(gradeHermesCost({ normalized, attribution, snapshot: {}, catalog: freeCatalog }))
+      .toMatchObject({ costStatus: "included", costMicros: null, note: { code: "price_explicitly_free" } });
+
+    const missingCache = structuredClone(catalog);
+    missingCache.providers[0].models[0].pricing.rates.cacheWrite = null;
+    expect(gradeHermesCost({ normalized, attribution, snapshot: {}, catalog: missingCache })).toMatchObject({
+      costStatus: "unknown", costMicros: null, note: { code: "cache_write_price_missing" }
+    });
+    expect(gradeHermesCost({ normalized, attribution, snapshot: {
+      billing: { status: "actual", source: "provider_response", currency: "USD", amount_usd: "1.234567" }
+    }, catalog })).toMatchObject({ costStatus: "actual", costMicros: 1234567 });
+    expect(gradeHermesCost({ normalized, attribution, snapshot: {
+      usage: { estimated_cost_usd: "99" }, billing: { status: "estimated", source: "provider_response", amount_usd: "99" }
+    }, catalog })).toMatchObject({ costStatus: "estimated", costMicros: 4200000 });
+  });
+
+  it("uses integer-micro precision, never a fake free zero, and rejects cost overflow", () => {
+    const tiny = normalizeHermesUsage({ input_tokens: 1, output_tokens: 0, total_tokens: 1 });
+    const pricing = { source: "test", currency: "USD", unit: "usd_per_million_tokens", collectedAt: 1,
+      pricingVersion: null, free: false, rates: { input: "0.1", output: "1", cacheRead: null, cacheWrite: null, request: null }, serviceTiers: {} };
+    const attribution = { actualProvider: "p", actualModel: "m", serviceTier: null };
+    const catalog = { providers: [{ id: "p", billingMode: "metered_or_unknown", models: [{ id: "m", pricing }] }] };
+    expect(gradeHermesCost({ normalized: tiny, attribution, snapshot: {}, catalog }))
+      .toMatchObject({ costStatus: "estimated", costMicros: 1 });
+
+    const hugePricing = structuredClone(pricing);
+    hugePricing.rates.input = "999999999999";
+    const hugeCatalog = { providers: [{ id: "p", billingMode: "metered_or_unknown", models: [{ id: "m", pricing: hugePricing }] }] };
+    expect(gradeHermesCost({
+      normalized: normalizeHermesUsage({ input_tokens: MAX_SAFE_TOKEN_COUNT, output_tokens: 0, total_tokens: MAX_SAFE_TOKEN_COUNT }),
+      attribution, snapshot: {}, catalog: hugeCatalog
+    })).toMatchObject({ costStatus: "unknown", costMicros: null, overflow: true });
+    expect(MAX_SAFE_MICROS).toBe(BigInt(Number.MAX_SAFE_INTEGER));
   });
 
   it("rejects unsafe token precision with an explicit overflow flag", () => {
@@ -131,7 +204,8 @@ describe("Hermes B2-1 collection and API", () => {
     const columns = (await env.DB.prepare("PRAGMA table_info(hermes_run_usage)").all()).results.map(row => row.name);
     expect(columns).toEqual(expect.arrayContaining([
       "input_tokens", "cache_read_tokens", "reasoning_tokens", "actual_provider", "requested_provider",
-      "collection_status", "occurred_at", "collected_at", "price_snapshot_json", "estimated_cost_micros"
+      "collection_status", "occurred_at", "collected_at", "price_snapshot_json", "estimated_cost_micros",
+      "actual_cost_micros", "cost_note", "coverage_incomplete", "coverage_note"
     ]));
     const indexes = (await env.DB.prepare("PRAGMA index_list(hermes_run_usage)").all()).results.map(row => row.name);
     expect(indexes).toEqual(expect.arrayContaining([
@@ -169,6 +243,53 @@ describe("Hermes B2-1 collection and API", () => {
       .toEqual({ collection_source: "sse_terminal" });
     await persistHermesRunUsage(testEnv(), row, snapshot, { source: "get_run" });
     expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM hermes_run_usage WHERE run_id = ?").bind(local.id).first()).toEqual({ n: 1 });
+  });
+
+  it("attaches estimates from the cached catalog, exposes coverage, and keeps price snapshots immutable", async () => {
+    const local = await insertRun({ requestedProvider: "metered", requestedModel: "m", status: "completed", completedAt: Date.now() });
+    const row = await env.DB.prepare("SELECT * FROM hermes_runs WHERE id = ?").bind(local.id).first();
+    const catalog = rate => ({
+      providers: [{ id: "metered", billingMode: "metered_or_unknown", models: [{ id: "m", pricing: {
+        source: "hermes_model_options", currency: "USD", unit: "usd_per_million_tokens", collectedAt: 111,
+        pricingVersion: "v1", free: false,
+        rates: { input: rate, output: "4", cacheRead: "0.5", cacheWrite: "1", request: null }, serviceTiers: {}
+      } }] }]
+    });
+    await env.DB.prepare(
+      `INSERT INTO hermes_catalog_cache (instance_id, catalog_json, capabilities_json, synced_at)
+       VALUES ('oracle-hermes', ?, '{}', 111)`
+    ).bind(JSON.stringify(catalog("2"))).run();
+    const snapshot = {
+      status: "completed", runtime: { provider: "metered", model: "m" },
+      usage: { input_tokens: 1000000, output_tokens: 500000, total_tokens: 1700000, cache_read_tokens: 200000 }
+    };
+    await persistHermesRunUsage(testEnv(), row, snapshot);
+    let stored = await env.DB.prepare(
+      "SELECT price_snapshot_json, estimated_cost_micros, cost_status, coverage_incomplete FROM hermes_run_usage WHERE run_id = ?"
+    ).bind(local.id).first();
+    expect(stored).toMatchObject({ estimated_cost_micros: 4100000, cost_status: "estimated", coverage_incomplete: 1 });
+    expect(JSON.parse(stored.price_snapshot_json)).toMatchObject({
+      provider: "metered", model: "m", collectedAt: 111, rates: { input: "2" }
+    });
+
+    await env.DB.prepare("UPDATE hermes_catalog_cache SET catalog_json = ?, synced_at = 222 WHERE instance_id = 'oracle-hermes'")
+      .bind(JSON.stringify(catalog("200"))).run();
+    await persistHermesRunUsage(testEnv(), row, snapshot);
+    stored = await env.DB.prepare(
+      "SELECT price_snapshot_json, estimated_cost_micros FROM hermes_run_usage WHERE run_id = ?"
+    ).bind(local.id).first();
+    expect(stored.estimated_cost_micros).toBe(4100000);
+    expect(JSON.parse(stored.price_snapshot_json).rates.input).toBe("2");
+
+    const detail = await call("/api/hermes/usage/runs/" + local.id);
+    expect(detail.json.usage).toMatchObject({
+      costStatus: "estimated", estimatedCostMicros: 4100000, actualCostMicros: null,
+      coverageIncomplete: true,
+      coverageNote: expect.stringContaining("not total-system cost"),
+      priceSnapshot: { provider: "metered", model: "m", rates: { input: "2" } }
+    });
+    const list = await call("/api/hermes/usage/runs?window=24h");
+    expect(list.json.runs[0]).toMatchObject({ runId: local.id, costStatus: "estimated", estimatedCostMicros: 4100000 });
   });
 
   it.each([

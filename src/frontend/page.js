@@ -1699,8 +1699,10 @@ body.dark .projectRuntimeItem{
 .hermesWorkbenchTitleForm{border:1px solid var(--primary);border-radius:10px;padding:10px;margin-bottom:10px}.hermesWorkbenchTitleForm label{display:block;font-size:12px;margin-bottom:6px}.hermesWorkbenchTitleForm input{width:100%;min-height:38px;border:1px solid var(--border);border-radius:8px;background:inherit;color:inherit;padding:7px 9px;font:inherit}.hermesWorkbenchTitleForm div{display:flex;justify-content:flex-end;gap:6px;margin-top:8px}
 .hermesJobsToolbar{grid-template-columns:minmax(0,1fr) auto auto auto}.hermesJobsEditor{padding:12px 16px;border-bottom:1px solid var(--border,#d9dee8);display:grid;grid-template-columns:1fr 1fr;gap:9px}.hermesJobsEditor[hidden]{display:none}.hermesJobsEditor label{display:flex;flex-direction:column;gap:4px;font-size:12px}.hermesJobsEditor .wide{grid-column:1/-1}.hermesJobsEditor input,.hermesJobsEditor textarea{font:inherit;border:1px solid var(--border,#d9dee8);border-radius:8px;padding:8px;background:inherit;color:inherit;min-width:0}.hermesJobsEditor textarea{min-height:92px;resize:vertical}.hermesJobsEditorActions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px}.hermesJobsEditorActions button{font:inherit;border:1px solid var(--border,#d9dee8);border-radius:7px;background:transparent;color:inherit;padding:7px 11px;cursor:pointer}.hermesJobsPrompt,.hermesJobsResult{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto;margin:8px 0 0;padding:8px;border-radius:7px;background:rgba(127,127,127,.08)}
 .hermesDiagnosticsToolbar{grid-template-columns:auto auto 1fr auto}.hermesDiagnosticsWindows{display:flex;gap:5px;flex-wrap:wrap}.hermesDiagnosticsWindows button[aria-pressed="true"]{border-color:var(--primary);color:var(--primary);font-weight:600}.hermesDiagnosticsToolbar select{font:inherit;border:1px solid var(--border,#d9dee8);border-radius:8px;padding:7px 9px;background:inherit;color:inherit;min-height:36px}.hermesDiagnosticsDetail{margin-top:10px;border-top:1px solid var(--border,#d9dee8);padding-top:10px}.hermesDiagnosticsTimeline{margin:8px 0 0;padding-left:20px;font-size:12px;line-height:1.5}.hermesDiagnosticsError{margin-top:8px;padding:8px;border-radius:7px;background:rgba(190,24,93,.08);white-space:pre-wrap;overflow-wrap:anywhere}.hermesDiagnosticsFacts{margin:6px 0;padding-left:20px;font-size:12px;line-height:1.5}.hermesDiagnosticsInference{margin-top:6px;padding:7px;border-left:3px solid #d97706;background:rgba(217,119,6,.08);font-size:12px}
+.hermesUsageDrawer{width:min(780px,100vw)}.hermesUsageToolbar{display:flex;flex-wrap:wrap;align-items:center;gap:7px;padding:12px 16px;border-bottom:1px solid var(--border,#d9dee8)}.hermesUsageToolbar select,.hermesUsageToolbar button{font:inherit;min-height:34px;border:1px solid var(--border,#d9dee8);border-radius:8px;padding:6px 8px;background:inherit;color:inherit}.hermesUsageToolbar button[aria-pressed="true"]{border-color:var(--primary);color:var(--primary);font-weight:600}.hermesUsageOverview{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:8px;margin-bottom:12px}.hermesUsageMetric{padding:10px;border:1px solid var(--border,#d9dee8);border-radius:9px;min-width:0}.hermesUsageMetric span{display:block;color:var(--muted,#667085);font-size:11px}.hermesUsageMetric strong{display:block;margin-top:4px;font-size:15px;overflow-wrap:anywhere}.hermesUsageTrend{display:flex;align-items:flex-end;gap:3px;height:96px;padding:10px 5px 0;border:1px solid var(--border,#d9dee8);border-radius:9px;margin-bottom:12px;overflow-x:auto}.hermesUsageTrendBar{flex:1 0 7px;min-width:7px;background:var(--primary,#2563eb);border-radius:3px 3px 0 0;opacity:.75}.hermesUsageCoverage{font-size:12px;line-height:1.5;padding:9px;border-left:3px solid #d97706;background:rgba(217,119,6,.08);margin-bottom:12px}.hermesUsageRun summary{cursor:pointer}.hermesUsageRunFacts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin-top:9px;font-size:12px}.hermesUsageRunFact{padding:6px;background:rgba(127,127,127,.07);border-radius:6px;overflow-wrap:anywhere}.hermesUsageLoadMore{width:100%;min-height:38px;border:1px solid var(--border,#d9dee8);border-radius:8px;background:transparent;color:inherit;cursor:pointer}
 .hermesRuntimeHealth{margin-bottom:12px}.hermesRuntimeHealth[data-status="unknown"]{border-left:4px solid #94a3b8}.hermesRuntimeHealth[data-status="healthy"]{border-left:4px solid #15803d}.hermesRuntimeHealth[data-status="degraded"]{border-left:4px solid #d97706}.hermesRuntimeHealth[data-status="unavailable"]{border-left:4px solid #be123c}.hermesRuntimeHealthFacts{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:6px;margin-top:8px}.hermesRuntimeHealthFact{padding:7px;border-radius:7px;background:var(--surface-muted,rgba(127,127,127,.07));font-size:12px;overflow-wrap:anywhere}.hermesRuntimeHealthNote{margin-top:7px;font-size:12px;color:var(--muted,#667085)}
-@media(max-width:640px){.hermesWorkbenchToolbar{grid-template-columns:1fr 1fr}.hermesWorkbenchToolbar input{grid-column:1/-1}.hermesWorkbenchDrawer{width:100vw}.hermesWorkbenchHeader{padding:12px}.hermesWorkbenchBody{padding:10px 12px 24px}}
+@media(max-width:800px){.hermesUsageOverview{grid-template-columns:repeat(2,minmax(0,1fr))}.hermesUsageToolbar select{flex:1 1 145px}.hermesUsageRunFacts{grid-template-columns:1fr}.hermesUsageCoverage{cursor:pointer}}
+@media(max-width:640px){.hermesWorkbenchToolbar{grid-template-columns:1fr 1fr}.hermesWorkbenchToolbar input{grid-column:1/-1}.hermesWorkbenchDrawer{width:100vw}.hermesWorkbenchHeader{padding:12px}.hermesWorkbenchBody{padding:10px 12px 24px}.hermesUsageOverview{grid-template-columns:1fr 1fr}.hermesUsageToolbar{padding:10px 12px}.hermesUsageToolbar .hermesDiagnosticsWindows{flex-basis:100%}}
 .hermesSettingsBody{display:flex;flex-direction:column;gap:12px}.hermesSettingsSection{border:1px solid var(--border,#d9dee8);border-radius:10px;padding:12px}.hermesSettingsSection h3{margin:0 0 8px;font-size:14px}.hermesSettingsLabel{display:flex;flex-direction:column;gap:6px;font-size:13px}.hermesSettingsLabel select{border:1px solid var(--border,#d9dee8);border-radius:8px;padding:7px 10px;background:inherit;color:inherit}.hermesSettingsHint,.hermesSettingsGap{font-size:12px;color:var(--muted,#667085);margin:6px 0 0;line-height:1.45}.hermesSettingsList{margin:0;padding-left:18px;font-size:12px;color:var(--muted,#667085);line-height:1.45}.hermesSettingsEffective{font-size:13px;line-height:1.5}@media(max-width:640px){.hermesJobsToolbar{grid-template-columns:1fr 1fr}.hermesJobsEditor{grid-template-columns:1fr}.hermesJobsEditor .wide,.hermesJobsEditorActions{grid-column:1}}
 
 .contextSection{
@@ -3623,6 +3625,33 @@ body.dark .toolErrorNotice{
   </div>
 </aside>
 
+<button id="hermesUsageBackdrop" class="hermesWorkbenchBackdrop" type="button" aria-label="关闭 Hermes 用量分析" hidden></button>
+<aside id="hermesUsageDrawer" class="hermesWorkbenchDrawer hermesUsageDrawer" aria-label="Hermes 用量分析" aria-hidden="true" hidden>
+  <div class="hermesWorkbenchHeader">
+    <div><h2>用量</h2><p>Hermes Usage Analytics · 服务端汇总 · 不是账单</p></div>
+    <button id="hermesUsageClose" class="hermesWorkbenchClose" type="button" aria-label="关闭">&times;</button>
+  </div>
+  <div class="hermesUsageToolbar" aria-label="用量筛选">
+    <div id="hermesUsageWindows" class="hermesDiagnosticsWindows" aria-label="用量时间范围">
+      <button type="button" data-window="24h" aria-pressed="true">24h</button><button type="button" data-window="7d" aria-pressed="false">7d</button><button type="button" data-window="30d" aria-pressed="false">30d</button><button type="button" data-window="90d" aria-pressed="false">90d</button>
+    </div>
+    <select id="hermesUsageProvider" data-filter="provider" aria-label="筛选实际 Provider"><option value="">全部实际 Provider</option></select>
+    <select id="hermesUsageModel" data-filter="model" aria-label="筛选实际模型"><option value="">全部实际模型</option></select>
+    <select id="hermesUsageSession" data-filter="session" aria-label="筛选 Session"><option value="">全部 Session</option></select>
+    <select id="hermesUsageProject" data-filter="project" aria-label="筛选项目"><option value="">全部项目</option></select>
+    <select id="hermesUsageJob" data-filter="job" aria-label="筛选 Job"><option value="">全部 Job</option></select>
+    <button id="hermesUsageRefresh" type="button">刷新</button>
+  </div>
+  <div class="hermesWorkbenchBody">
+    <div id="hermesUsageStatus" class="hermesWorkbenchStatus">用量由 Worker 在限定时间范围内汇总，不下载全部事件历史。</div>
+    <div id="hermesUsageOverview" class="hermesUsageOverview" aria-label="用量概览"></div>
+    <div id="hermesUsageTrend" class="hermesUsageTrend" aria-label="每日 Token 趋势"></div>
+    <details class="hermesUsageCoverage" open><summary>保留与覆盖范围</summary><div id="hermesUsageCoverage"></div></details>
+    <div id="hermesUsageRuns"></div>
+    <button id="hermesUsageLoadMore" class="hermesUsageLoadMore" type="button" hidden>加载更多</button>
+  </div>
+</aside>
+
 <button id="hermesSettingsBackdrop" class="hermesWorkbenchBackdrop" type="button" aria-label="关闭 Hermes 运行设置" hidden></button>
 <aside id="hermesSettingsDrawer" class="hermesWorkbenchDrawer" aria-label="Hermes 运行设置" aria-hidden="true" hidden>
   <div class="hermesWorkbenchHeader">
@@ -3789,7 +3818,7 @@ body.dark .toolErrorNotice{
         <label>Provider <select id="hermesProviderSelect" class="modelSelectNative" aria-label="Hermes Provider" aria-hidden="true" tabindex="-1"></select></label>
         <label id="hermesModelField" hidden>基础模型 <select id="hermesModelSelect" class="modelSelectNative" aria-label="Hermes 基础模型" aria-hidden="true" tabindex="-1"></select></label>
         <div class="openClawCatalogLine"><span id="hermesCatalogStatus"></span><button id="hermesCatalogRefresh" type="button">刷新目录</button></div>
-        <div class="hermesCapabilitiesLine"><button id="hermesCapabilitiesToggle" type="button" aria-expanded="false" aria-controls="hermesCapabilitiesPanel">能力</button><button id="hermesWorkbenchToggle" type="button" aria-expanded="false" aria-controls="hermesWorkbenchDrawer">会话 / 项目</button><button id="hermesJobsToggle" type="button" aria-expanded="false" aria-controls="hermesJobsDrawer">定时任务</button><button id="hermesDiagnosticsToggle" type="button" aria-expanded="false" aria-controls="hermesDiagnosticsDrawer">诊断</button><button id="hermesSettingsToggle" type="button" aria-expanded="false" aria-controls="hermesSettingsDrawer">设置</button></div>
+        <div class="hermesCapabilitiesLine"><button id="hermesCapabilitiesToggle" type="button" aria-expanded="false" aria-controls="hermesCapabilitiesPanel">能力</button><button id="hermesWorkbenchToggle" type="button" aria-expanded="false" aria-controls="hermesWorkbenchDrawer">会话 / 项目</button><button id="hermesJobsToggle" type="button" aria-expanded="false" aria-controls="hermesJobsDrawer">定时任务</button><button id="hermesDiagnosticsToggle" type="button" aria-expanded="false" aria-controls="hermesDiagnosticsDrawer">诊断</button><button id="hermesUsageToggle" type="button" aria-expanded="false" aria-controls="hermesUsageDrawer">用量</button><button id="hermesSettingsToggle" type="button" aria-expanded="false" aria-controls="hermesSettingsDrawer">设置</button></div>
         <section id="hermesCapabilitiesPanel" class="hermesCapabilitiesPanel" aria-label="Hermes 能力" hidden>
           <div class="hermesCapabilitiesToolbar">
             <input id="hermesCapabilitiesSearch" type="search" autocomplete="off" placeholder="搜索 Skills / Toolsets" aria-label="搜索 Hermes 能力">
@@ -14527,6 +14556,24 @@ var hermesRuntimeHealthFacts = document.getElementById("hermesRuntimeHealthFacts
 var hermesRuntimeHealthNotes = document.getElementById("hermesRuntimeHealthNotes");
 var hermesRuntimeHealthState = { loading:false, data:null, error:null, instanceId:"", requestedAt:0 };
 var hermesDiagnosticsState = { open:false, loading:false, reloadPending:false, window:"24h", status:"", category:"", runs:[], detail:null, selectedId:"", error:null, detailError:null, syncError:null, dataSource:"D1 persisted Hermes runs", updatedAt:null, emptyReason:"", total:0, hasMore:false };
+var hermesUsageToggle = document.getElementById("hermesUsageToggle");
+var hermesUsageDrawer = document.getElementById("hermesUsageDrawer");
+var hermesUsageBackdrop = document.getElementById("hermesUsageBackdrop");
+var hermesUsageClose = document.getElementById("hermesUsageClose");
+var hermesUsageWindows = document.getElementById("hermesUsageWindows");
+var hermesUsageProvider = document.getElementById("hermesUsageProvider");
+var hermesUsageModel = document.getElementById("hermesUsageModel");
+var hermesUsageSession = document.getElementById("hermesUsageSession");
+var hermesUsageProject = document.getElementById("hermesUsageProject");
+var hermesUsageJob = document.getElementById("hermesUsageJob");
+var hermesUsageRefresh = document.getElementById("hermesUsageRefresh");
+var hermesUsageStatus = document.getElementById("hermesUsageStatus");
+var hermesUsageOverview = document.getElementById("hermesUsageOverview");
+var hermesUsageTrend = document.getElementById("hermesUsageTrend");
+var hermesUsageCoverage = document.getElementById("hermesUsageCoverage");
+var hermesUsageRuns = document.getElementById("hermesUsageRuns");
+var hermesUsageLoadMore = document.getElementById("hermesUsageLoadMore");
+var hermesUsageState = { open:false, loading:false, window:"24h", filters:{ provider:"", model:"", session:"", project:"", job:"" }, analytics:null, runs:[], total:0, hasMore:false, error:null };
 var hermesRunMount = document.getElementById("hermesRunMount");
 var hermesRunStatus = document.getElementById("hermesRunStatus");
 var hermesRunStatusText = document.getElementById("hermesRunStatusText");
@@ -15404,6 +15451,164 @@ async function loadHermesJobs(){
     renderHermesJobs();
     if(hermesJobsState.reloadPending){ hermesJobsState.reloadPending = false; loadHermesJobs(); }
   }
+}
+
+function setHermesUsageOpen(open){
+  hermesUsageState.open = Boolean(open);
+  if(hermesUsageDrawer){
+    hermesUsageDrawer.hidden = !hermesUsageState.open;
+    hermesUsageDrawer.setAttribute("aria-hidden", hermesUsageState.open ? "false" : "true");
+  }
+  if(hermesUsageBackdrop) hermesUsageBackdrop.hidden = !hermesUsageState.open;
+  hermesUsageToggle?.setAttribute("aria-expanded", hermesUsageState.open ? "true" : "false");
+  if(hermesUsageState.open) loadHermesUsage(true);
+}
+
+function hermesUsageNumber(value){
+  return Number.isSafeInteger(Number(value)) && Number(value) >= 0 ? Number(value).toLocaleString() : "N/A";
+}
+
+function hermesUsageBucketText(bucket, runCount){
+  if(!bucket || bucket.value === null || bucket.value === undefined) return "N/A";
+  const coverage = Number(runCount) > 0 && Number(bucket.knownRuns) < Number(runCount) ? " · 部分" : "";
+  return hermesUsageNumber(bucket.value) + coverage;
+}
+
+function hermesUsageCostText(micros, status, currency){
+  if(micros === null || micros === undefined) return status === "included" ? "Included / 已包含" : "N/A";
+  const amount = (Number(micros) / 1000000).toFixed(6);
+  return (status === "actual" ? "Actual " : "Estimated ") + amount + " " + (currency || "currency N/A");
+}
+
+function hermesUsageEstimatedSummary(costs){
+  if(costs?.estimatedMicros !== null && costs?.estimatedMicros !== undefined){
+    return hermesUsageCostText(costs.estimatedMicros, "estimated", costs.currency) + (costs.includedRuns ? " · " + costs.includedRuns + " Included" : "");
+  }
+  if(costs?.includedRuns && !costs?.unavailableRuns && !costs?.actualRuns) return "Included / 已包含";
+  return "N/A" + (costs?.includedRuns ? " · " + costs.includedRuns + " Included" : "");
+}
+
+function hermesUsageMetric(label, value){
+  const card = document.createElement("div");
+  card.className = "hermesUsageMetric";
+  const name = document.createElement("span");
+  name.textContent = label;
+  const strong = document.createElement("strong");
+  strong.textContent = value;
+  card.append(name, strong);
+  return card;
+}
+
+function renderHermesUsageFilters(facets){
+  const entries = [
+    ["provider", hermesUsageProvider, "全部实际 Provider"], ["model", hermesUsageModel, "全部实际模型"],
+    ["session", hermesUsageSession, "全部 Session"], ["project", hermesUsageProject, "全部项目"],
+    ["job", hermesUsageJob, "全部 Job"]
+  ];
+  entries.forEach(([name, select, emptyLabel]) => {
+    if(!select) return;
+    const selected = hermesUsageState.filters[name] || "";
+    select.innerHTML = "";
+    const empty = document.createElement("option");
+    empty.value = ""; empty.textContent = emptyLabel; select.appendChild(empty);
+    (facets?.[name] || []).forEach(facet => {
+      const option = document.createElement("option");
+      option.value = facet.value;
+      option.textContent = facet.value + " (" + facet.runCount + ")";
+      select.appendChild(option);
+    });
+    if(selected && !(facets?.[name] || []).some(facet => facet.value === selected)){
+      const option = document.createElement("option"); option.value = selected; option.textContent = selected + " (当前筛选)"; select.appendChild(option);
+    }
+    select.value = selected;
+  });
+}
+
+function renderHermesUsage(){
+  hermesUsageWindows?.querySelectorAll?.("[data-window]").forEach(button => button.setAttribute("aria-pressed", button.dataset.window === hermesUsageState.window ? "true" : "false"));
+  if(!hermesUsageStatus || !hermesUsageOverview || !hermesUsageTrend || !hermesUsageCoverage || !hermesUsageRuns) return;
+  if(hermesUsageState.loading) hermesUsageStatus.textContent = "用量汇总加载中…";
+  else if(hermesUsageState.error) hermesUsageStatus.textContent = "用量汇总不可用：" + hermesErrorText(hermesUsageState.error);
+  else hermesUsageStatus.textContent = "服务端汇总 · " + hermesUsageState.total + " 次运行 · 当前明细 " + hermesUsageState.runs.length + " 条；不是提供商账单。";
+  const analytics = hermesUsageState.analytics;
+  const summary = analytics?.summary;
+  hermesUsageOverview.innerHTML = "";
+  if(summary){
+    const runCount = summary.runCount || 0;
+    const totalKnown = summary.coverage?.totalKnownRuns || 0;
+    const coverage = runCount ? Math.round(totalKnown * 1000 / runCount) / 10 + "%" : "N/A";
+    const metrics = [
+      ["Input Token", hermesUsageBucketText(summary.tokens?.input, runCount)],
+      ["Output Token", hermesUsageBucketText(summary.tokens?.output, runCount)],
+      ["Cache Read", hermesUsageBucketText(summary.tokens?.cacheRead, runCount)],
+      ["Cache Write", hermesUsageBucketText(summary.tokens?.cacheWrite, runCount)],
+      ["确认总 Token", hermesUsageBucketText(summary.tokens?.total, runCount)],
+      ["实际费用", hermesUsageCostText(summary.costs?.actualMicros, "actual", summary.costs?.currency)],
+      ["估算费用", hermesUsageEstimatedSummary(summary.costs)],
+      ["运行次数", hermesUsageNumber(runCount)], ["Token 覆盖率", coverage]
+    ];
+    metrics.forEach(([label,value]) => hermesUsageOverview.appendChild(hermesUsageMetric(label,value)));
+  }
+  hermesUsageTrend.innerHTML = "";
+  const daily = analytics?.daily || [];
+  const max = Math.max(1, ...daily.map(day => Number(day.totalTokens) || 0));
+  daily.forEach(day => {
+    const bar = document.createElement("div");
+    bar.className = "hermesUsageTrendBar";
+    bar.style.height = Math.max(3, Math.round((Number(day.totalTokens) || 0) * 82 / max)) + "px";
+    bar.title = day.day + " · total " + hermesUsageNumber(day.totalTokens) + " · " + day.runCount + " runs";
+    hermesUsageTrend.appendChild(bar);
+  });
+  if(!daily.length){ const empty = document.createElement("span"); empty.className = "hermesWorkbenchCardMeta"; empty.textContent = "所选范围没有每日趋势数据"; hermesUsageTrend.appendChild(empty); }
+  const c = analytics?.coverage || {};
+  const sc = summary?.coverage || {};
+  hermesUsageCoverage.textContent = "采集开始：" + hermesDiagnosticsTime(c.collectionStart) + "；最早覆盖运行：" + hermesDiagnosticsTime(c.earliestOccurrence) + "；完整覆盖 " + (sc.completeRuns || 0) + "/" + (summary?.runCount || 0) + "，历史缺口 " + (sc.historicalGapRuns || 0) + "。" + (c.retention || "") + " " + (c.note || "");
+  renderHermesUsageFilters(analytics?.facets);
+  hermesUsageRuns.innerHTML = "";
+  hermesUsageState.runs.forEach(run => {
+    const card = document.createElement("details");
+    card.className = "hermesWorkbenchCard hermesUsageRun";
+    const heading = document.createElement("summary");
+    heading.textContent = hermesDiagnosticsTime(run.occurredAt) + " · " + (run.attribution?.actualProvider || "Provider N/A") + " / " + (run.attribution?.actualModel || "Model N/A") + " · " + (run.costStatus || "n_a");
+    const facts = document.createElement("div"); facts.className = "hermesUsageRunFacts";
+    const snapshot = run.priceSnapshot;
+    const snapshotText = snapshot ? [snapshot.source, snapshot.unit, snapshot.collectedAt ? hermesDiagnosticsTime(snapshot.collectedAt) : ""].filter(Boolean).join(" · ") : "N/A";
+    const costMicros = run.costStatus === "actual" ? run.actualCostMicros : run.estimatedCostMicros;
+    const values = [
+      ["Run", run.runId], ["Token", "in " + hermesUsageNumber(run.tokens?.input) + " / out " + hermesUsageNumber(run.tokens?.output) + " / total " + hermesUsageNumber(run.tokens?.total)],
+      ["Cache", "read " + hermesUsageNumber(run.tokens?.cacheRead) + " / write " + hermesUsageNumber(run.tokens?.cacheWrite)],
+      ["费用等级", hermesUsageCostText(costMicros, run.costStatus, run.currency) + " · " + (run.costStatus || "N/A")],
+      ["价格快照", snapshotText], ["note.code", run.costNoteCode || "N/A"],
+      ["Session / Project / Job", [run.scope?.sessionId, run.scope?.projectId, run.scope?.jobId].filter(Boolean).join(" / ") || "N/A"],
+      ["覆盖", run.coverageIncomplete ? "不完整：" + (run.coverageNote || "存在未采集用量") : "运行时声明完整"]
+    ];
+    values.forEach(([label,value]) => { const item = document.createElement("div"); item.className = "hermesUsageRunFact"; item.textContent = label + "：" + value; facts.appendChild(item); });
+    card.append(heading, facts); hermesUsageRuns.appendChild(card);
+  });
+  if(!hermesUsageState.runs.length && !hermesUsageState.loading){ const empty = document.createElement("div"); empty.className = "hermesWorkbenchCard"; empty.textContent = "所选范围和筛选条件下没有已采集的用量记录。Token 与费用均为 N/A，而不是 $0。"; hermesUsageRuns.appendChild(empty); }
+  if(hermesUsageLoadMore){ hermesUsageLoadMore.hidden = !hermesUsageState.hasMore; hermesUsageLoadMore.disabled = hermesUsageState.loading; }
+}
+
+async function loadHermesUsage(reset){
+  if(hermesUsageState.loading) return;
+  hermesUsageState.loading = true; hermesUsageState.error = null; renderHermesUsage();
+  const offset = reset === false ? hermesUsageState.runs.length : 0;
+  const params = new URLSearchParams({ window:hermesUsageState.window, limit:"25", offset:String(offset) });
+  Object.entries(hermesUsageState.filters).forEach(([name,value]) => { if(value) params.set(name,value); });
+  try{
+    const analyticsPromise = fetch("/api/hermes/usage/analytics?" + params.toString()).then(async res => ({ res, data:await res.json().catch(() => ({})) }));
+    const runsPromise = fetch("/api/hermes/usage/runs?" + params.toString()).then(async res => ({ res, data:await res.json().catch(() => ({})) }));
+    const [analyticsResult,runsResult] = await Promise.all([analyticsPromise,runsPromise]);
+    if(!analyticsResult.res.ok || !analyticsResult.data.ok) throw analyticsResult.data.error || { code:"hermes_usage_unavailable", message:"用量汇总不可用" };
+    if(!runsResult.res.ok || !runsResult.data.ok) throw runsResult.data.error || { code:"hermes_usage_runs_unavailable", message:"用量明细不可用" };
+    hermesUsageState.analytics = analyticsResult.data;
+    hermesUsageState.runs = offset ? hermesUsageState.runs.concat(runsResult.data.runs || []) : (runsResult.data.runs || []);
+    hermesUsageState.total = Number(runsResult.data.page?.total || 0);
+    hermesUsageState.hasMore = Boolean(runsResult.data.page?.hasMore);
+  }catch(err){
+    if(!offset) hermesUsageState.runs = [];
+    hermesUsageState.error = err?.code ? err : { code:"network", message:err?.message || "网络错误" };
+  }finally{ hermesUsageState.loading = false; renderHermesUsage(); }
 }
 
 function setHermesDiagnosticsOpen(open){
@@ -16613,7 +16818,7 @@ function initHermesUi(){
   hermesCapabilitiesCategory?.addEventListener("change", renderHermesCapabilities);
   hermesWorkbenchToggle?.addEventListener("click", () => {
     const opening = !hermesWorkbenchState.open;
-    if(opening){ setHermesJobsOpen(false); setHermesDiagnosticsOpen(false); setHermesSettingsOpen(false); }
+    if(opening){ setHermesJobsOpen(false); setHermesDiagnosticsOpen(false); setHermesUsageOpen(false); setHermesSettingsOpen(false); }
     setHermesWorkbenchOpen(opening);
   });
   hermesWorkbenchClose?.addEventListener("click", () => setHermesWorkbenchOpen(false));
@@ -16630,12 +16835,12 @@ function initHermesUi(){
   hermesWorkbenchProjectCreate?.addEventListener("click", createHermesWorkbenchProject);
   hermesJobsToggle?.addEventListener("click", () => {
       const opening = !hermesJobsState.open;
-      if(opening){ setHermesWorkbenchOpen(false); setHermesDiagnosticsOpen(false); setHermesSettingsOpen(false); }
+      if(opening){ setHermesWorkbenchOpen(false); setHermesDiagnosticsOpen(false); setHermesUsageOpen(false); setHermesSettingsOpen(false); }
       setHermesJobsOpen(opening);
     });
     hermesDiagnosticsToggle?.addEventListener("click", () => {
       const opening = !hermesDiagnosticsState.open;
-      if(opening){ setHermesWorkbenchOpen(false); setHermesJobsOpen(false); setHermesSettingsOpen(false); }
+      if(opening){ setHermesWorkbenchOpen(false); setHermesJobsOpen(false); setHermesUsageOpen(false); setHermesSettingsOpen(false); }
       setHermesDiagnosticsOpen(opening);
     });
     hermesDiagnosticsClose?.addEventListener("click", () => setHermesDiagnosticsOpen(false));
@@ -16658,9 +16863,28 @@ function initHermesUi(){
       hermesDiagnosticsState.window = button.dataset.window;
       loadHermesDiagnostics();
     });
+    hermesUsageToggle?.addEventListener("click", () => {
+      const opening = !hermesUsageState.open;
+      if(opening){ setHermesWorkbenchOpen(false); setHermesJobsOpen(false); setHermesDiagnosticsOpen(false); setHermesSettingsOpen(false); }
+      setHermesUsageOpen(opening);
+    });
+    hermesUsageClose?.addEventListener("click", () => setHermesUsageOpen(false));
+    hermesUsageBackdrop?.addEventListener("click", () => setHermesUsageOpen(false));
+    hermesUsageRefresh?.addEventListener("click", () => loadHermesUsage(true));
+    hermesUsageWindows?.addEventListener("click", event => {
+      const button = event.target?.closest?.("[data-window]");
+      if(!button) return;
+      hermesUsageState.window = button.dataset.window;
+      loadHermesUsage(true);
+    });
+    [hermesUsageProvider,hermesUsageModel,hermesUsageSession,hermesUsageProject,hermesUsageJob].forEach(select => select?.addEventListener("change", () => {
+      hermesUsageState.filters[select.dataset.filter] = select.value || "";
+      loadHermesUsage(true);
+    }));
+    hermesUsageLoadMore?.addEventListener("click", () => loadHermesUsage(false));
     hermesSettingsToggle?.addEventListener("click", () => {
       const opening = !hermesSettingsState.open;
-      if(opening){ setHermesWorkbenchOpen(false); setHermesJobsOpen(false); setHermesDiagnosticsOpen(false); }
+      if(opening){ setHermesWorkbenchOpen(false); setHermesJobsOpen(false); setHermesDiagnosticsOpen(false); setHermesUsageOpen(false); }
       setHermesSettingsOpen(opening);
     });
     hermesSettingsClose?.addEventListener("click", () => setHermesSettingsOpen(false));

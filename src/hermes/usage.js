@@ -15,6 +15,13 @@ import { isHermesTerminal } from "./status.js";
 const MAX_SAFE_TOKEN_COUNT = Number.MAX_SAFE_INTEGER;
 const COLLECTION_SOURCES = new Set(["get_run", "sse_terminal", "backfill"]);
 const WINDOWS = { "24h": 86400000, "7d": 604800000, "30d": 2592000000, "90d": 7776000000 };
+const USAGE_FILTERS = {
+  provider: "actual_provider",
+  model: "actual_model",
+  session: "upstream_session_id",
+  project: "project_id",
+  job: "hermes_job_id"
+};
 const BACKFILL_RETRY_MS = 15000;
 const backfillRetryAfter = new Map();
 
@@ -383,31 +390,186 @@ function pageNumber(url, name, fallback, max) {
   return value;
 }
 
+function usageWindow(url) {
+  const name = String(url.searchParams.get("window") || "30d");
+  if (!WINDOWS[name]) {
+    throw new HermesError("hermes_usage_window_invalid", "window must be 24h, 7d, 30d, or 90d", { httpStatus: 400 });
+  }
+  return { name, since: Date.now() - WINDOWS[name] };
+}
+
+function usageFilters(url) {
+  const filters = {};
+  for (const name of Object.keys(USAGE_FILTERS)) {
+    const raw = url.searchParams.get(name);
+    if (raw === null || raw === "") continue;
+    const value = cleanId(raw, 200);
+    if (!value || value !== raw.trim()) {
+      throw new HermesError("hermes_usage_filter_invalid", name + " filter is invalid", { httpStatus: 400 });
+    }
+    filters[name] = value;
+  }
+  return filters;
+}
+
+function usagePredicate(owner, since, filters) {
+  const clauses = ["owner_username = ?", "occurred_at >= ?"];
+  const bindings = [owner, since];
+  for (const [name, value] of Object.entries(filters)) {
+    clauses.push(USAGE_FILTERS[name] + " = ?");
+    bindings.push(value);
+  }
+  return { sql: clauses.join(" AND "), bindings };
+}
+
+function safeAggregate(value) {
+  if (value === null || value === undefined) return null;
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0 ? number : null;
+}
+
+function aggregateBucket(row, name) {
+  const known = Number(row?.[name + "_known"] || 0);
+  return { value: known ? safeAggregate(row?.[name + "_sum"]) : null, knownRuns: known };
+}
+
+function summaryRecord(row) {
+  const runCount = Number(row?.run_count || 0);
+  const currencyCount = Number(row?.currency_count || 0);
+  return {
+    runCount,
+    tokens: {
+      input: aggregateBucket(row, "input"),
+      output: aggregateBucket(row, "output"),
+      total: aggregateBucket(row, "total"),
+      cacheRead: aggregateBucket(row, "cache_read"),
+      cacheWrite: aggregateBucket(row, "cache_write")
+    },
+    costs: {
+      actualMicros: Number(row?.actual_count || 0) && currencyCount <= 1 ? safeAggregate(row?.actual_sum) : null,
+      actualRuns: Number(row?.actual_count || 0),
+      estimatedMicros: Number(row?.estimated_count || 0) && currencyCount <= 1 ? safeAggregate(row?.estimated_sum) : null,
+      estimatedRuns: Number(row?.estimated_count || 0),
+      includedRuns: Number(row?.included_count || 0),
+      unavailableRuns: Number(row?.unavailable_count || 0),
+      currencies: currencyCount,
+      currency: currencyCount === 1 ? (row?.currency_value || null) : null
+    },
+    coverage: {
+      collectedRuns: Number(row?.collected_count || 0),
+      partialRuns: Number(row?.partial_count || 0),
+      missingRuns: Number(row?.missing_count || 0),
+      completeRuns: Number(row?.coverage_complete_count || 0),
+      historicalGapRuns: Number(row?.historical_gap_count || 0),
+      totalKnownRuns: Number(row?.total_known || 0)
+    }
+  };
+}
+
+async function readCollectionCoverage(db, owner, since) {
+  const row = await db.prepare(
+    `SELECT MIN(collected_at) AS collection_start, MIN(occurred_at) AS earliest_occurrence,
+      MAX(collected_at) AS last_collected_at,
+      SUM(CASE WHEN occurred_at < ? THEN 1 ELSE 0 END) AS records_before_window
+     FROM hermes_run_usage WHERE owner_username = ?`
+  ).bind(since, owner).first();
+  return {
+    collectionStart: safeAggregate(row?.collection_start),
+    earliestOccurrence: safeAggregate(row?.earliest_occurrence),
+    lastCollectedAt: safeAggregate(row?.last_collected_at),
+    recordsBeforeWindow: Number(row?.records_before_window || 0),
+    retention: "Usage facts are retained separately from the 30-day diagnostics payload cleanup.",
+    historicalDataMayBeIncomplete: true,
+    note: "Collection began with schema 0029. Pre-collection and retained-away upstream history may be missing; auxiliary, title, compression, and subtask usage may be incomplete."
+  };
+}
+
+async function usageAnalytics(env, owner, url) {
+  const window = usageWindow(url);
+  const filters = usageFilters(url);
+  const predicate = usagePredicate(owner, window.since, filters);
+  const totalsSql = `SELECT COUNT(*) AS run_count,
+    SUM(input_tokens) AS input_sum, COUNT(input_tokens) AS input_known,
+    SUM(output_tokens) AS output_sum, COUNT(output_tokens) AS output_known,
+    SUM(total_tokens) AS total_sum, COUNT(total_tokens) AS total_known,
+    SUM(cache_read_tokens) AS cache_read_sum, COUNT(cache_read_tokens) AS cache_read_known,
+    SUM(cache_write_tokens) AS cache_write_sum, COUNT(cache_write_tokens) AS cache_write_known,
+    SUM(CASE WHEN cost_status = 'actual' THEN actual_cost_micros END) AS actual_sum,
+    SUM(CASE WHEN cost_status = 'actual' THEN 1 ELSE 0 END) AS actual_count,
+    SUM(CASE WHEN cost_status = 'estimated' THEN estimated_cost_micros END) AS estimated_sum,
+    SUM(CASE WHEN cost_status = 'estimated' THEN 1 ELSE 0 END) AS estimated_count,
+    SUM(CASE WHEN cost_status = 'included' THEN 1 ELSE 0 END) AS included_count,
+    SUM(CASE WHEN cost_status NOT IN ('actual','estimated','included') OR cost_status IS NULL THEN 1 ELSE 0 END) AS unavailable_count,
+    COUNT(DISTINCT CASE WHEN cost_status IN ('actual','estimated') THEN currency END) AS currency_count,
+    MIN(CASE WHEN cost_status IN ('actual','estimated') THEN currency END) AS currency_value,
+    SUM(CASE WHEN collection_status = 'collected' THEN 1 ELSE 0 END) AS collected_count,
+    SUM(CASE WHEN collection_status = 'partial' THEN 1 ELSE 0 END) AS partial_count,
+    SUM(CASE WHEN collection_status = 'missing' THEN 1 ELSE 0 END) AS missing_count,
+    SUM(CASE WHEN coverage_incomplete = 0 THEN 1 ELSE 0 END) AS coverage_complete_count,
+    SUM(CASE WHEN historical_gap = 1 THEN 1 ELSE 0 END) AS historical_gap_count
+    FROM hermes_run_usage WHERE ${predicate.sql}`;
+  const trendSql = `SELECT strftime('%Y-%m-%d', occurred_at / 1000, 'unixepoch') AS day,
+    COUNT(*) AS run_count, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
+    SUM(total_tokens) AS total_tokens, SUM(cache_read_tokens) AS cache_read_tokens,
+    SUM(cache_write_tokens) AS cache_write_tokens,
+    SUM(CASE WHEN cost_status = 'actual' THEN actual_cost_micros END) AS actual_cost_micros,
+    SUM(CASE WHEN cost_status = 'estimated' THEN estimated_cost_micros END) AS estimated_cost_micros
+    FROM hermes_run_usage WHERE ${predicate.sql} GROUP BY day ORDER BY day ASC`;
+  const facetQueries = Object.entries(USAGE_FILTERS).map(([name, column]) => env.DB.prepare(
+    `SELECT ${column} AS value, COUNT(*) AS run_count FROM hermes_run_usage
+     WHERE owner_username = ? AND occurred_at >= ? AND ${column} IS NOT NULL
+     GROUP BY ${column} ORDER BY run_count DESC, value ASC LIMIT 100`
+  ).bind(owner, window.since).all().then(result => [name, (result.results || []).map(row => ({
+    value: row.value, runCount: Number(row.run_count || 0)
+  }))]));
+  const [totals, trend, coverage, facetEntries] = await Promise.all([
+    env.DB.prepare(totalsSql).bind(...predicate.bindings).first(),
+    env.DB.prepare(trendSql).bind(...predicate.bindings).all(),
+    readCollectionCoverage(env.DB, owner, window.since),
+    Promise.all(facetQueries)
+  ]);
+  return {
+    ok: true,
+    window: window.name,
+    filters,
+    summary: summaryRecord(totals),
+    daily: (trend.results || []).map(row => ({
+      day: row.day, runCount: Number(row.run_count || 0),
+      inputTokens: safeAggregate(row.input_tokens), outputTokens: safeAggregate(row.output_tokens),
+      totalTokens: safeAggregate(row.total_tokens), cacheReadTokens: safeAggregate(row.cache_read_tokens),
+      cacheWriteTokens: safeAggregate(row.cache_write_tokens), actualCostMicros: safeAggregate(row.actual_cost_micros),
+      estimatedCostMicros: safeAggregate(row.estimated_cost_micros)
+    })),
+    facets: Object.fromEntries(facetEntries),
+    coverage
+  };
+}
+
 export async function handleHermesUsage(request, env, url, { owner, fetchImpl } = {}) {
   if (request.method !== "GET") return null;
+  if (url.pathname === "/api/hermes/usage/analytics") {
+    return usageAnalytics(env, owner, url);
+  }
   if (url.pathname === "/api/hermes/usage/runs") {
-    const windowName = String(url.searchParams.get("window") || "30d");
-    if (!WINDOWS[windowName]) {
-      throw new HermesError("hermes_usage_window_invalid", "window must be 24h, 7d, 30d, or 90d", { httpStatus: 400 });
-    }
+    const window = usageWindow(url);
+    const filters = usageFilters(url);
     const limit = pageNumber(url, "limit", 50, 100);
     const offset = pageNumber(url, "offset", 0, 10000);
-    const since = Date.now() - WINDOWS[windowName];
+    const predicate = usagePredicate(owner, window.since, filters);
     const result = await env.DB.prepare(
-      "SELECT * FROM hermes_run_usage WHERE owner_username = ? AND occurred_at >= ? ORDER BY occurred_at DESC, run_id DESC LIMIT ? OFFSET ?"
-    ).bind(owner, since, limit, offset).all();
-    const start = await env.DB.prepare(
-      "SELECT MIN(collected_at) AS collection_start FROM hermes_run_usage WHERE owner_username = ?"
-    ).bind(owner).first();
+      `SELECT * FROM hermes_run_usage WHERE ${predicate.sql} ORDER BY occurred_at DESC, run_id DESC LIMIT ? OFFSET ?`
+    ).bind(...predicate.bindings, limit, offset).all();
+    const count = await env.DB.prepare(
+      `SELECT COUNT(*) AS total FROM hermes_run_usage WHERE ${predicate.sql}`
+    ).bind(...predicate.bindings).first();
+    const total = Number(count?.total || 0);
+    const coverage = await readCollectionCoverage(env.DB, owner, window.since);
     return {
       ok: true,
       runs: (result.results || []).map(usageRecord),
-      page: { limit, offset, window: windowName },
-      coverage: {
-        collectionStart: start?.collection_start ?? null,
-        historicalDataMayBeIncomplete: true,
-        note: "Usage is collected from authoritative Hermes run snapshots; pre-0029 and retained-away usage may be missing."
-      }
+      page: { limit, offset, total, hasMore: offset + (result.results || []).length < total, window: window.name },
+      filters,
+      coverage
     };
   }
   const match = url.pathname.match(/^\/api\/hermes\/usage\/runs\/(hrun_[a-f0-9]{32})$/);

@@ -200,6 +200,29 @@ describe("Hermes frontend", () => {
     expect(html.indexOf('id="hermesDiagnosticsToggle"')).toBeGreaterThan(html.indexOf('id="hermesJobsToggle"'));
   });
 
+  it("renders the server-aggregated usage drawer with honest costs, filters, and responsive markers", () => {
+    const html = htmlPage();
+    expect(html).toContain('id="hermesUsageToggle"');
+    expect(html).toContain('id="hermesUsageDrawer" class="hermesWorkbenchDrawer hermesUsageDrawer"');
+    expect(html).toContain("Hermes Usage Analytics · 服务端汇总 · 不是账单");
+    for(const window of ["24h", "7d", "30d", "90d"]) expect(html).toContain('data-window="' + window + '"');
+    for(const filter of ["provider", "model", "session", "project", "job"]) expect(html).toContain('data-filter="' + filter + '"');
+    expect(html).toContain("@media(max-width:800px){.hermesUsageOverview");
+    expect(html).toContain(".hermesUsageRunFacts{grid-template-columns:1fr}");
+    expect(html).toContain("不下载全部事件历史");
+    expect(html.indexOf('id="hermesUsageToggle"')).toBeGreaterThan(html.indexOf('id="hermesDiagnosticsToggle"'));
+
+    const render = lastDeclaration(pageScript(), "renderHermesUsage");
+    for(const label of ["确认总 Token", "实际费用", "估算费用", "Token 覆盖率", "note.code", "价格快照"]) expect(render).toContain(label);
+    expect(render).toContain("N/A，而不是 $0");
+    expect(render).toContain("historicalGapRuns");
+    const load = lastDeclaration(pageScript(), "loadHermesUsage");
+    expect(load).toContain('/api/hermes/usage/analytics?');
+    expect(load).toContain('/api/hermes/usage/runs?');
+    expect(load).not.toContain('method:"POST"');
+    expect(load).not.toContain("download");
+  });
+
   it("offers run diagnostic summary downloads only from the loaded detail renderer", () => {
     const render = lastDeclaration(pageScript(), "renderHermesDiagnosticsDetail");
     const download = lastDeclaration(pageScript(), "exportHermesDiagnostics");
@@ -269,7 +292,8 @@ describe("Hermes frontend", () => {
     expect(jump).toContain("persistActiveWorkspace");
     expect(jump).toContain("loadConversations");
     const script = pageScript();
-    expect(script).toContain('if(opening){ setHermesWorkbenchOpen(false); setHermesJobsOpen(false); setHermesSettingsOpen(false); }\n      setHermesDiagnosticsOpen(opening);');
+    expect(script).toContain('if(opening){ setHermesWorkbenchOpen(false); setHermesJobsOpen(false); setHermesUsageOpen(false); setHermesSettingsOpen(false); }\n      setHermesDiagnosticsOpen(opening);');
+    expect(script).toContain('if(opening){ setHermesWorkbenchOpen(false); setHermesJobsOpen(false); setHermesDiagnosticsOpen(false); setHermesSettingsOpen(false); }\n      setHermesUsageOpen(opening);');
     const load = lastDeclaration(script, "loadHermesDiagnosticsDetail");
     expect(load).toContain('/api/hermes/diagnostics/runs/');
     expect(load).toContain("detailError");
@@ -284,9 +308,11 @@ describe("Hermes frontend", () => {
     expect(html).toContain('id="hermesWorkbenchDrawer" class="hermesWorkbenchDrawer" aria-label="Hermes 会话与项目" aria-hidden="true" hidden>');
     expect(html).toContain('id="hermesJobsDrawer" class="hermesWorkbenchDrawer" aria-label="Hermes 定时任务" aria-hidden="true" hidden>');
     expect(html).toContain('id="hermesSettingsDrawer" class="hermesWorkbenchDrawer" aria-label="Hermes 运行设置" aria-hidden="true" hidden>');
+    expect(html).toContain('id="hermesUsageDrawer" class="hermesWorkbenchDrawer hermesUsageDrawer" aria-label="Hermes 用量分析" aria-hidden="true" hidden>');
     expect(html).toContain('id="hermesWorkbenchBackdrop" class="hermesWorkbenchBackdrop" type="button" aria-label="关闭 Hermes 会话与项目" hidden>');
     expect(html).toContain('id="hermesJobsBackdrop" class="hermesWorkbenchBackdrop" type="button" aria-label="关闭 Hermes 定时任务" hidden>');
     expect(html).toContain('id="hermesSettingsBackdrop" class="hermesWorkbenchBackdrop" type="button" aria-label="关闭 Hermes 运行设置" hidden>');
+    expect(html).toContain('id="hermesUsageBackdrop" class="hermesWorkbenchBackdrop" type="button" aria-label="关闭 Hermes 用量分析" hidden>');
     expect(html).toContain('id="hermesJobsEditor" class="hermesJobsEditor" hidden>');
   });
 

@@ -236,7 +236,10 @@ describe("Hermes B2-1 collection and API", () => {
     ]));
     const indexes = (await env.DB.prepare("PRAGMA index_list(hermes_run_usage)").all()).results.map(row => row.name);
     expect(indexes).toEqual(expect.arrayContaining([
-      "idx_hermes_run_usage_owner_time", "idx_hermes_run_usage_owner_status_time"
+      "idx_hermes_run_usage_owner_time", "idx_hermes_run_usage_owner_status_time",
+      "idx_hermes_usage_owner_provider_time", "idx_hermes_usage_owner_model_time",
+      "idx_hermes_usage_owner_session_time", "idx_hermes_usage_owner_project_time",
+      "idx_hermes_usage_owner_job_time"
     ]));
   });
 
@@ -443,6 +446,55 @@ describe("Hermes B2-1 collection and API", () => {
     expect(list.json.runs.map(run => run.runId)).toEqual([alice.id]);
     expect(list.json.coverage.historicalDataMayBeIncomplete).toBe(true);
     expect((await call("/api/hermes/usage/runs/" + bob.id, { user: "alice" })).status).toBe(404);
+  });
+
+  it("aggregates owner-scoped totals and daily trends that reconcile with filtered details", async () => {
+    const aliceA = await insertRun({ owner: "alice", status: "completed", completedAt: Date.now() - 2000 });
+    const aliceB = await insertRun({ owner: "alice", status: "completed", completedAt: Date.now() - 1000 });
+    const bob = await insertRun({ owner: "bob", status: "completed", completedAt: Date.now() });
+    const samples = [
+      [aliceA, "metered", "model-a", 10, 2, 12, "session-a", "job-a"],
+      [aliceB, "metered", "model-b", 20, 3, 23, "session-b", null],
+      [bob, "metered", "model-a", 999, 1, 1000, "session-bob", "job-bob"]
+    ];
+    for (const [local, provider, model, input, output, total, session, job] of samples) {
+      const row = await env.DB.prepare("SELECT * FROM hermes_runs WHERE id = ?").bind(local.id).first();
+      await persistHermesRunUsage(testEnv(), row, {
+        status: "completed", session_id: session, job_id: job,
+        runtime: { provider, model }, usage: { input_tokens: input, output_tokens: output, total_tokens: total }
+      });
+    }
+    await env.DB.prepare(
+      `UPDATE hermes_run_usage SET cost_status = 'estimated', estimated_cost_micros = 1200,
+       currency = 'USD', cost_note_code = 'catalog_estimate' WHERE run_id = ?`
+    ).bind(aliceA.id).run();
+    await env.DB.prepare(
+      `UPDATE hermes_run_usage SET cost_status = 'included', estimated_cost_micros = NULL,
+       currency = NULL, cost_note_code = 'subscription_included' WHERE run_id = ?`
+    ).bind(aliceB.id).run();
+
+    const analytics = await call("/api/hermes/usage/analytics?window=24h&provider=metered", { user: "alice" });
+    expect(analytics.status).toBe(200);
+    expect(analytics.json.summary).toMatchObject({
+      runCount: 2,
+      tokens: { input: { value: 30, knownRuns: 2 }, output: { value: 5, knownRuns: 2 }, total: { value: 35, knownRuns: 2 } },
+      costs: { estimatedMicros: 1200, estimatedRuns: 1, includedRuns: 1 },
+      coverage: { totalKnownRuns: 2 }
+    });
+    expect(analytics.json.daily.reduce((sum, day) => sum + day.totalTokens, 0)).toBe(35);
+    expect(analytics.json.facets.model.map(item => item.value)).toEqual(expect.arrayContaining(["model-a", "model-b"]));
+    expect(analytics.json.coverage.note).toContain("Pre-collection");
+
+    const details = await call("/api/hermes/usage/runs?window=24h&provider=metered&model=model-a&limit=1&offset=0", { user: "alice" });
+    expect(details.json.page).toMatchObject({ total: 1, hasMore: false });
+    expect(details.json.runs.map(run => run.runId)).toEqual([aliceA.id]);
+    expect(details.json.runs[0]).toMatchObject({ costStatus: "estimated", costNoteCode: "catalog_estimate" });
+  });
+
+  it("rejects unbounded or malformed analytics inputs", async () => {
+    expect((await call("/api/hermes/usage/analytics?window=365d")).status).toBe(400);
+    expect((await call("/api/hermes/usage/runs?provider=%20bad%20value")).status).toBe(400);
+    expect((await call("/api/hermes/usage/runs?limit=101")).status).toBe(400);
   });
 
   it("keeps terminalization successful when the usage write fails", async () => {

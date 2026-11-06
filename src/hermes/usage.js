@@ -329,4 +329,3 @@ export async function handleHermesUsage(request, env, url, { owner, fetchImpl } 
 }
 
 export { MAX_SAFE_TOKEN_COUNT, usageRecord };
-

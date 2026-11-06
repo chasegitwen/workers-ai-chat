@@ -47,4 +47,3 @@ ON hermes_run_usage(owner_username, occurred_at DESC, run_id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_hermes_run_usage_owner_status_time
 ON hermes_run_usage(owner_username, collection_status, occurred_at DESC);
-

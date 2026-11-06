@@ -100,7 +100,6 @@ describe("Hermes B2-1 usage normalization", () => {
     expect(normalizeHermesAttribution({ provider: "openai-codex" }, {} ).fallbackUsed).toBeNull();
   });
 });
-
 describe("Hermes B2-1 collection and API", () => {
   it("applies the additive usage schema and owner/time indexes", async () => {
     const columns = (await env.DB.prepare("PRAGMA table_info(hermes_run_usage)").all()).results.map(row => row.name);

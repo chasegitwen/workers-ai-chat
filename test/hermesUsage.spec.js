@@ -24,7 +24,6 @@ beforeEach(async () => {
   vi.stubGlobal("fetch", mock.fetch);
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
-
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -217,4 +216,3 @@ describe("Hermes B2-1 collection and API", () => {
     expect(await env.DB.prepare("SELECT total_tokens FROM hermes_run_usage WHERE run_id = ?").bind(local.id).first()).toEqual({ total_tokens: 4 });
   });
 });
-

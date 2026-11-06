@@ -223,6 +223,63 @@ describe("Hermes frontend", () => {
     expect(load).not.toContain("download");
   });
 
+  it("queues a fresh usage load when filters change during an in-flight request", async () => {
+    const script = pageScript();
+    const requests = [];
+    const pending = [];
+    const fetch = url => {
+      requests.push(url);
+      return new Promise(resolve => pending.push(resolve));
+    };
+    const source = [
+      'let hermesUsageState = { loading:false, reloadPending:false, window:"24h", filters:{ provider:"" }, analytics:null, runs:[], total:0, hasMore:false, error:null };',
+      'function renderHermesUsage(){}',
+      lastDeclaration(script, "loadHermesUsage"),
+      'return { loadHermesUsage, state:() => hermesUsageState, setFilter(value){ hermesUsageState.window = "90d"; hermesUsageState.filters.provider = value; } };'
+    ].join("\n");
+    const api = new Function("fetch", source)(fetch);
+    const response = data => ({ ok:true, json:async () => data });
+
+    const first = api.loadHermesUsage(true);
+    api.setFilter("anthropic");
+    await api.loadHermesUsage(true);
+    expect(api.state().reloadPending).toBe(true);
+    pending.shift()(response({ ok:true, summary:{ runCount:1 } }));
+    pending.shift()(response({ ok:true, runs:[], page:{ total:1, hasMore:false } }));
+    await first;
+
+    expect(requests).toHaveLength(4);
+    expect(requests.slice(2)).toEqual([
+      expect.stringContaining("window=90d"),
+      expect.stringContaining("window=90d")
+    ]);
+    expect(requests.slice(2)).toEqual([
+      expect.stringContaining("provider=anthropic"),
+      expect.stringContaining("provider=anthropic")
+    ]);
+    pending.shift()(response({ ok:true, summary:{ runCount:2 } }));
+    pending.shift()(response({ ok:true, runs:[], page:{ total:2, hasMore:false } }));
+    for(let turn = 0; turn < 8 && api.state().loading; turn += 1) await Promise.resolve();
+    expect(api.state().loading).toBe(false);
+    expect(api.state().total).toBe(2);
+  });
+
+  it("marks actual and estimated cost totals as partial and surfaces unavailable runs", () => {
+    const script = pageScript();
+    const source = [
+      lastDeclaration(script, "hermesUsageCostText"),
+      lastDeclaration(script, "hermesUsageCostCoverageText"),
+      lastDeclaration(script, "hermesUsageActualSummary"),
+      lastDeclaration(script, "hermesUsageEstimatedSummary"),
+      "return { hermesUsageActualSummary, hermesUsageEstimatedSummary };"
+    ].join("\n");
+    const api = new Function(source)();
+    const costs = { actualMicros:1000000, estimatedMicros:2500000, currency:"USD", actualRuns:1, estimatedRuns:2, includedRuns:1, unavailableRuns:3 };
+
+    expect(api.hermesUsageActualSummary(costs)).toBe("Actual 1.000000 USD · 部分（1/7 次 Actual，3 次 N/A）");
+    expect(api.hermesUsageEstimatedSummary(costs)).toBe("Estimated 2.500000 USD · 部分（2/7 次 Estimated，3 次 N/A） · 1 Included");
+  });
+
   it("offers run diagnostic summary downloads only from the loaded detail renderer", () => {
     const render = lastDeclaration(pageScript(), "renderHermesDiagnosticsDetail");
     const download = lastDeclaration(pageScript(), "exportHermesDiagnostics");

@@ -14573,7 +14573,7 @@ var hermesUsageTrend = document.getElementById("hermesUsageTrend");
 var hermesUsageCoverage = document.getElementById("hermesUsageCoverage");
 var hermesUsageRuns = document.getElementById("hermesUsageRuns");
 var hermesUsageLoadMore = document.getElementById("hermesUsageLoadMore");
-var hermesUsageState = { open:false, loading:false, window:"24h", filters:{ provider:"", model:"", session:"", project:"", job:"" }, analytics:null, runs:[], total:0, hasMore:false, error:null };
+var hermesUsageState = { open:false, loading:false, reloadPending:false, window:"24h", filters:{ provider:"", model:"", session:"", project:"", job:"" }, analytics:null, runs:[], total:0, hasMore:false, error:null };
 var hermesRunMount = document.getElementById("hermesRunMount");
 var hermesRunStatus = document.getElementById("hermesRunStatus");
 var hermesRunStatusText = document.getElementById("hermesRunStatusText");
@@ -15480,12 +15480,28 @@ function hermesUsageCostText(micros, status, currency){
   return (status === "actual" ? "Actual " : "Estimated ") + amount + " " + (currency || "currency N/A");
 }
 
+function hermesUsageCostCoverageText(costs, status){
+  const actualRuns = Number(costs?.actualRuns || 0);
+  const estimatedRuns = Number(costs?.estimatedRuns || 0);
+  const includedRuns = Number(costs?.includedRuns || 0);
+  const unavailableRuns = Number(costs?.unavailableRuns || 0);
+  const runCount = actualRuns + estimatedRuns + includedRuns + unavailableRuns;
+  const coveredRuns = status === "actual" ? actualRuns : estimatedRuns;
+  if(!runCount || coveredRuns >= runCount) return "";
+  const unavailable = unavailableRuns ? "，" + unavailableRuns + " 次 N/A" : "";
+  return " · 部分（" + coveredRuns + "/" + runCount + " 次 " + (status === "actual" ? "Actual" : "Estimated") + unavailable + "）";
+}
+
+function hermesUsageActualSummary(costs){
+  return hermesUsageCostText(costs?.actualMicros, "actual", costs?.currency) + hermesUsageCostCoverageText(costs, "actual");
+}
+
 function hermesUsageEstimatedSummary(costs){
   if(costs?.estimatedMicros !== null && costs?.estimatedMicros !== undefined){
-    return hermesUsageCostText(costs.estimatedMicros, "estimated", costs.currency) + (costs.includedRuns ? " · " + costs.includedRuns + " Included" : "");
+    return hermesUsageCostText(costs.estimatedMicros, "estimated", costs.currency) + hermesUsageCostCoverageText(costs, "estimated") + (costs.includedRuns ? " · " + costs.includedRuns + " Included" : "");
   }
   if(costs?.includedRuns && !costs?.unavailableRuns && !costs?.actualRuns) return "Included / 已包含";
-  return "N/A" + (costs?.includedRuns ? " · " + costs.includedRuns + " Included" : "");
+  return "N/A" + hermesUsageCostCoverageText(costs, "estimated") + (costs?.includedRuns ? " · " + costs.includedRuns + " Included" : "");
 }
 
 function hermesUsageMetric(label, value){
@@ -15543,7 +15559,7 @@ function renderHermesUsage(){
       ["Cache Read", hermesUsageBucketText(summary.tokens?.cacheRead, runCount)],
       ["Cache Write", hermesUsageBucketText(summary.tokens?.cacheWrite, runCount)],
       ["确认总 Token", hermesUsageBucketText(summary.tokens?.total, runCount)],
-      ["实际费用", hermesUsageCostText(summary.costs?.actualMicros, "actual", summary.costs?.currency)],
+      ["实际费用", hermesUsageActualSummary(summary.costs)],
       ["估算费用", hermesUsageEstimatedSummary(summary.costs)],
       ["运行次数", hermesUsageNumber(runCount)], ["Token 覆盖率", coverage]
     ];
@@ -15590,7 +15606,7 @@ function renderHermesUsage(){
 }
 
 async function loadHermesUsage(reset){
-  if(hermesUsageState.loading) return;
+  if(hermesUsageState.loading){ hermesUsageState.reloadPending = true; return; }
   hermesUsageState.loading = true; hermesUsageState.error = null; renderHermesUsage();
   const offset = reset === false ? hermesUsageState.runs.length : 0;
   const params = new URLSearchParams({ window:hermesUsageState.window, limit:"25", offset:String(offset) });
@@ -15608,7 +15624,11 @@ async function loadHermesUsage(reset){
   }catch(err){
     if(!offset) hermesUsageState.runs = [];
     hermesUsageState.error = err?.code ? err : { code:"network", message:err?.message || "网络错误" };
-  }finally{ hermesUsageState.loading = false; renderHermesUsage(); }
+  }finally{
+    hermesUsageState.loading = false;
+    renderHermesUsage();
+    if(hermesUsageState.reloadPending){ hermesUsageState.reloadPending = false; loadHermesUsage(true); }
+  }
 }
 
 function setHermesDiagnosticsOpen(open){

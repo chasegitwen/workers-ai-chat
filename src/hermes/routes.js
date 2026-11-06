@@ -44,6 +44,7 @@ import { sanitizeHermesTimelineEvent } from "./timeline.js";
 import { handleHermesWorkbench } from "./workbench.js";
 import { handleHermesJobs } from "./jobs.js";
 import { handleHermesDiagnostics } from "./diagnostics.js";
+import { handleHermesUsage } from "./usage.js";
 
 const RUN_ROUTE = /^\/api\/hermes\/runs\/(hrun_[a-f0-9]{32})(?:\/(events|cancel|approval|clarify|reconcile|resolve-unknown))?$/;
 const MAX_DELTA_CHARS = 8000;
@@ -298,7 +299,9 @@ async function handleEvents(request, env, row, url, options) {
       await recordHermesEventSeq(env, row.id, maxSeq);
       let snapshot = null;
       if (sawTerminal) {
-        const synced = await syncHermesRun(env, await readRunById(env.DB, row.id), { fetchImpl: options.fetchImpl });
+        const synced = await syncHermesRun(env, await readRunById(env.DB, row.id), {
+          fetchImpl: options.fetchImpl, usageSource: "sse_terminal"
+        });
         snapshot = synced.run;
       }
       await write(formatSseFrame(snapshot
@@ -341,6 +344,11 @@ export async function handleHermes(request, env, url, ctx, options = {}) {
     if (url.pathname === "/api/hermes/run-settings" && request.method === "GET") {
       return await handleRunSettings(env, url, routeOptions);
     }
+
+    const usageResponse = await handleHermesUsage(request, env, url, {
+      owner, fetchImpl: options.fetchImpl
+    });
+    if (usageResponse) return jsonResponse(usageResponse);
 
     const diagnosticsResponse = await handleHermesDiagnostics(request, env, url, {
       owner, fetchImpl: options.fetchImpl, ctx: routeOptions.ctx

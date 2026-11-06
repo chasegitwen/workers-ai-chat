@@ -183,6 +183,8 @@ export async function persistHermesDiagnosticSummary(env, runId) {
 
 export async function pruneHermesDiagnosticPayloads(env, { now = Date.now(), limit = HERMES_RETENTION_BATCH_MAX } = {}) {
   if (!env?.DB) return 0;
+  // Usage analytics live in hermes_run_usage and are intentionally outside this
+  // retention operation. Never join, cascade, or delete usage rows here.
   const batch = Math.max(1, Math.min(HERMES_RETENTION_BATCH_MAX, Number(limit) || HERMES_RETENTION_BATCH_MAX));
   try {
     const result = await env.DB.prepare(

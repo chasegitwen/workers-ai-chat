@@ -39,7 +39,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  for (const table of ["hermes_runs", "hermes_conversation_bindings", "hermes_catalog_cache", "messages", "conversations"]) {
+  for (const table of ["hermes_run_usage", "hermes_runs", "hermes_conversation_bindings", "hermes_catalog_cache", "messages", "conversations"]) {
     await env.DB.prepare("DELETE FROM " + table).run();
   }
   await env.DB.prepare(

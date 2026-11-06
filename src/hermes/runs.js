@@ -53,6 +53,11 @@ import {
   persistHermesDiagnosticSummary,
   serializeCappedTimeline
 } from "./persistence.js";
+import {
+  normalizeHermesAttribution,
+  normalizeHermesUsage,
+  persistHermesRunUsage
+} from "./usage.js";
 
 const CLIENT_REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
 const ACTIVE_SQL = sqlStatusList(HERMES_ACTIVE_STATUSES);
@@ -99,11 +104,14 @@ function safeModelId(value) {
 }
 
 function whitelistUsage(usage) {
-  if (!usage || typeof usage !== "object") return null;
+  const normalized = normalizeHermesUsage(usage);
   const out = {};
-  ["input_tokens", "output_tokens", "total_tokens", "cache_read_tokens", "cache_write_tokens"].forEach(key => {
-    if (Number.isFinite(usage[key])) out[key] = Math.max(0, Math.floor(usage[key]));
-  });
+  const fields = [
+    ["input_tokens", normalized.input], ["output_tokens", normalized.output],
+    ["total_tokens", normalized.total], ["cache_read_tokens", normalized.cacheRead],
+    ["cache_write_tokens", normalized.cacheWrite], ["reasoning_tokens", normalized.reasoning]
+  ];
+  fields.forEach(([key, value]) => { if (value !== null) out[key] = value; });
   return Object.keys(out).length ? out : null;
 }
 
@@ -561,7 +569,7 @@ async function postRun(env, row, { fetchImpl, fromStatuses, reconcile = false })
 // ---------------------------------------------------------------------------------------
 // Status sync and finalization
 
-async function finalizeCompleted(env, row, snapshot) {
+async function finalizeCompleted(env, row, snapshot, { usageSource = "get_run" } = {}) {
   const db = env.DB;
   const runtime = whitelistRuntime(snapshot.runtime);
   const usage = whitelistUsage(snapshot.usage);
@@ -600,20 +608,21 @@ async function finalizeCompleted(env, row, snapshot) {
     safeCode(snapshot.status) || "completed",
     output ? null : "empty_output",
     output ? messageId : null,
-    runtime?.provider || null,
-    runtime?.model || null,
-    runtime?.routeSource || null,
+    runtime?.provider || row.actual_provider || null,
+    runtime?.model || row.actual_model || null,
+    runtime?.routeSource || row.route_source || null,
     usage ? JSON.stringify(usage) : null,
     timestamp,
     timestamp,
     row.id
   ));
   await db.batch(statements);
+  await persistHermesRunUsage(env, { ...row, status: "completed" }, snapshot, { source: usageSource });
   await persistHermesDiagnosticSummary(env, row.id);
   log("completed", { run_id: row.id, has_output: Boolean(output), actual_model: runtime?.model || "" });
 }
 
-async function applySnapshot(env, row, snapshot) {
+async function applySnapshot(env, row, snapshot, { usageSource = "get_run" } = {}) {
   const db = env.DB;
   const snapshotTimeline = timelineEventsFromSnapshot(snapshot);
   if (snapshotTimeline.length) {
@@ -628,6 +637,9 @@ async function applySnapshot(env, row, snapshot) {
   const admissionId = cleanText(snapshot?.admission_id, 160) || null;
   const generation = Number.isInteger(snapshot?.execution_generation) ? snapshot.execution_generation : null;
   const runtime = whitelistRuntime(snapshot?.runtime);
+  const attribution = normalizeHermesAttribution(snapshot?.runtime, {
+    provider: row.requested_provider, model: row.requested_model
+  });
   const snapshotApproval = mapped === "waiting_for_approval"
     ? approvalFromSnapshot(snapshot, generation ?? row.execution_generation)
     : null;
@@ -652,6 +664,9 @@ async function applySnapshot(env, row, snapshot) {
     upstream_status: upstreamStatus || null,
     admission_id: admissionId || row.admission_id || null,
     execution_generation: generation ?? row.execution_generation ?? null,
+    actual_provider: attribution.actualProvider || row.actual_provider || null,
+    actual_model: attribution.actualModel || row.actual_model || null,
+    route_source: attribution.routeSource || row.route_source || null,
     approval_request_id: snapshotApproval?.requestId || null,
     approval_generation: snapshotApproval?.executionGeneration ?? null,
     approval_json: snapshotApproval ? JSON.stringify(snapshotApproval) : null,
@@ -668,7 +683,7 @@ async function applySnapshot(env, row, snapshot) {
     return;
   }
   if (mapped === "completed") {
-    await finalizeCompleted(env, row, snapshot);
+    await finalizeCompleted(env, row, snapshot, { usageSource });
     return;
   }
   if (mapped === "failed") {
@@ -678,10 +693,12 @@ async function applySnapshot(env, row, snapshot) {
       status_detail: safeCode(snapshot?.turn_exit_reason) || (snapshot?.partial ? "partial" : null),
       error_code: "hermes_run_failed",
       error_message: message,
-      actual_provider: runtime?.provider || null,
-      actual_model: runtime?.model || null,
+      actual_provider: runtime?.provider || row.actual_provider || null,
+      actual_model: runtime?.model || row.actual_model || null,
+      route_source: runtime?.routeSource || row.route_source || null,
       usage_json: whitelistUsage(snapshot?.usage) ? JSON.stringify(whitelistUsage(snapshot.usage)) : null
     }));
+    await persistHermesRunUsage(env, { ...row, status: "failed" }, snapshot, { source: usageSource });
     return;
   }
   if (mapped === "cancelled") {
@@ -689,8 +706,10 @@ async function applySnapshot(env, row, snapshot) {
     // never asked to cancel so the UI does not claim a user cancellation.
     await updateActiveRun(env, row.id, terminalFields("cancelled", {
       ...common,
-      status_detail: row.cancel_requested_at ? "cancelled_by_user" : "cancelled_upstream_without_request"
+      status_detail: row.cancel_requested_at ? "cancelled_by_user" : "cancelled_upstream_without_request",
+      usage_json: whitelistUsage(snapshot?.usage) ? JSON.stringify(whitelistUsage(snapshot.usage)) : null
     }));
+    await persistHermesRunUsage(env, { ...row, status: "cancelled" }, snapshot, { source: usageSource });
     return;
   }
   if (mapped === "interrupted") {
@@ -698,8 +717,10 @@ async function applySnapshot(env, row, snapshot) {
       ...common,
       status_detail: "upstream_interrupted",
       error_code: "hermes_run_interrupted",
-      error_message: safeMessage(snapshot?.error || "Hermes interrupted the run; it was not retried")
+      error_message: safeMessage(snapshot?.error || "Hermes interrupted the run; it was not retried"),
+      usage_json: whitelistUsage(snapshot?.usage) ? JSON.stringify(whitelistUsage(snapshot.usage)) : null
     }));
+    await persistHermesRunUsage(env, { ...row, status: "interrupted" }, snapshot, { source: usageSource });
     return;
   }
   if (mapped === "unknown") {
@@ -717,7 +738,7 @@ async function applySnapshot(env, row, snapshot) {
   await updateActiveRun(env, row.id, { ...common, status, status_detail: null });
 }
 
-export async function syncHermesRun(env, row, { fetchImpl } = {}) {
+export async function syncHermesRun(env, row, { fetchImpl, usageSource = "get_run" } = {}) {
   const db = env.DB;
   if (!row || isHermesTerminal(row.status)) return { run: row, syncError: null };
   if (["reserving", "submitting"].includes(row.status)) {
@@ -736,7 +757,7 @@ export async function syncHermesRun(env, row, { fetchImpl } = {}) {
   try {
     const client = createHermesClient(env, row.instance_id, { fetchImpl });
     const response = await client.getRun(row.upstream_run_id);
-    await applySnapshot(env, row, response.body);
+    await applySnapshot(env, row, response.body, { usageSource });
   } catch (err) {
     if (err instanceof HermesError && err.code === "hermes_run_not_found") {
       await updateActiveRun(env, row.id, {

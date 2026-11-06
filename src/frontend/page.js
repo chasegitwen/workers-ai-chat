@@ -15637,15 +15637,35 @@ async function loadHermesUsage(reset){
   }
 }
 
-function exportHermesUsage(){
+async function exportHermesUsage(){
   const params = new URLSearchParams({ window:hermesUsageState.window });
   Object.entries(hermesUsageState.filters).forEach(([name,value]) => { if(value) params.set(name,value); });
-  const link = document.createElement("a");
-  link.href = "/api/hermes/usage/export?" + params.toString();
-  link.download = "";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+  if(hermesUsageExport) hermesUsageExport.disabled = true;
+  if(hermesUsageStatus) hermesUsageStatus.textContent = "用量 CSV 导出中…";
+  try{
+    const response = await fetch("/api/hermes/usage/export?" + params.toString());
+    if(!response.ok){
+      const data = await response.json().catch(() => ({}));
+      throw data.error || { code:"hermes_usage_export_failed", message:"用量 CSV 导出失败（HTTP " + response.status + "）" };
+    }
+    const truncated = response.headers.get("X-Hermes-Export-Truncated") === "true";
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = "hermes-usage-" + hermesUsageState.window + (truncated ? "-truncated" : "") + ".csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(objectUrl);
+    if(hermesUsageStatus) hermesUsageStatus.textContent = truncated
+      ? "导出完成：已截断，仅前 5000 条。"
+      : "导出完成：CSV 包含当前时间范围和筛选条件下的用量。";
+  }catch(err){
+    if(hermesUsageStatus) hermesUsageStatus.textContent = "导出失败：" + hermesErrorText(err);
+  }finally{
+    if(hermesUsageExport) hermesUsageExport.disabled = false;
+  }
 }
 
 function setHermesDiagnosticsOpen(open){

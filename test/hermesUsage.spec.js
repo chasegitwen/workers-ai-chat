@@ -487,6 +487,48 @@ describe("Hermes B2-1 collection and API", () => {
     expect(response.json.error.code).toBe("hermes_run_not_found");
   });
 
+  it("marks bounded exports as truncated and supports an owned targeted run", async () => {
+    const runs = [];
+    for (let index = 0; index < 2; index++) {
+      const local = await insertRun({ owner: "alice", status: "completed", completedAt: Date.now() - index });
+      const row = await env.DB.prepare("SELECT * FROM hermes_runs WHERE id = ?").bind(local.id).first();
+      await persistHermesRunUsage(testEnv(), row, {
+        status: "completed", usage: { input_tokens: index + 1, output_tokens: 1, total_tokens: index + 2 }
+      });
+      runs.push(local);
+    }
+
+    const truncated = await call("/api/hermes/usage/export?window=24h&limit=1", { user: "alice" });
+    expect(truncated.status).toBe(200);
+    expect(truncated.headers.get("x-hermes-export-truncated")).toBe("true");
+    expect(truncated.headers.get("x-hermes-export-rows")).toBe("1");
+    expect(truncated.headers.get("content-disposition")).toContain("hermes-usage-24h-truncated.csv");
+    expect(runs.filter(run => truncated.text.includes(run.id))).toHaveLength(1);
+
+    const targeted = await call("/api/hermes/usage/export?window=24h&run_id=" + runs[0].id, { user: "alice" });
+    expect(targeted.status).toBe(200);
+    expect(targeted.text).toContain(runs[0].id);
+    expect(targeted.text).not.toContain(runs[1].id);
+  });
+
+  it("neutralizes leading tab and carriage return CSV cells", async () => {
+    const projects = ["\tformula", "\rformula"];
+    for (const project of projects) {
+      const local = await insertRun({ owner: "alice", status: "completed", completedAt: Date.now() });
+      const row = await env.DB.prepare("SELECT * FROM hermes_runs WHERE id = ?").bind(local.id).first();
+      await persistHermesRunUsage(testEnv(), row, {
+        status: "completed", usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 }
+      });
+      await env.DB.prepare("UPDATE hermes_run_usage SET project_id = ? WHERE run_id = ?").bind(project, local.id).run();
+    }
+
+    const response = await call("/api/hermes/usage/export?window=24h", { user: "alice" });
+    expect(response.status).toBe(200);
+    expect(response.text).not.toContain(",\tformula,");
+    expect(response.text).toContain("," + "'\tformula,");
+    expect(response.text).toContain('"' + "'\rformula" + '"');
+  });
+
   it("aggregates owner-scoped totals and daily trends that reconcile with filtered details", async () => {
     const aliceA = await insertRun({ owner: "alice", status: "completed", completedAt: Date.now() - 2000 });
     const aliceB = await insertRun({ owner: "alice", status: "completed", completedAt: Date.now() - 1000 });

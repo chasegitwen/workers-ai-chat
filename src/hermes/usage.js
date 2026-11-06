@@ -427,7 +427,7 @@ function csvCell(value) {
   if (value === null || value === undefined) return "";
   let text = String(value);
   // Keep spreadsheet applications from interpreting exported metadata as a formula.
-  if (/^[=+\-@]/.test(text)) text = "'" + text;
+  if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
   return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
 }
 
@@ -495,17 +495,18 @@ async function exportOwnedUsage(env, owner, url) {
      FROM hermes_run_usage WHERE ${clauses.join(" AND ")}
      ORDER BY occurred_at DESC, run_id DESC LIMIT ?`
   ).bind(...bindings, limit + 1).all();
+  const truncated = (result.results || []).length > limit;
   const rows = (result.results || []).slice(0, limit).map(usageExportRow);
   const columns = Object.keys(usageExportRow({}));
   const csv = [columns.join(","), ...rows.map(row => columns.map(name => csvCell(row[name])).join(","))].join("\r\n") + "\r\n";
   return new Response(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="hermes-usage-${window.name}.csv"`,
+      "Content-Disposition": `attachment; filename="hermes-usage-${window.name}${truncated ? "-truncated" : ""}.csv"`,
       "Cache-Control": "private, no-store",
       "X-Hermes-Export-Window": window.name,
       "X-Hermes-Export-Rows": String(rows.length),
-      "X-Hermes-Export-Truncated": (result.results || []).length > limit ? "true" : "false"
+      "X-Hermes-Export-Truncated": truncated ? "true" : "false"
     }
   });
 }

@@ -227,6 +227,56 @@ describe("Hermes frontend", () => {
     expect(download).toContain('/api/hermes/usage/export?');
     expect(download).toContain("hermesUsageState.window");
     expect(download).toContain("hermesUsageState.filters");
+    expect(download).toContain('response.headers.get("X-Hermes-Export-Truncated")');
+    expect(download).toContain("已截断，仅前 5000 条");
+    expect(download).toContain("response.ok");
+  });
+
+  it("downloads successful usage exports as blobs and surfaces truncation or JSON errors", async () => {
+    const script = pageScript();
+    const status = element();
+    const exportButton = element();
+    const links = [];
+    const document = {
+      body:{ appendChild(link){ links.push(link); } },
+      createElement:() => ({ click(){ this.clicked = true; }, remove(){ this.removed = true; } })
+    };
+    const URL = {
+      createObjectURL:() => "blob:usage",
+      revokeObjectURL(value){ this.revoked = value; }
+    };
+    const responses = [
+      { ok:true, status:200, headers:{ get:() => "true" }, blob:async () => ({ csv:true }) },
+      ...[400, 401, 404, 500].map(statusCode => ({
+        ok:false, status:statusCode, headers:{ get:() => null },
+        json:async () => ({ error:{ code:"export_" + statusCode, message:"导出错误 " + statusCode } })
+      }))
+    ];
+    const source = [
+      'let hermesUsageState = { window:"90d", filters:{ provider:"metered" } };',
+      'let hermesUsageStatus = status;',
+      'let hermesUsageExport = exportButton;',
+      lastDeclaration(script, "hermesErrorText"),
+      lastDeclaration(script, "exportHermesUsage"),
+      'return exportHermesUsage;'
+    ].join("\n");
+    const runExport = new Function("fetch", "document", "URL", "status", "exportButton", "HERMES_ERROR_TEXT", source)(
+      async () => responses.shift(), document, URL, status, exportButton, {}
+    );
+
+    await runExport();
+    expect(links).toHaveLength(1);
+    expect(links[0]).toMatchObject({ href:"blob:usage", download:"hermes-usage-90d-truncated.csv", clicked:true, removed:true });
+    expect(URL.revoked).toBe("blob:usage");
+    expect(status.textContent).toContain("已截断，仅前 5000 条");
+    expect(exportButton.disabled).toBe(false);
+
+    for (const statusCode of [400, 401, 404, 500]) {
+      await runExport();
+      expect(links).toHaveLength(1);
+      expect(status.textContent).toBe("导出失败：导出错误 " + statusCode);
+      expect(exportButton.disabled).toBe(false);
+    }
   });
 
   it("loads only the next usage page when loading more", async () => {

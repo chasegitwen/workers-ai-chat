@@ -35,9 +35,11 @@ async function cookie(user = "admin", extra = {}) {
   return "wa_session=" + await createSession(user, testEnv(extra));
 }
 
-async function call(path, { user = "admin", envExtra = {} } = {}) {
+async function call(path, { user = "admin", envExtra = {}, method = "GET", body } = {}) {
   const response = await worker.fetch(new Request(ORIGIN + path, {
-    headers: { Cookie: await cookie(user, envExtra) }
+    method,
+    headers: { Cookie: await cookie(user, envExtra), ...(body ? { "Content-Type": "application/json" } : {}) },
+    body: body ? JSON.stringify(body) : undefined
   }), testEnv(envExtra), { waitUntil() {} });
   const text = await response.text();
   let json = null;
@@ -81,6 +83,31 @@ describe("Hermes B2-1 usage normalization", () => {
     expect(normalizeHermesUsage(null)).toMatchObject({
       input: null, output: null, total: null, collectionStatus: "missing"
     });
+  });
+
+  it("isolates raw OpenAI and Anthropic cache conventions from pricing buckets", () => {
+    const openAi = normalizeHermesUsage({
+      input_tokens: 100, output_tokens: 20, total_tokens: 120,
+      input_tokens_details: { cached_tokens: 60 }
+    });
+    expect(openAi).toMatchObject({
+      input: null, output: null, total: null, cacheRead: null, collectionStatus: "missing"
+    });
+    expect(openAi.validationFlags).toEqual(expect.arrayContaining([
+      "usage_shape_openai_raw_ignored", "input_includes_cache_true"
+    ]));
+
+    const anthropic = normalizeHermesUsage({
+      input_tokens: 40, output_tokens: 5, cache_read_input_tokens: 60,
+      cache_creation_input_tokens: 10
+    });
+    expect(anthropic).toMatchObject({
+      input: null, output: null, total: null, cacheRead: null, cacheWrite: null,
+      collectionStatus: "missing"
+    });
+    expect(anthropic.validationFlags).toEqual(expect.arrayContaining([
+      "usage_shape_anthropic_raw_ignored", "input_includes_cache_false"
+    ]));
   });
 
   it("rejects unsafe token precision with an explicit overflow flag", () => {
@@ -138,6 +165,8 @@ describe("Hermes B2-1 collection and API", () => {
     const row = await env.DB.prepare("SELECT * FROM hermes_runs WHERE id = ?").bind(local.id).first();
     const snapshot = { status: "completed", runtime: { provider: "openai-codex", model: "gpt-requested" }, usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 } };
     await persistHermesRunUsage(testEnv(), row, snapshot, { source: "sse_terminal" });
+    expect(await env.DB.prepare("SELECT collection_source FROM hermes_run_usage WHERE run_id = ?").bind(local.id).first())
+      .toEqual({ collection_source: "sse_terminal" });
     await persistHermesRunUsage(testEnv(), row, snapshot, { source: "get_run" });
     expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM hermes_run_usage WHERE run_id = ?").bind(local.id).first()).toEqual({ n: 1 });
   });
@@ -165,6 +194,44 @@ describe("Hermes B2-1 collection and API", () => {
     expect(response.json.usage).toMatchObject({ collectionSource: "backfill", collectionStatus: "collected", tokens: { input: 12, output: 4, total: 16 } });
     expect(mock.calls.map(call => call.method)).toEqual(["GET"]);
     expect(mock.calls[0].path).toContain("/v1/runs/");
+  });
+
+  it("persists cancel usage only from the authoritative GET after stop", async () => {
+    const local = await insertRun();
+    mock.onStop = async (_call, run) => {
+      Object.assign(run, {
+        status: "cancelled",
+        usage: { input_tokens: 11, output_tokens: 2, total_tokens: 13 }
+      });
+      return new Response(JSON.stringify({
+        run_id: run.run_id, status: "cancelled",
+        usage: { input_tokens: 999, output_tokens: 999, total_tokens: 1998 }
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    mock.calls.length = 0;
+    const response = await call("/api/hermes/runs/" + local.id + "/cancel?project_id=default", { method: "POST", body: {} });
+    expect(response.status).toBe(200);
+    expect(response.json.run.status).toBe("cancelled");
+    expect(mock.calls.map(item => item.method)).toEqual(["POST", "GET"]);
+    expect(await env.DB.prepare(
+      "SELECT input_tokens, output_tokens, total_tokens, collection_source FROM hermes_run_usage WHERE run_id = ?"
+    ).bind(local.id).first()).toEqual({
+      input_tokens: 11, output_tokens: 2, total_tokens: 13, collection_source: "get_run"
+    });
+  });
+
+  it("upgrades a prior missing row when a later authoritative GET has usage", async () => {
+    const local = await insertRun({ status: "completed", completedAt: Date.now() });
+    const row = await env.DB.prepare("SELECT * FROM hermes_runs WHERE id = ?").bind(local.id).first();
+    await persistHermesRunUsage(testEnv(), row, { status: "completed", usage: {} }, { source: "backfill" });
+    Object.assign(local.upstream, {
+      status: "completed", usage: { input_tokens: 8, output_tokens: 3, total_tokens: 11 }
+    });
+    const response = await call("/api/hermes/usage/runs/" + local.id);
+    expect(response.json.usage).toMatchObject({
+      collectionStatus: "collected", collectionSource: "backfill",
+      tokens: { input: 8, output: 3, total: 11 }, validationFlags: []
+    });
   });
 
   it("exposes paginated owner-only usage and hides cross-user detail", async () => {
@@ -204,6 +271,31 @@ describe("Hermes B2-1 collection and API", () => {
     Object.assign(local.upstream, { status: "completed", usage: {} });
     const response = await call("/api/hermes/usage/runs/" + local.id);
     expect(response.json.usage).toMatchObject({ collectionStatus: "missing", historicalGap: true, tokens: { input: null, output: null, total: null } });
+  });
+
+  it("uses retained local usage when upstream backfill is not found", async () => {
+    const local = await insertRun({ status: "completed", completedAt: Date.now() });
+    await env.DB.prepare("UPDATE hermes_runs SET usage_json = ? WHERE id = ?")
+      .bind(JSON.stringify({ input_tokens: 14, output_tokens: 6, total_tokens: 20 }), local.id).run();
+    mock.onGet = async () => new Response(JSON.stringify({
+      error: { code: "run_not_found", message: "Run not found", type: "not_found" }
+    }), { status: 404, headers: { "Content-Type": "application/json" } });
+    const response = await call("/api/hermes/usage/runs/" + local.id);
+    expect(response.json.usage).toMatchObject({
+      collectionStatus: "collected", historicalGap: true,
+      tokens: { input: 14, output: 6, total: 20 }
+    });
+  });
+
+  it("backs off repeated detail backfill after a transient upstream error", async () => {
+    const local = await insertRun({ status: "completed", completedAt: Date.now() });
+    mock.onGet = async () => new Response(JSON.stringify({
+      error: { code: "upstream_busy", message: "Try later", type: "server_error" }
+    }), { status: 503, headers: { "Content-Type": "application/json" } });
+    mock.calls.length = 0;
+    expect((await call("/api/hermes/usage/runs/" + local.id)).json.collectionPending).toBe(true);
+    expect((await call("/api/hermes/usage/runs/" + local.id)).json.collectionPending).toBe(true);
+    expect(mock.calls.filter(item => item.method === "GET" && item.path.includes("/v1/runs/")).length).toBe(1);
   });
 
   it("diagnostic pruning never deletes durable usage", async () => {

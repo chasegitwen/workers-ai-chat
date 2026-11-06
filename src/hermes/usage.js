@@ -14,6 +14,15 @@ import { isHermesTerminal } from "./status.js";
 const MAX_SAFE_TOKEN_COUNT = Number.MAX_SAFE_INTEGER;
 const COLLECTION_SOURCES = new Set(["get_run", "sse_terminal", "backfill"]);
 const WINDOWS = { "24h": 86400000, "7d": 604800000, "30d": 2592000000, "90d": 7776000000 };
+const BACKFILL_RETRY_MS = 15000;
+const backfillRetryAfter = new Map();
+
+function deferBackfill(key, now) {
+  if (!backfillRetryAfter.has(key) && backfillRetryAfter.size >= 1024) {
+    backfillRetryAfter.delete(backfillRetryAfter.keys().next().value);
+  }
+  backfillRetryAfter.set(key, now + BACKFILL_RETRY_MS);
+}
 
 function cleanId(value, max = 200) {
   const text = String(value ?? "").trim();
@@ -64,22 +73,33 @@ function tokenInteger(candidate, bucket, flags) {
 export function normalizeHermesUsage(rawUsage) {
   const usage = rawUsage && typeof rawUsage === "object" && !Array.isArray(rawUsage) ? rawUsage : null;
   const flags = [];
+  // GET /v1/runs is already normalized by Hermes. Raw provider shapes have
+  // incompatible cache conventions, so do not blend their aliases into these
+  // pricing buckets. A raw-shape marker makes the omission explicit.
+  const openAiRaw = Boolean(usage && (
+    own(usage, "prompt_tokens") || own(usage, "completion_tokens") || own(usage, "cached_tokens")
+    || (usage.input_tokens_details && typeof usage.input_tokens_details === "object")
+    || (usage.output_tokens_details && typeof usage.output_tokens_details === "object")
+  ));
+  const anthropicRaw = Boolean(usage && (
+    own(usage, "cache_read_input_tokens") || own(usage, "cache_creation_input_tokens")
+  ));
+  if (openAiRaw || anthropicRaw) {
+    if (openAiRaw) flags.push("usage_shape_openai_raw_ignored", "input_includes_cache_true");
+    if (anthropicRaw) flags.push("usage_shape_anthropic_raw_ignored", "input_includes_cache_false");
+    return {
+      input: null, output: null, total: null, cacheRead: null, cacheWrite: null, reasoning: null,
+      collectionStatus: "missing", overflowDetected: false, validationFlags: flags
+    };
+  }
   const candidates = usage ? {
-    input: firstTokenValue(usage, ["input_tokens", "input", "prompt_tokens"]),
-    output: firstTokenValue(usage, ["output_tokens", "output", "completion_tokens"]),
+    input: firstTokenValue(usage, ["input_tokens", "input"]),
+    output: firstTokenValue(usage, ["output_tokens", "output"]),
     total: firstTokenValue(usage, ["total_tokens", "total"]),
-    cacheRead: firstTokenValue(usage, ["cache_read_tokens", "cache_read", "cached_tokens", "cache_read_input_tokens"]),
-    cacheWrite: firstTokenValue(usage, ["cache_write_tokens", "cache_write", "cache_creation_input_tokens"]),
+    cacheRead: firstTokenValue(usage, ["cache_read_tokens", "cache_read"]),
+    cacheWrite: firstTokenValue(usage, ["cache_write_tokens", "cache_write"]),
     reasoning: firstTokenValue(usage, ["reasoning_tokens", "reasoning"])
   } : null;
-  // Some OpenAI-compatible responses nest optional token details. These remain
-  // separate buckets and are not folded into confirmed input/output.
-  if (usage && !candidates.cacheRead.present && usage.input_tokens_details && typeof usage.input_tokens_details === "object") {
-    candidates.cacheRead = firstTokenValue(usage.input_tokens_details, ["cached_tokens"]);
-  }
-  if (usage && !candidates.reasoning.present && usage.output_tokens_details && typeof usage.output_tokens_details === "object") {
-    candidates.reasoning = firstTokenValue(usage.output_tokens_details, ["reasoning_tokens"]);
-  }
   const tokens = {
     input: candidates ? tokenInteger(candidates.input, "input", flags) : null,
     output: candidates ? tokenInteger(candidates.output, "output", flags) : null,
@@ -215,17 +235,21 @@ export async function persistHermesRunUsage(env, run, snapshot, {
         collection_source = excluded.collection_source,
         historical_gap = MAX(hermes_run_usage.historical_gap, excluded.historical_gap),
         overflow_detected = MAX(hermes_run_usage.overflow_detected, excluded.overflow_detected),
-        validation_flags_json = CASE WHEN excluded.validation_flags_json = '[]'
-          THEN hermes_run_usage.validation_flags_json ELSE excluded.validation_flags_json END,
+        validation_flags_json = CASE
+          WHEN excluded.collection_status = 'collected' THEN excluded.validation_flags_json
+          WHEN excluded.validation_flags_json = '[]' THEN hermes_run_usage.validation_flags_json
+          ELSE excluded.validation_flags_json END,
         occurred_at = excluded.occurred_at,
         collected_at = excluded.collected_at`
     ).bind(
-      run.id, run.owner_username, run.upstream_run_id || null, String(snapshot?.status || run.status || "unknown").slice(0, 40),
+      run.id, run.owner_username, run.upstream_run_id || null,
+      cleanId(snapshot?.status, 40) || cleanId(run.status, 40) || "unknown",
       normalized.input, normalized.output, normalized.total, normalized.cacheRead, normalized.cacheWrite,
       normalized.reasoning, attribution.actualProvider, attribution.actualModel, attribution.requestedProvider,
       attribution.requestedModel, attribution.routeSource, attribution.fallbackUsed === null ? null : (attribution.fallbackUsed ? 1 : 0),
       run.instance_id, attribution.runtimeProfile, attribution.serviceTier, run.project_id || null,
-      run.conversation_id || null, snapshot?.session_id || run.upstream_session_id || null, jobId,
+      run.conversation_id || null,
+      cleanId(snapshot?.session_id, 200) || cleanId(run.upstream_session_id, 200) || null, jobId,
       normalized.collectionStatus, safeSource, historicalGap ? 1 : 0, normalized.overflowDetected ? 1 : 0,
       JSON.stringify(normalized.validationFlags),
       Number(run.completed_at || run.submitted_at || run.created_at || now), now
@@ -264,7 +288,13 @@ export async function backfillHermesRunUsage(env, run, { fetchImpl } = {}) {
     });
   } catch (err) {
     if (err instanceof HermesError && err.code === "hermes_run_not_found") {
-      return persistHermesRunUsage(env, run, { status: run.status }, {
+      let localUsage = null;
+      try {
+        localUsage = run.usage_json ? JSON.parse(run.usage_json) : null;
+      } catch (parseError) {
+        localUsage = null;
+      }
+      return persistHermesRunUsage(env, run, { status: run.status, usage: localUsage }, {
         source: "backfill", historicalGap: true
       });
     }
@@ -316,8 +346,13 @@ export async function handleHermesUsage(request, env, url, { owner, fetchImpl } 
     .bind(runId, owner).first();
   if (!run) throw new HermesError("hermes_run_not_found", "Hermes run not found", { httpStatus: 404 });
   let stored = await readOwnedUsage(env.DB, owner, runId);
-  if (!stored) {
-    await backfillHermesRunUsage(env, run, { fetchImpl });
+  if (!stored || stored.collection_status !== "collected") {
+    const retryKey = owner + ":" + runId;
+    const now = Date.now();
+    if (now >= (backfillRetryAfter.get(retryKey) || 0)) {
+      deferBackfill(retryKey, now);
+      await backfillHermesRunUsage(env, run, { fetchImpl });
+    }
     stored = await readOwnedUsage(env.DB, owner, runId);
   }
   return {

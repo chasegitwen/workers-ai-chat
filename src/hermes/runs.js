@@ -795,11 +795,11 @@ export async function cancelHermesRun(env, row, { fetchImpl } = {}) {
   let cancelError = null;
   try {
     const client = createHermesClient(env, row.instance_id, { fetchImpl });
-    const response = await client.stopRun(row.upstream_run_id);
-    const fresh = await readRunById(db, row.id);
-    const mapped = mapHermesUpstreamStatus(response.body?.status);
-    if (mapped && mapped !== "stopping") await applySnapshot(env, fresh, response.body);
-    else await updateActiveRun(env, row.id, { status: "stopping", upstream_status: "stopping", status_detail: null });
+    await client.stopRun(row.upstream_run_id);
+    // A stop response acknowledges the mutation but is not an authoritative run
+    // snapshot. Only the follow-up GET may terminalize or persist usage.
+    const synced = await syncHermesRun(env, await readRunById(db, row.id), { fetchImpl, usageSource: "get_run" });
+    cancelError = synced.syncError;
   } catch (err) {
     cancelError = publicError(err);
     log("stop_failed", { run_id: row.id, code: err?.code || "error" });
